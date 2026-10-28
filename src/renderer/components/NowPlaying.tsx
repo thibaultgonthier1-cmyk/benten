@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePlayer, playerStore } from "../state/player";
 import { describeQuality, formatTime } from "../lib/library";
 import { coverAccent, Cover } from "./Cover";
-import { QualityBadge } from "./QualityBadge";
+import { QualityBadge, QualitySheet } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
 
 /** Pas de deplacement clavier du scrubber, en secondes. */
@@ -25,17 +25,24 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
 
   const barRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<number | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const close = (): void => playerStore.getState().setNowPlayingOpen(false);
+  const close = (): void => {
+    setSheetOpen(false);
+    playerStore.getState().setNowPlayingOpen(false);
+  };
 
+  // Echap : ferme d'abord la feuille qualite si ouverte, sinon la vue lecture (comportement proto).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      if (sheetOpen) setSheetOpen(false);
+      else close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, sheetOpen]);
 
   if (!track) return null;
   const playing = status === "playing";
@@ -175,6 +182,24 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
           </div>
         </div>
       </div>
+
+      <div className="np-foot">
+        <button
+          className={"foot-btn" + (sheetOpen ? " active" : "")}
+          type="button"
+          aria-label="Afficher la qualite de lecture"
+          aria-haspopup="dialog"
+          aria-expanded={sheetOpen}
+          onClick={() => setSheetOpen((v) => !v)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 12h3l3-8 4 16 3-8h3" />
+          </svg>
+          <span>Qualite — {q.label}</span>
+        </button>
+      </div>
+
+      <QualitySheet open={sheetOpen} onClose={() => setSheetOpen(false)} track={track} />
     </div>
   );
 }

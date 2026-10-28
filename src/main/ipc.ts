@@ -6,12 +6,14 @@ import type Database from "better-sqlite3";
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { CHANNELS } from "../shared/channels";
 import type {
+  AudioDeviceInfo,
   LibraryQueryArgs,
   LibraryQueryResult,
   LibraryView,
   Page,
   ScanSummary,
 } from "../shared/types";
+import { defaultOutputDevice } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
 import { getAlbums, getAllTracks, getArtists } from "./library/repository";
 
@@ -147,6 +149,11 @@ export function registerIpc(db: Database.Database): void {
       last = p;
     });
     return { ...last, added, skipped };
+  });
+
+  ipcMain.handle(CHANNELS.AUDIO_DEFAULT_DEVICE, (event): AudioDeviceInfo => {
+    assertTrusted(event);
+    return defaultOutputDevice();
   });
 
   ipcMain.handle(CHANNELS.AUDIO_READ_FILE, (event, path: unknown): Promise<ArrayBuffer> => {

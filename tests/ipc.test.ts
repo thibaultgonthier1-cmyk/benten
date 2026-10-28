@@ -38,13 +38,21 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
-  it("enregistre ping, library:query, library:scan et audio:read-file", () => {
+  it("enregistre ping, library:query, library:scan, audio:default-device et audio:read-file", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
+      "audio:default-device",
       "audio:read-file",
       "library:query",
       "library:scan",
     ]);
+  });
+
+  it("audio:default-device renvoie un peripherique nomme et rejette un expediteur non fiable", async () => {
+    const dev = (await call("audio:default-device", trusted)) as { name: string };
+    expect(typeof dev.name).toBe("string");
+    expect(dev.name.trim().length).toBeGreaterThan(0);
+    await expect(call("audio:default-device", evil)).rejects.toThrow(/untrusted sender/);
   });
 
   it("library:scan indexe un dossier valide et renvoie le resume", async () => {

@@ -67,9 +67,10 @@ export interface ScanSummary {
   errors: number;
 }
 
+/** Peripherique de sortie detecte (informatif). `sampleRate` absent si indisponible. */
 export interface AudioDeviceInfo {
-  sampleRate: number;
-  channels: number;
+  name: string;
+  sampleRate?: number;
 }
 
 /** API exposée au Renderer sous `window.benten` (contextBridge). */
