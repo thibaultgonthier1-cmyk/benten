@@ -126,6 +126,11 @@ function statements(db: Db) {
       "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
     ),
     clearPlaylistTracks: db.prepare("DELETE FROM playlist_tracks WHERE playlist_id = ?"),
+    // Etat applicatif (Task 14A) : magasin cle/valeur, upsert idempotent sur la cle.
+    getState: db.prepare("SELECT value FROM app_state WHERE key = ?").pluck(),
+    setState: db.prepare(
+      "INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ),
   };
 }
 
@@ -354,6 +359,34 @@ export function getTrackByPath(db: Db, path: string): TrackRow | undefined {
   return r ? toTrackRow(r) : undefined;
 }
 
+/**
+ * Re-resout une liste d'ids en `TrackRow`, en PRESERVANT l'ordre demande et en LAISSANT TOMBER
+ * les ids absents (piste supprimee depuis la sauvegarde). Les doublons sont conserves (une file peut
+ * repeter une piste). Sert la reprise de file au lancement (Task 14A). Les ids sont dedupliques pour
+ * la requete (bornee par lots pour rester sous la limite de variables SQLite), puis l'ordre et les
+ * doublons d'origine sont reconstitues en memoire.
+ */
+export function getTracksByIds(db: Db, ids: readonly number[]): TrackRow[] {
+  if (ids.length === 0) return [];
+  const byId = new Map<number, TrackRow>();
+  const unique = [...new Set(ids)];
+  const CHUNK = 500; // marge confortable sous SQLITE_MAX_VARIABLE_NUMBER
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const slice = unique.slice(i, i + CHUNK);
+    const placeholders = slice.map(() => "?").join(",");
+    const rows = db
+      .prepare(`SELECT ${TRACK_COLUMNS} FROM tracks t WHERE t.id IN (${placeholders})`)
+      .all(...slice) as RawTrack[];
+    for (const r of rows) byId.set(r.id, toTrackRow(r));
+  }
+  const out: TrackRow[] = [];
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row) out.push(row);
+  }
+  return out;
+}
+
 /** Stat persisté + clé de pochette d'une piste, pour décider d'un saut de ré-extraction. */
 export function getTrackStat(
   db: Db,
@@ -380,6 +413,22 @@ export function getSources(db: Db): SourceRow[] {
 /** Retire une source par `id` (no-op si l'id n'existe pas). */
 export function removeSource(db: Db, id: number): void {
   stmts(db).deleteSource.run(id);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * ETAT APPLICATIF — magasin cle/valeur (`app_state`). Sert la persistance de
+ * l'etat de lecture (Task 14A). La valeur est une chaine opaque (JSON cote
+ * Renderer) : le repository ne l'interprete pas.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Lit la valeur associee a `key`, ou `undefined` si la cle est absente. */
+export function getState(db: Db, key: string): string | undefined {
+  return stmts(db).getState.get(key) as string | undefined;
+}
+
+/** Ecrit `value` pour `key` (upsert idempotent : un second appel ecrase la valeur). */
+export function setState(db: Db, key: string, value: string): void {
+  stmts(db).setState.run(key, value);
 }
 
 /**

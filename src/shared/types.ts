@@ -147,6 +147,11 @@ export interface BentenApi {
     scan(paths: readonly string[]): Promise<ScanSummary>;
     /** Recherche sur titre/artiste/album (`LIKE` insensible à la casse). */
     search(args: SearchArgs): Promise<TrackRow[]>;
+    /**
+     * Re-résout une liste d'ids en `TrackRow` (ordre préservé, ids absents ignorés). Sert la
+     * reprise de file au lancement (Task 14A).
+     */
+    tracksByIds(ids: readonly number[]): Promise<TrackRow[]>;
   };
   audio: {
     defaultDevice(): Promise<AudioDeviceInfo>;
@@ -188,6 +193,13 @@ export interface BentenApi {
     removeTrack(id: number, position: number): Promise<void>;
     /** Déplace la piste de `from` vers `to`, re-densifie les positions. */
     reorder(id: number, from: number, to: number): Promise<void>;
+  };
+  /** État applicatif persisté (magasin clé/valeur `app_state`) — reprise au lancement (Task 14A). */
+  state: {
+    /** Lit la valeur d'une clé, ou `undefined` si absente. */
+    get(key: string): Promise<string | undefined>;
+    /** Écrit (upsert) la valeur d'une clé. */
+    set(key: string, value: string): Promise<void>;
   };
 }
 

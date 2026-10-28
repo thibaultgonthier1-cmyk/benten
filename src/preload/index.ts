@@ -12,6 +12,7 @@ const api: BentenApi = {
     query: (args) => invoke(CHANNELS.LIBRARY_QUERY, args),
     scan: (paths) => invoke(CHANNELS.LIBRARY_SCAN, paths),
     search: (args) => invoke(CHANNELS.LIBRARY_SEARCH, args),
+    tracksByIds: (ids) => invoke(CHANNELS.LIBRARY_TRACKS_BY_IDS, ids),
   },
   audio: {
     defaultDevice: () => invoke(CHANNELS.AUDIO_DEFAULT_DEVICE),
@@ -38,6 +39,10 @@ const api: BentenApi = {
     add: (id, trackIds) => invoke(CHANNELS.PLAYLISTS_ADD, id, trackIds),
     removeTrack: (id, position) => invoke(CHANNELS.PLAYLISTS_REMOVE, id, position),
     reorder: (id, from, to) => invoke(CHANNELS.PLAYLISTS_REORDER, id, from, to),
+  },
+  state: {
+    get: (key) => invoke(CHANNELS.STATE_GET, key),
+    set: (key, value) => invoke(CHANNELS.STATE_SET, key, value),
   },
 };
 

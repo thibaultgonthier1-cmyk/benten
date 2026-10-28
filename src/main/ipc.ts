@@ -34,12 +34,15 @@ import {
   getPlaylists,
   getPlaylistTracks,
   getSources,
+  getState,
+  getTracksByIds,
   removeFromPlaylist,
   removeSource,
   renamePlaylist,
   reorderPlaylist,
   searchTracks,
   setFavorite,
+  setState,
   type SortOpts,
 } from "./library/repository";
 
@@ -305,6 +308,11 @@ export function registerIpc(db: Database.Database): void {
     return searchLibrary(db, args);
   });
 
+  ipcMain.handle(CHANNELS.LIBRARY_TRACKS_BY_IDS, (event, ids: unknown): TrackRow[] => {
+    assertTrusted(event);
+    return getTracksByIds(db, requireIntArray(ids, "library:tracks-by-ids"));
+  });
+
   ipcMain.handle(CHANNELS.LIBRARY_SCAN, async (event, paths: unknown): Promise<ScanSummary> => {
     assertTrusted(event);
     const roots = validateScanPaths(paths);
@@ -411,5 +419,18 @@ export function registerIpc(db: Database.Database): void {
       requireInt(from, "playlists:reorder", "from"),
       requireInt(to, "playlists:reorder", "to"),
     );
+  });
+
+  ipcMain.handle(CHANNELS.STATE_GET, (event, key: unknown): string | undefined => {
+    assertTrusted(event);
+    if (typeof key !== "string") throw new Error("state:get: key must be a string");
+    return getState(db, key);
+  });
+
+  ipcMain.handle(CHANNELS.STATE_SET, (event, key: unknown, value: unknown): void => {
+    assertTrusted(event);
+    if (typeof key !== "string") throw new Error("state:set: key must be a string");
+    if (typeof value !== "string") throw new Error("state:set: value must be a string");
+    setState(db, key, value);
   });
 }

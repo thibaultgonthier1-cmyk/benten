@@ -457,6 +457,21 @@ export class AudioEngine {
     await this.load(this.queue[this.queueIndex]!);
   }
 
+  /**
+   * Reprise au lancement (Task 14A) — restaure une file EN PAUSE a `positionSec`, sans JAMAIS
+   * demarrer le son ni reveiller le contexte (aucun son automatique). Fixe la file et charge la
+   * piste a `index` (comme `setQueue`), puis se fige en `paused` a la position memorisee (meme fin
+   * que `rebuildContext`). Si la piste courante est illisible, `load` a deja pose `error` et on n'y
+   * touche pas ; une file vide reste neutre.
+   */
+  async restoreQueue(tracks: readonly TrackRow[], index: number, positionSec: number): Promise<void> {
+    await this.setQueue(tracks, index);
+    if (this.buffer) {
+      this.pausedPositionSec = clamp(Number.isFinite(positionSec) ? positionSec : 0, 0, this.durationSec);
+      this.setStatus("paused");
+    }
+  }
+
   /** Index de la piste courante dans la file. */
   getQueueIndex(): number {
     return this.queueIndex;

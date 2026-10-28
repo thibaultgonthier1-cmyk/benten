@@ -16,8 +16,10 @@ import {
   getPlaylists,
   getPlaylistTracks,
   getSources,
+  getState,
   getTrackByPath,
   getTracksByAlbum,
+  getTracksByIds,
   isFavorite,
   removeFromPlaylist,
   removeSource,
@@ -26,6 +28,7 @@ import {
   reorderPlaylist,
   searchTracks,
   setFavorite,
+  setState,
   upsertTracks,
 } from "../src/main/library/repository";
 import type { SortField, TrackInput } from "../src/shared/types";
@@ -439,6 +442,48 @@ describe("repository", () => {
     const row = getPlaylists(db).find((p) => p.id === id)!;
     expect(row.trackCount).toBe(0);
     expect(getPlaylistTracks(db, id)).toEqual([]);
+  });
+
+  // ── app_state (Task 14A) ─────────────────────────────────────────────────
+  it("setState writes a value, getState reads it back, and getState(missing) is undefined", () => {
+    expect(getState(db, "player")).toBeUndefined();
+    setState(db, "player", '{"a":1}');
+    expect(getState(db, "player")).toBe('{"a":1}');
+    expect(getState(db, "absent")).toBeUndefined();
+  });
+
+  it("setState upsert is idempotent on key (second write overwrites, no duplicate rows)", () => {
+    setState(db, "k", "first");
+    setState(db, "k", "second");
+    expect(getState(db, "k")).toBe("second");
+    const count = db.prepare("SELECT COUNT(*) FROM app_state WHERE key = ?").pluck().get("k");
+    expect(count).toBe(1);
+  });
+
+  it("app_state survives a close/reopen (persisted)", () => {
+    setState(db, "player", "payload");
+    const path = db.name;
+    db.close();
+    db = openDb(path);
+    expect(getState(db, "player")).toBe("payload");
+  });
+
+  // ── getTracksByIds (Task 14A, resume restore) ────────────────────────────
+  it("getTracksByIds preserves the requested order and drops ids no longer present", () => {
+    const [t1, t2, t3] = seedTrackIds();
+    // Ordre demande volontairement different de l'ordre d'insertion, avec un id absent (999).
+    const rows = getTracksByIds(db, [t3, 999, t1, t2]);
+    expect(rows.map((r) => r.id)).toEqual([t3, t1, t2]);
+    // Les lignes sont des TrackRow complets (playable booleen, chemin present).
+    expect(rows.every((r) => typeof r.playable === "boolean" && typeof r.path === "string")).toBe(true);
+  });
+
+  it("getTracksByIds keeps duplicate ids (a queue may repeat a track) and returns [] for []", () => {
+    const [t1, t2] = seedTrackIds();
+    expect(getTracksByIds(db, [])).toEqual([]);
+    expect(getTracksByIds(db, [t1, t2, t1]).map((r) => r.id)).toEqual([t1, t2, t1]);
+    // Tous les ids disparus -> liste vide (reprise propre).
+    expect(getTracksByIds(db, [999, 1000])).toEqual([]);
   });
 
   it("migrates by user_version and is reopenable", () => {

@@ -63,6 +63,7 @@ describe("registerIpc", () => {
       "library:query",
       "library:scan",
       "library:search",
+      "library:tracks-by-ids",
       "playlists:add",
       "playlists:create",
       "playlists:delete",
@@ -73,7 +74,41 @@ describe("registerIpc", () => {
       "playlists:tracks",
       "sources:list",
       "sources:remove",
+      "state:get",
+      "state:set",
     ]);
+  });
+
+  it("state:set persiste une valeur, state:get la relit, valide les chaines et refuse l'expediteur non fiable", async () => {
+    expect(await call("state:get", trusted, "player")).toBeUndefined();
+    await call("state:set", trusted, "player", '{"volume":0.5}');
+    expect(await call("state:get", trusted, "player")).toBe('{"volume":0.5}');
+    // Upsert : une seconde ecriture ecrase.
+    await call("state:set", trusted, "player", '{"volume":0.9}');
+    expect(await call("state:get", trusted, "player")).toBe('{"volume":0.9}');
+
+    // Validation des chaines.
+    await expect(call("state:get", trusted, 42)).rejects.toThrow(/state:get/);
+    await expect(call("state:set", trusted, "k", 42)).rejects.toThrow(/state:set/);
+    await expect(call("state:set", trusted, 1, "v")).rejects.toThrow(/state:set/);
+    // Expediteur non fiable.
+    await expect(call("state:get", evil, "player")).rejects.toThrow(/untrusted sender/);
+    await expect(call("state:set", evil, "k", "v")).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("library:tracks-by-ids re-resout les ids dans l'ordre, ignore les absents, valide le tableau", async () => {
+    await call("library:scan", trusted, [join(FIX, "library")]);
+    const all = (await call("library:query", trusted, { view: "tracks" })) as { rows: TrackRow[] };
+    const ids = all.rows.map((t) => t.id);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const requested = [ids[1]!, 999999, ids[0]!];
+    const rows = (await call("library:tracks-by-ids", trusted, requested)) as TrackRow[];
+    expect(rows.map((r) => r.id)).toEqual([ids[1], ids[0]]);
+    expect(await call("library:tracks-by-ids", trusted, [])).toEqual([]);
+    // Validation : tableau d'entiers requis.
+    await expect(call("library:tracks-by-ids", trusted, "nope")).rejects.toThrow(/tracks-by-ids/);
+    await expect(call("library:tracks-by-ids", trusted, [1.5])).rejects.toThrow(/tracks-by-ids/);
+    await expect(call("library:tracks-by-ids", evil, [1])).rejects.toThrow(/untrusted sender/);
   });
 
   it("playlists:* couvre le CRUD + l'ordonnancement, valide les entiers/noms et refuse l'expéditeur non fiable", async () => {

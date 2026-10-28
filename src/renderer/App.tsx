@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./theme/tokens.css";
 import { AudioEngine, qualitySampleRate } from "./audio/engine";
 import { NativeDecoder } from "./audio/decoder";
-import { bindEngine, playerStore, usePlayer } from "./state/player";
+import { bindEngine, playerStore, usePlayer, type PlayerState } from "./state/player";
 import { createControls } from "./components/controls";
 import {
   DEFAULT_SORT_FILTER,
@@ -12,7 +12,8 @@ import {
   type AlbumSortFilter,
 } from "./lib/library";
 import { makeThrottle } from "./lib/throttle";
-import type { QualityMode, TrackRow } from "../shared/types";
+import { restoreState, serializeState } from "./lib/persist";
+import type { QualityMode, SourceRow, TrackRow } from "../shared/types";
 import { LibraryGrid } from "./components/LibraryGrid";
 import { SortFilterBar } from "./components/SortFilterBar";
 import { SearchResults } from "./components/SearchResults";
@@ -28,8 +29,12 @@ const SEARCH_LIMIT = 200;
 /** Anti-rebond de la barre de recherche (ms) : une frappe rapide ne lance qu'une requete. */
 const SEARCH_DEBOUNCE_MS = 150;
 
-/** Bibliotheque locale connue : proposee en raccourci sur l'ecran d'accueil. */
-const KNOWN_LIBRARY = "C:\\Users\\Dream\\Downloads\\REA DS\\.prism-profile\\documents\\Prism Library";
+/** Clé `app_state` sous laquelle l'état de lecture est persisté. */
+const PLAYER_STATE_KEY = "player";
+/** Anti-rebond de la sauvegarde d'état (ms) : les changements structurels sont coalescés. */
+const SAVE_DEBOUNCE_MS = 1000;
+/** Throttle de sauvegarde de la position de lecture (ms) : on ne persiste pas chaque frame rAF. */
+const SAVE_POSITION_THROTTLE_MS = 5000;
 
 /** Charge TOUTES les pistes (pagine) puis les regroupe en albums. */
 async function fetchAllAlbums(): Promise<Album[]> {
@@ -62,6 +67,9 @@ export function App(): JSX.Element {
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
+  // Racines persistées (Task 5) : proposées en raccourci de ré-indexation sur l'écran d'accueil,
+  // en remplacement de l'ancienne bibliothèque codée en dur.
+  const [sources, setSources] = useState<SourceRow[]>([]);
   const mainRef = useRef<HTMLElement>(null);
   // Feuille « Ajouter à une playlist » : pistes a ajouter + libelle (titre d'album).
   const [plSheet, setPlSheet] = useState<{ open: boolean; trackIds: number[]; label?: string }>({
@@ -104,7 +112,11 @@ export function App(): JSX.Element {
     // gapless/shuffle/repeat via CDP (Runtime.evaluate). `import.meta.env.DEV` est `false` dans un
     // build de production -> ce pont n'est JAMAIS attache en prod. Nettoye au demontage.
     if (import.meta.env.DEV) {
-      (window as unknown as { __benten?: unknown }).__benten = { engine, store: playerStore };
+      (window as unknown as { __benten?: unknown }).__benten = {
+        engine,
+        store: playerStore,
+        persist: { serializeState, restoreState },
+      };
     }
     let raf = 0;
     // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
@@ -121,9 +133,67 @@ export function App(): JSX.Element {
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
+
+    // --- Persistance de l'état (Task 14A) : sauvegarde debouncée + throttle de position. --------
+    const persistNow = (): void => {
+      const api = window.benten?.state;
+      if (!api) return; // hors fenêtre (tests) : no-op.
+      const s = playerStore.getState();
+      const payload = JSON.stringify(
+        serializeState({
+          queue: s.queue,
+          currentIndex: s.currentIndex,
+          positionSec: s.positionSec,
+          shuffle: s.shuffle,
+          repeat: s.repeat,
+          volume: s.volume,
+          qualityMode: s.qualityMode,
+          nowPlayingOpen: s.nowPlayingOpen,
+        }),
+      );
+      void api.set(PLAYER_STATE_KEY, payload).catch(() => {
+        /* best-effort : un échec d'écriture ne doit jamais casser la lecture */
+      });
+    };
+    // Signature STRUCTURELLE : tout sauf la position (qui bouge en continu). Un changement ici
+    // (file, index, shuffle, repeat, volume, qualité, vue, statut) planifie une sauvegarde
+    // debouncée (≥1 s) ; un trailing debounce suffit car ces changements sont discrets, pas rAF.
+    const structuralKey = (s: PlayerState): string =>
+      [
+        s.queue.map((t) => t.id).join(","),
+        s.currentIndex,
+        s.shuffle,
+        s.repeat,
+        s.volume,
+        s.qualityMode,
+        s.nowPlayingOpen,
+        s.status,
+      ].join("|");
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastKey = structuralKey(playerStore.getState());
+    const unsubscribeSave = playerStore.subscribe((s) => {
+      const key = structuralKey(s);
+      if (key === lastKey) return; // changement de position pure : ignoré ici (voir le throttle).
+      lastKey = key;
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        saveTimer = undefined;
+        persistNow();
+      }, SAVE_DEBOUNCE_MS);
+    });
+    // La position avance en continu en lecture : on la persiste à faible cadence (throttle), plutôt
+    // qu'une écriture par frame — complète les sauvegardes sur pause / changement de piste ci-dessus.
+    const positionSaver = setInterval(() => {
+      if (playerStore.getState().status === "playing") persistNow();
+    }, SAVE_POSITION_THROTTLE_MS);
+
     return () => {
       cancelAnimationFrame(raf);
       unbind();
+      unsubscribeSave();
+      if (saveTimer) clearTimeout(saveTimer);
+      clearInterval(positionSaver);
+      persistNow(); // capture finale (best-effort) de la position au démontage
       playerStore.getState().attachEngine(null);
       playerStore.getState().attachQualityRebuild(null);
       if (import.meta.env.DEV) {
@@ -141,11 +211,73 @@ export function App(): JSX.Element {
     }
   }, []);
 
+  // Racines persistées : chargées au démarrage et après chaque scan (une source peut s'ajouter).
+  const refreshSources = useCallback(async (): Promise<void> => {
+    try {
+      setSources(await window.benten.sources.list());
+    } catch {
+      /* best-effort : l'absence de sources ne bloque pas l'écran d'accueil. */
+    }
+  }, []);
+
+  // Reprise de l'état de lecture au lancement (Task 14A) — EN PAUSE, sans aucun son automatique.
+  // Ne s'exécute qu'une fois. Applique d'abord les préférences scalaires (volume/aléatoire/
+  // répétition/qualité/vue), puis re-résout les ids de file en `TrackRow` via la DB et charge la
+  // piste courante en pause à la position mémorisée. File vide ou tous les ids disparus : démarrage
+  // propre. (Démarrer une veille de dossiers sur les sources est la Task 14B — pas ici.)
+  const restoredRef = useRef(false);
+  const restorePlaybackState = useCallback(async (): Promise<void> => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    let raw: string | undefined;
+    try {
+      raw = await window.benten.state.get(PLAYER_STATE_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return; // rien de sauvé : défauts propres.
+    const restored = restoreState(raw);
+    if (!restored) return; // état corrompu : défauts propres.
+
+    const store = playerStore.getState();
+    // Préférences scalaires : appliquées même si la file a disparu. `setShuffle`/`setRepeat`/
+    // `setVolume` configurent aussi le moteur ; `qualityMode`/`nowPlayingOpen` ne sont posés que
+    // dans le store (pas de recréation de contexte au lancement : on reste muet et sans course).
+    store.setVolume(restored.volume);
+    store.setShuffle(restored.shuffle);
+    store.setRepeat(restored.repeat);
+    playerStore.setState({
+      qualityMode: restored.qualityMode,
+      nowPlayingOpen: restored.nowPlayingOpen,
+    });
+
+    if (restored.queueTrackIds.length === 0) return;
+    let tracks: TrackRow[] = [];
+    try {
+      tracks = await window.benten.library.tracksByIds(restored.queueTrackIds);
+    } catch {
+      return;
+    }
+    if (tracks.length === 0) return; // tous les ids disparus : file vide, démarrage propre.
+    // Index courant re-mappé sur la file filtrée (des ids ont pu disparaître) : par identité si
+    // possible, sinon borné à ce qui reste.
+    const savedId = restored.queueTrackIds[restored.currentIndex];
+    let index = savedId != null ? tracks.findIndex((t) => t.id === savedId) : -1;
+    if (index < 0) index = Math.min(Math.max(restored.currentIndex, 0), tracks.length - 1);
+
+    store.setQueue(tracks, index);
+    // Reprise EN PAUSE à la position mémorisée : le moteur ne démarre AUCUNE source.
+    await engine.restoreQueue(tracks, index, restored.positionSec);
+  }, [engine]);
+
   useEffect(() => {
     void reload();
     // Amorce les favoris (ids) depuis la base : le cœur et le filtre favoris reflètent l'état persisté.
     void playerStore.getState().loadFavorites();
-  }, [reload]);
+    // Charge les racines persistées (raccourcis de ré-indexation) et reprend l'état de lecture.
+    void refreshSources();
+    void restorePlaybackState();
+  }, [reload, refreshSources, restorePlaybackState]);
 
   // Recherche avec anti-rebond : terme vide -> on vide les resultats sans interroger. Un drapeau
   // `cancelled` ignore une reponse qui arrive apres un nouveau terme (course de frappe rapide).
@@ -223,6 +355,12 @@ export function App(): JSX.Element {
         const summary = await window.benten.library.scan([path]);
         setScanMsg(`Indexation : ${summary.added} ajoutes, ${summary.skipped} ignores.`);
         await reload();
+        // La racine scannée devient une source persistée : on rafraîchit la liste des raccourcis.
+        try {
+          setSources(await window.benten.sources.list());
+        } catch {
+          /* best-effort */
+        }
       } catch (err) {
         setScanMsg(`Echec : ${err instanceof Error ? err.message : String(err)}`);
       } finally {
@@ -244,13 +382,6 @@ export function App(): JSX.Element {
     } catch (err) {
       setScanMsg(`Echec : ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [scanning, runScan]);
-
-  // Raccourci : pre-remplit et indexe la bibliotheque locale connue.
-  const useKnownLibrary = useCallback((): void => {
-    if (scanning) return;
-    setScanPath(KNOWN_LIBRARY);
-    void runScan(KNOWN_LIBRARY);
   }, [scanning, runScan]);
 
   // Tri + filtres appliqués côté vue (la SortFilterBar pilote la liste affichée). Même liste
@@ -410,14 +541,22 @@ export function App(): JSX.Element {
                     Scanner
                   </button>
                 </div>
-                <button
-                  className="scan-hint"
-                  type="button"
-                  onClick={useKnownLibrary}
-                  disabled={scanning}
-                >
-                  utiliser ma bibliotheque
-                </button>
+                {sources.length > 0 && (
+                  <div className="scan-sources">
+                    {sources.map((s) => (
+                      <button
+                        key={s.id}
+                        className="scan-hint"
+                        type="button"
+                        onClick={() => void runScan(s.path)}
+                        disabled={scanning}
+                        title={s.path}
+                      >
+                        {s.path}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {scanMsg && <div className="scan-note">{scanMsg}</div>}
               </div>
             </section>

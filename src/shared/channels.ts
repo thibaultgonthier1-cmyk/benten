@@ -3,6 +3,7 @@ export const CHANNELS = {
   LIBRARY_QUERY: "library:query",
   LIBRARY_SCAN: "library:scan",
   LIBRARY_SEARCH: "library:search",
+  LIBRARY_TRACKS_BY_IDS: "library:tracks-by-ids",
   AUDIO_DEFAULT_DEVICE: "audio:default-device",
   AUDIO_LIST_DEVICES: "audio:list-devices",
   AUDIO_READ_FILE: "audio:read-file",
@@ -19,6 +20,8 @@ export const CHANNELS = {
   PLAYLISTS_ADD: "playlists:add",
   PLAYLISTS_REMOVE: "playlists:remove",
   PLAYLISTS_REORDER: "playlists:reorder",
+  STATE_GET: "state:get",
+  STATE_SET: "state:set",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
