@@ -10,6 +10,14 @@ export const CHANNELS = {
   SOURCES_REMOVE: "sources:remove",
   FAVORITES_TOGGLE: "favorites:toggle",
   FAVORITES_LIST: "favorites:list",
+  PLAYLISTS_LIST: "playlists:list",
+  PLAYLISTS_CREATE: "playlists:create",
+  PLAYLISTS_RENAME: "playlists:rename",
+  PLAYLISTS_DELETE: "playlists:delete",
+  PLAYLISTS_TRACKS: "playlists:tracks",
+  PLAYLISTS_ADD: "playlists:add",
+  PLAYLISTS_REMOVE: "playlists:remove",
+  PLAYLISTS_REORDER: "playlists:reorder",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

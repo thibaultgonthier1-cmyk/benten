@@ -16,6 +16,7 @@ import type { TrackRow } from "../shared/types";
 import { LibraryGrid } from "./components/LibraryGrid";
 import { SortFilterBar } from "./components/SortFilterBar";
 import { SearchResults } from "./components/SearchResults";
+import { Playlists } from "./components/Playlists";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
 
@@ -51,6 +52,7 @@ export function App(): JSX.Element {
   const controls = useMemo(() => createControls(engine, playerStore), [engine]);
 
   const [albums, setAlbums] = useState<Album[]>([]);
+  const [view, setView] = useState<"library" | "playlists">("library");
   const [sortFilter, setSortFilter] = useState<AlbumSortFilter>(DEFAULT_SORT_FILTER);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -135,6 +137,24 @@ export function App(): JSX.Element {
     [controls],
   );
 
+  // Lecture d'une playlist : on fabrique un album ephemere (id synthetique) a partir de ses pistes
+  // et on reutilise exactement le chemin de file de `playAlbum` (store.setQueue + engine.setQueue).
+  const playTracks = useCallback(
+    (tracks: readonly TrackRow[], index = 0): void => {
+      if (tracks.length === 0) return;
+      const pseudo: Album = {
+        id: -1,
+        title: "Playlist",
+        artist: "",
+        artKey: tracks.find((t) => t.artKey)?.artKey ?? null,
+        tracks,
+      };
+      controls.playAlbum(pseudo, index);
+      playerStore.getState().setNowPlayingOpen(true);
+    },
+    [controls],
+  );
+
   const runScan = useCallback(
     async (pathArg?: string): Promise<void> => {
       const path = (pathArg ?? scanPath).trim();
@@ -204,10 +224,13 @@ export function App(): JSX.Element {
             </div>
           </div>
           <button
-            className={"nav-item" + (sortFilter.favoritesOnly ? "" : " active")}
+            className={"nav-item" + (view === "library" && !sortFilter.favoritesOnly ? " active" : "")}
             type="button"
-            aria-current={sortFilter.favoritesOnly ? undefined : "page"}
-            onClick={() => setSortFilter((sf) => ({ ...sf, favoritesOnly: false }))}
+            aria-current={view === "library" && !sortFilter.favoritesOnly ? "page" : undefined}
+            onClick={() => {
+              setView("library");
+              setSortFilter((sf) => ({ ...sf, favoritesOnly: false }));
+            }}
           >
             <svg viewBox="0 0 24 24">
               <path d="M3 11l9-8 9 8" />
@@ -217,15 +240,33 @@ export function App(): JSX.Element {
           </button>
           <div className="nav-group">Ma bibliotheque</div>
           <button
-            className={"nav-item" + (sortFilter.favoritesOnly ? " active" : "")}
+            className={"nav-item" + (view === "library" && sortFilter.favoritesOnly ? " active" : "")}
             type="button"
-            aria-current={sortFilter.favoritesOnly ? "page" : undefined}
-            onClick={() => setSortFilter((sf) => ({ ...sf, favoritesOnly: true }))}
+            aria-current={view === "library" && sortFilter.favoritesOnly ? "page" : undefined}
+            onClick={() => {
+              setView("library");
+              setSortFilter((sf) => ({ ...sf, favoritesOnly: true }));
+            }}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 20.5l-1.3-1.2C5.4 14.5 2.5 11.9 2.5 8.6 2.5 6.2 4.4 4.3 6.8 4.3c1.4 0 2.7.65 3.6 1.7l1.6 1.9 1.6-1.9c.9-1.05 2.2-1.7 3.6-1.7 2.4 0 4.3 1.9 4.3 4.3 0 3.3-2.9 5.9-8.2 10.7L12 20.5z" />
             </svg>
             Favoris <span className="kanji">好</span>
+          </button>
+          <button
+            className={"nav-item" + (view === "playlists" ? " active" : "")}
+            type="button"
+            aria-current={view === "playlists" ? "page" : undefined}
+            onClick={() => setView("playlists")}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h12" />
+              <path d="M4 12h12" />
+              <path d="M4 17h8" />
+              <circle cx="19" cy="16" r="2.4" />
+              <path d="M21.4 16V8.5l-3.4 1" />
+            </svg>
+            Playlists <span className="kanji">曲</span>
           </button>
         </nav>
 
@@ -262,7 +303,9 @@ export function App(): JSX.Element {
             </p>
           </header>
 
-          {searching ? (
+          {view === "playlists" ? (
+            <Playlists onPlay={playTracks} />
+          ) : searching ? (
             <SearchResults
               tracks={results}
               query={query}

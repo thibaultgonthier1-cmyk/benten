@@ -100,6 +100,18 @@ export interface SourceRow {
   addedAt: number;
 }
 
+/** Playlist telle que listée (avec son nombre de pistes). */
+export interface PlaylistRow {
+  id: number;
+  name: string;
+  /** Nombre de pistes (LEFT JOIN : 0 pour une playlist vide). */
+  trackCount: number;
+  /** Horodatage de création (ms epoch). */
+  createdAt: number;
+  /** Horodatage de dernière modification (ms epoch) ; bougé à chaque mutation. */
+  updatedAt: number;
+}
+
 export type LibraryRow = AlbumRow | TrackRow | ArtistRow;
 
 export interface LibraryQueryResult {
@@ -149,6 +161,24 @@ export interface BentenApi {
     toggle(trackId: number, on: boolean): Promise<void>;
     /** Ids de toutes les pistes favorites (pour amorcer le store). */
     list(): Promise<number[]>;
+  };
+  playlists: {
+    /** Toutes les playlists avec leur `trackCount` (triées récent d'abord). */
+    list(): Promise<PlaylistRow[]>;
+    /** Crée une playlist et renvoie son id. */
+    create(name: string): Promise<number>;
+    /** Renomme une playlist (bouge `updated_at`). */
+    rename(id: number, name: string): Promise<void>;
+    /** Supprime une playlist (cascade sur ses pistes). */
+    remove(id: number): Promise<void>;
+    /** Pistes d'une playlist, ordonnées par position. */
+    tracks(id: number): Promise<TrackRow[]>;
+    /** Ajoute des pistes à la fin de la playlist (positions denses). */
+    add(id: number, trackIds: readonly number[]): Promise<void>;
+    /** Retire la piste à `position`, puis recompacte les positions. */
+    removeTrack(id: number, position: number): Promise<void>;
+    /** Déplace la piste de `from` vers `to`, re-densifie les positions. */
+    reorder(id: number, from: number, to: number): Promise<void>;
   };
 }
 

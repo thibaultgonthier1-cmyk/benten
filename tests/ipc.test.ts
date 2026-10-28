@@ -51,7 +51,7 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
-  it("enregistre ping, library:*, audio:*, dialog:pick-folder, sources:* et favorites:*", () => {
+  it("enregistre ping, library:*, audio:*, dialog:pick-folder, sources:*, favorites:* et playlists:*", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
       "audio:default-device",
@@ -62,9 +62,84 @@ describe("registerIpc", () => {
       "library:query",
       "library:scan",
       "library:search",
+      "playlists:add",
+      "playlists:create",
+      "playlists:delete",
+      "playlists:list",
+      "playlists:remove",
+      "playlists:rename",
+      "playlists:reorder",
+      "playlists:tracks",
       "sources:list",
       "sources:remove",
     ]);
+  });
+
+  it("playlists:* couvre le CRUD + l'ordonnancement, valide les entiers/noms et refuse l'expéditeur non fiable", async () => {
+    const mk = (path: string): TrackInput => ({
+      path,
+      title: "T",
+      artist: "A",
+      album: "AA",
+      albumArtist: null,
+      trackNo: 1,
+      discNo: null,
+      durationSec: 100,
+      format: "flac",
+      sampleRate: 44100,
+      bitDepth: 16,
+      playable: true,
+      artKey: null,
+      mtimeMs: null,
+      sizeBytes: null,
+    });
+    upsertTracks(db, [mk("/p/1.flac"), mk("/p/2.flac")]);
+    const t1 = db.prepare("SELECT id FROM tracks WHERE path = ?").pluck().get("/p/1.flac") as number;
+    const t2 = db.prepare("SELECT id FROM tracks WHERE path = ?").pluck().get("/p/2.flac") as number;
+
+    expect(await call("playlists:list", trusted)).toEqual([]);
+    const id = (await call("playlists:create", trusted, "Mix")) as number;
+    expect(typeof id).toBe("number");
+
+    await call("playlists:add", trusted, id, [t1, t2]);
+    const ids = async (): Promise<number[]> =>
+      ((await call("playlists:tracks", trusted, id)) as { id: number }[]).map((t) => t.id);
+    expect(await ids()).toEqual([t1, t2]);
+
+    await call("playlists:reorder", trusted, id, 0, 1);
+    expect(await ids()).toEqual([t2, t1]);
+
+    await call("playlists:remove", trusted, id, 0);
+    expect(await ids()).toEqual([t1]);
+
+    await call("playlists:rename", trusted, id, "Renamed");
+    const list = (await call("playlists:list", trusted)) as {
+      id: number;
+      name: string;
+      trackCount: number;
+    }[];
+    expect(list).toHaveLength(1);
+    expect(list[0]!.name).toBe("Renamed");
+    expect(list[0]!.trackCount).toBe(1);
+
+    await call("playlists:delete", trusted, id);
+    expect(await call("playlists:list", trusted)).toEqual([]);
+
+    // Validation des entiers / noms.
+    await expect(call("playlists:create", trusted, "")).rejects.toThrow(/playlists:create/);
+    await expect(call("playlists:create", trusted, "   ")).rejects.toThrow(/playlists:create/);
+    await expect(call("playlists:create", trusted, 42)).rejects.toThrow(/playlists:create/);
+    await expect(call("playlists:rename", trusted, 1.5, "x")).rejects.toThrow(/playlists:rename/);
+    await expect(call("playlists:rename", trusted, 1, "")).rejects.toThrow(/playlists:rename/);
+    await expect(call("playlists:add", trusted, 1, ["x"])).rejects.toThrow(/playlists:add/);
+    await expect(call("playlists:add", trusted, 1, "nope")).rejects.toThrow(/playlists:add/);
+    await expect(call("playlists:remove", trusted, 1, 1.5)).rejects.toThrow(/playlists:remove/);
+    await expect(call("playlists:reorder", trusted, 1, 0, "x")).rejects.toThrow(/playlists:reorder/);
+
+    // Expéditeur non fiable.
+    await expect(call("playlists:list", evil)).rejects.toThrow(/untrusted sender/);
+    await expect(call("playlists:create", evil, "x")).rejects.toThrow(/untrusted sender/);
+    await expect(call("playlists:tracks", evil, 1)).rejects.toThrow(/untrusted sender/);
   });
 
   it("favorites:toggle persiste un favori, favorites:list le renvoie, garde l'id entier et l'expediteur fiable", async () => {

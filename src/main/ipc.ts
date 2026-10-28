@@ -12,6 +12,7 @@ import type {
   LibraryQueryResult,
   LibraryView,
   Page,
+  PlaylistRow,
   ScanSummary,
   SearchArgs,
   SortDir,
@@ -23,12 +24,20 @@ import { defaultOutputDevice } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
 import {
   addSource,
+  addToPlaylist,
+  createPlaylist,
+  deletePlaylist,
   getAlbums,
   getAllTracks,
   getArtists,
   getFavoriteIds,
+  getPlaylists,
+  getPlaylistTracks,
   getSources,
+  removeFromPlaylist,
   removeSource,
+  renamePlaylist,
+  reorderPlaylist,
   searchTracks,
   setFavorite,
   type SortOpts,
@@ -40,6 +49,37 @@ const MAX_SCAN_PATHS = 64;
 /** Garde-fou : un fichier audio plus gros que ca est tenu pour aberrant (chemin errone). */
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024;
 const VIEWS: ReadonlySet<string> = new Set<LibraryView>(["albums", "tracks", "artists"]);
+/** Garde-fou : un nom de playlist au-dela de cette longueur est tenu pour aberrant. */
+const MAX_PLAYLIST_NAME = 200;
+
+/** Exige un entier (sinon rejet avec le prefixe du canal). */
+function requireInt(v: unknown, channel: string, field: string): number {
+  if (typeof v !== "number" || !Number.isInteger(v)) {
+    throw new Error(`${channel}: ${field} must be an integer`);
+  }
+  return v;
+}
+
+/** Exige un nom non vide (apres trim) et borne ; renvoie le nom TRIM. */
+function requireName(v: unknown, channel: string): string {
+  if (typeof v !== "string") throw new Error(`${channel}: name must be a string`);
+  const name = v.trim();
+  if (name.length === 0 || name.length > MAX_PLAYLIST_NAME) {
+    throw new Error(`${channel}: name must be a non-empty string`);
+  }
+  return name;
+}
+
+/** Exige un tableau borne d'ids entiers (pour `playlists:add`). */
+function requireIntArray(v: unknown, channel: string): number[] {
+  if (!Array.isArray(v)) throw new Error(`${channel}: trackIds must be an array of integers`);
+  for (const x of v) {
+    if (typeof x !== "number" || !Number.isInteger(x)) {
+      throw new Error(`${channel}: trackIds must be an array of integers`);
+    }
+  }
+  return v as number[];
+}
 
 /**
  * Vrai si `url` (celle de la frame appelante) est l'UI de l'application :
@@ -317,5 +357,54 @@ export function registerIpc(db: Database.Database): void {
   ipcMain.handle(CHANNELS.FAVORITES_LIST, (event): number[] => {
     assertTrusted(event);
     return getFavoriteIds(db);
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_LIST, (event): PlaylistRow[] => {
+    assertTrusted(event);
+    return getPlaylists(db);
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_CREATE, (event, name: unknown): number => {
+    assertTrusted(event);
+    return createPlaylist(db, requireName(name, "playlists:create"));
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_RENAME, (event, id: unknown, name: unknown): void => {
+    assertTrusted(event);
+    renamePlaylist(db, requireInt(id, "playlists:rename", "id"), requireName(name, "playlists:rename"));
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_DELETE, (event, id: unknown): void => {
+    assertTrusted(event);
+    deletePlaylist(db, requireInt(id, "playlists:delete", "id"));
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_TRACKS, (event, id: unknown): TrackRow[] => {
+    assertTrusted(event);
+    return getPlaylistTracks(db, requireInt(id, "playlists:tracks", "id"));
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_ADD, (event, id: unknown, trackIds: unknown): void => {
+    assertTrusted(event);
+    addToPlaylist(db, requireInt(id, "playlists:add", "id"), requireIntArray(trackIds, "playlists:add"));
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_REMOVE, (event, id: unknown, position: unknown): void => {
+    assertTrusted(event);
+    removeFromPlaylist(
+      db,
+      requireInt(id, "playlists:remove", "id"),
+      requireInt(position, "playlists:remove", "position"),
+    );
+  });
+
+  ipcMain.handle(CHANNELS.PLAYLISTS_REORDER, (event, id: unknown, from: unknown, to: unknown): void => {
+    assertTrusted(event);
+    reorderPlaylist(
+      db,
+      requireInt(id, "playlists:reorder", "id"),
+      requireInt(from, "playlists:reorder", "from"),
+      requireInt(to, "playlists:reorder", "to"),
+    );
   });
 }

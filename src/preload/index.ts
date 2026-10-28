@@ -28,6 +28,16 @@ const api: BentenApi = {
     toggle: (trackId, on) => invoke(CHANNELS.FAVORITES_TOGGLE, trackId, on),
     list: () => invoke(CHANNELS.FAVORITES_LIST),
   },
+  playlists: {
+    list: () => invoke(CHANNELS.PLAYLISTS_LIST),
+    create: (name) => invoke(CHANNELS.PLAYLISTS_CREATE, name),
+    rename: (id, name) => invoke(CHANNELS.PLAYLISTS_RENAME, id, name),
+    remove: (id) => invoke(CHANNELS.PLAYLISTS_DELETE, id),
+    tracks: (id) => invoke(CHANNELS.PLAYLISTS_TRACKS, id),
+    add: (id, trackIds) => invoke(CHANNELS.PLAYLISTS_ADD, id, trackIds),
+    removeTrack: (id, position) => invoke(CHANNELS.PLAYLISTS_REMOVE, id, position),
+    reorder: (id, from, to) => invoke(CHANNELS.PLAYLISTS_REORDER, id, from, to),
+  },
 };
 
 contextBridge.exposeInMainWorld("benten", api);

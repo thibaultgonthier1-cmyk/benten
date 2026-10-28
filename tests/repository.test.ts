@@ -6,16 +6,24 @@ import type Database from "better-sqlite3";
 import { openDb } from "../src/main/library/db";
 import {
   addSource,
+  addToPlaylist,
+  createPlaylist,
+  deletePlaylist,
   getAlbums,
   getAllTracks,
   getArtists,
   getFavoriteIds,
+  getPlaylists,
+  getPlaylistTracks,
   getSources,
   getTrackByPath,
   getTracksByAlbum,
   isFavorite,
+  removeFromPlaylist,
   removeSource,
   removeTracks,
+  renamePlaylist,
+  reorderPlaylist,
   searchTracks,
   setFavorite,
   upsertTracks,
@@ -336,6 +344,101 @@ describe("repository", () => {
     // En retirant le favori, plus aucun album favori.
     setFavorite(db, fav.id, false);
     expect(getAlbums(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } })).toEqual([]);
+  });
+
+  // ── Playlists (Task 10) ──────────────────────────────────────────────────
+  const seedTrackIds = (): [number, number, number] => {
+    upsertTracks(db, records());
+    return [
+      getTrackByPath(db, "/m/a/01.flac")!.id,
+      getTrackByPath(db, "/m/a/02.flac")!.id,
+      getTrackByPath(db, "/m/b/01.mp3")!.id,
+    ];
+  };
+  // Lit directement les colonnes (track_id, position) pour asserter les valeurs de position.
+  const positions = (id: number): { trackId: number; position: number }[] =>
+    db
+      .prepare("SELECT track_id AS trackId, position FROM playlist_tracks WHERE playlist_id = ? ORDER BY position")
+      .all(id) as { trackId: number; position: number }[];
+
+  it("createPlaylist + addToPlaylist appends tracks in order (getPlaylistTracks by position)", () => {
+    const [t1, t2, t3] = seedTrackIds();
+    const id = createPlaylist(db, "Road Trip");
+    expect(typeof id).toBe("number");
+    addToPlaylist(db, id, [t1, t2, t3]);
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t1, t2, t3]);
+    expect(positions(id)).toEqual([
+      { trackId: t1, position: 0 },
+      { trackId: t2, position: 1 },
+      { trackId: t3, position: 2 },
+    ]);
+  });
+
+  it("addToPlaylist appends after the current max position (dense, contiguous)", () => {
+    const [t1, t2, t3] = seedTrackIds();
+    const id = createPlaylist(db, "P");
+    addToPlaylist(db, id, [t1]);
+    addToPlaylist(db, id, [t2, t3]);
+    expect(positions(id).map((p) => p.position)).toEqual([0, 1, 2]);
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t1, t2, t3]);
+  });
+
+  it("removeFromPlaylist removes the row at a position then recompacts positions to 0..n-1", () => {
+    const [t1, t2, t3] = seedTrackIds();
+    const id = createPlaylist(db, "P");
+    addToPlaylist(db, id, [t1, t2, t3]);
+    removeFromPlaylist(db, id, 1); // position de t2
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t1, t3]);
+    // Positions recompactées : valeurs de colonne réelles 0,1 (pas juste l'ordre).
+    expect(positions(id)).toEqual([
+      { trackId: t1, position: 0 },
+      { trackId: t3, position: 1 },
+    ]);
+  });
+
+  it("reorderPlaylist moves item from->to and re-densifies positions (no PK collision)", () => {
+    const [t1, t2, t3] = seedTrackIds();
+    const id = createPlaylist(db, "P");
+    addToPlaylist(db, id, [t1, t2, t3]);
+    reorderPlaylist(db, id, 0, 2); // t1 -> fin
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t2, t3, t1]);
+    expect(positions(id).map((p) => p.position)).toEqual([0, 1, 2]);
+    reorderPlaylist(db, id, 2, 0); // retour : index 2 -> index 0
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t1, t2, t3]);
+    expect(positions(id).map((p) => p.position)).toEqual([0, 1, 2]);
+  });
+
+  it("deletePlaylist cascades playlist_tracks (no orphan rows)", () => {
+    const [t1, t2] = seedTrackIds();
+    const id = createPlaylist(db, "P");
+    addToPlaylist(db, id, [t1, t2]);
+    const count = (): number =>
+      db.prepare("SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?").pluck().get(id) as number;
+    expect(count()).toBe(2);
+    deletePlaylist(db, id);
+    expect(getPlaylists(db).find((p) => p.id === id)).toBeUndefined();
+    expect(count()).toBe(0);
+  });
+
+  it("getPlaylists returns trackCount; renamePlaylist updates name + updated_at (not created_at)", () => {
+    const [t1, t2] = seedTrackIds();
+    const id = createPlaylist(db, "Old");
+    addToPlaylist(db, id, [t1, t2]);
+    // Fige des horodatages connus pour prouver que SEUL updated_at bouge au renommage.
+    db.prepare("UPDATE playlists SET created_at = 1000, updated_at = 1000 WHERE id = ?").run(id);
+    renamePlaylist(db, id, "New");
+    const row = getPlaylists(db).find((p) => p.id === id)!;
+    expect(row.name).toBe("New");
+    expect(row.trackCount).toBe(2);
+    expect(row.createdAt).toBe(1000);
+    expect(row.updatedAt).toBeGreaterThan(1000);
+  });
+
+  it("getPlaylists reports trackCount 0 for an empty playlist (LEFT JOIN)", () => {
+    const id = createPlaylist(db, "Empty");
+    const row = getPlaylists(db).find((p) => p.id === id)!;
+    expect(row.trackCount).toBe(0);
+    expect(getPlaylistTracks(db, id)).toEqual([]);
   });
 
   it("migrates by user_version and is reopenable", () => {

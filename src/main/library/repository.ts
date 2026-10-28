@@ -4,6 +4,7 @@ import type {
   ArtistRow,
   LibraryFilter,
   Page,
+  PlaylistRow,
   SortDir,
   SortField,
   SourceRow,
@@ -99,6 +100,32 @@ function statements(db: Db) {
     deleteFavorite: db.prepare("DELETE FROM favorites WHERE track_id = ?"),
     isFavorite: db.prepare("SELECT 1 FROM favorites WHERE track_id = ?").pluck(),
     favoriteIds: db.prepare("SELECT track_id FROM favorites ORDER BY added_at, track_id").pluck(),
+    // Playlists : CRUD + ordonnancement dense. La PK (playlist_id, position) impose de ne jamais
+    // laisser deux lignes partager une position, meme transitoirement (voir recompaction plus bas).
+    insertPlaylist: db.prepare("INSERT INTO playlists (name, created_at, updated_at) VALUES (?, ?, ?)"),
+    renamePlaylist: db.prepare("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?"),
+    deletePlaylist: db.prepare("DELETE FROM playlists WHERE id = ?"),
+    touchPlaylist: db.prepare("UPDATE playlists SET updated_at = ? WHERE id = ?"),
+    playlists: db.prepare(`
+      SELECT p.id, p.name, COUNT(pt.track_id) AS trackCount,
+             p.created_at AS createdAt, p.updated_at AS updatedAt
+      FROM playlists p
+      LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+      GROUP BY p.id
+      ORDER BY p.updated_at DESC, p.id DESC`),
+    playlistTracks: db.prepare(`
+      SELECT ${TRACK_COLUMNS} FROM playlist_tracks pt
+      JOIN tracks t ON t.id = pt.track_id
+      WHERE pt.playlist_id = ?
+      ORDER BY pt.position ASC`),
+    playlistTrackIds: db
+      .prepare("SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position ASC")
+      .pluck(),
+    playlistMaxPos: db.prepare("SELECT MAX(position) FROM playlist_tracks WHERE playlist_id = ?").pluck(),
+    insertPlaylistTrack: db.prepare(
+      "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+    ),
+    clearPlaylistTracks: db.prepare("DELETE FROM playlist_tracks WHERE playlist_id = ?"),
   };
 }
 
@@ -392,4 +419,91 @@ export function removeTracks(db: Db, paths: readonly string[]): number {
     s.pruneArtists.run();
     return removed;
   })(paths);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * PLAYLISTS — `position` est DENSE (0..n-1) et CONTIGUË, recompactée dans une
+ * transaction à chaque retrait/réordonnancement. La PK (playlist_id, position)
+ * interdit deux lignes à la même position, même transitoirement : les mutations
+ * d'ordre LISENT l'ordre courant en mémoire, calculent le nouvel ordre en JS,
+ * SUPPRIMENT toutes les lignes de la playlist, puis RÉ-INSÈRENT en 0..n-1 — la
+ * seule stratégie triviallement sans collision de PK. Chaque mutation bouge
+ * `updated_at`. Tout fait dans un seul `db.transaction(...)`.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Crée une playlist (created_at = updated_at = maintenant). Renvoie le nouvel id. */
+export function createPlaylist(db: Db, name: string): number {
+  const now = Date.now();
+  return Number(stmts(db).insertPlaylist.run(name, now, now).lastInsertRowid);
+}
+
+/** Renomme une playlist et bouge son `updated_at`. */
+export function renamePlaylist(db: Db, id: number, name: string): void {
+  stmts(db).renamePlaylist.run(name, Date.now(), id);
+}
+
+/** Supprime une playlist ; ses `playlist_tracks` partent en cascade (foreign_keys = ON). */
+export function deletePlaylist(db: Db, id: number): void {
+  stmts(db).deletePlaylist.run(id);
+}
+
+/** Toutes les playlists avec leur `trackCount` (LEFT JOIN), plus récemment modifiées d'abord. */
+export function getPlaylists(db: Db): PlaylistRow[] {
+  return stmts(db).playlists.all() as PlaylistRow[];
+}
+
+/** Pistes d'une playlist, ordonnées par `position` croissante. */
+export function getPlaylistTracks(db: Db, id: number): TrackRow[] {
+  return (stmts(db).playlistTracks.all(id) as RawTrack[]).map(toTrackRow);
+}
+
+/**
+ * Ajoute des pistes à la FIN de la playlist, aux positions qui suivent le max courant (donc denses
+ * et contiguës). Une playlist vide démarre à 0. Transaction ; bouge `updated_at`. Les doublons de
+ * piste sont autorisés (la PK porte sur la position, pas sur le track_id).
+ */
+export function addToPlaylist(db: Db, id: number, trackIds: readonly number[]): void {
+  const s = stmts(db);
+  db.transaction(() => {
+    const max = s.playlistMaxPos.get(id) as number | null;
+    let pos = max == null ? 0 : max + 1;
+    for (const trackId of trackIds) s.insertPlaylistTrack.run(id, trackId, pos++);
+    s.touchPlaylist.run(Date.now(), id);
+  })();
+}
+
+/**
+ * Retire la ligne à `position`, puis RECOMPACTE les positions restantes en 0..n-1. `position`
+ * hors bornes = no-op (aucune écriture). Transaction ; bouge `updated_at`. On lit l'ordre courant,
+ * on retire l'index, on vide la playlist et on ré-insère — pas de collision de PK possible.
+ */
+export function removeFromPlaylist(db: Db, id: number, position: number): void {
+  const s = stmts(db);
+  db.transaction(() => {
+    const ids = s.playlistTrackIds.all(id) as number[];
+    if (position < 0 || position >= ids.length) return;
+    ids.splice(position, 1);
+    s.clearPlaylistTracks.run(id);
+    ids.forEach((trackId, i) => s.insertPlaylistTrack.run(id, trackId, i));
+    s.touchPlaylist.run(Date.now(), id);
+  })();
+}
+
+/**
+ * Déplace la piste de l'index `from` vers l'index `to`, puis re-densifie les positions en 0..n-1.
+ * Index hors bornes ou `from === to` = no-op. Transaction ; bouge `updated_at`. Même stratégie
+ * sans collision que `removeFromPlaylist` (DELETE puis RE-INSERT dans le nouvel ordre).
+ */
+export function reorderPlaylist(db: Db, id: number, from: number, to: number): void {
+  const s = stmts(db);
+  db.transaction(() => {
+    const ids = s.playlistTrackIds.all(id) as number[];
+    const n = ids.length;
+    if (from < 0 || from >= n || to < 0 || to >= n || from === to) return;
+    const [moved] = ids.splice(from, 1);
+    ids.splice(to, 0, moved!);
+    s.clearPlaylistTracks.run(id);
+    ids.forEach((trackId, i) => s.insertPlaylistTrack.run(id, trackId, i));
+    s.touchPlaylist.run(Date.now(), id);
+  })();
 }
