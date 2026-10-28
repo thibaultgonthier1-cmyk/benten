@@ -1,5 +1,5 @@
 import { basename, dirname, extname } from "node:path";
-import { parseFile, type IAudioMetadata } from "music-metadata";
+import type { IAudioMetadata } from "music-metadata";
 import type { TrackInput } from "../../shared/types";
 
 /** Extensions dont la lecture est bloquee par un DRM (jamais lisibles). */
@@ -44,6 +44,14 @@ function formatLabel(ext: string, container: string | undefined, codec: string |
   return ext.replace(/^\./, "").toUpperCase();
 }
 
+/**
+ * music-metadata est ESM-only alors que le main est compile en CJS : import dynamique
+ * (paresseux, mis en cache) plutot qu'un `require` statique qui depend de require(esm).
+ */
+let parserModule: Promise<typeof import("music-metadata")> | undefined;
+const loadParser = (): Promise<typeof import("music-metadata")> =>
+  (parserModule ??= import("music-metadata"));
+
 const clean = (s: string | undefined): string => (s ?? "").trim();
 
 /**
@@ -71,6 +79,7 @@ export async function readMetadata(path: string): Promise<TrackInput> {
   if (DRM_EXTENSIONS.has(ext)) return unplayable;
 
   try {
+    const { parseFile } = await loadParser();
     const meta: IAudioMetadata = await parseFile(path, { skipCovers: true });
     const { common, format } = meta;
     // Sans frequence d'echantillonnage on n'a pas de piste decodable.

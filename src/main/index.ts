@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from "electron";
 import { join } from "node:path";
 import { registerIpc } from "./ipc";
+import { openDb } from "./library/db";
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -25,7 +26,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  registerIpc();
+  registerIpc(openDb(join(app.getPath("userData"), "benten.db")));
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

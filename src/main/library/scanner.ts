@@ -32,8 +32,13 @@ const defaultFs: ScanFs = {
  * Parcourt `root` recursivement et produit les chemins des fichiers audio connus.
  * Ignore les dossiers/fichiers caches (prefixe `.`). Un dossier illisible est saute :
  * le parcours ne s'interrompt jamais. Ordre deterministe (tri par nom).
+ * `extensions` permet d'elargir l'ensemble reconnu (defaut : `AUDIO_EXTENSIONS`).
  */
-export async function* scanAudioFiles(root: string, fs: ScanFs = defaultFs): AsyncIterable<string> {
+export async function* scanAudioFiles(
+  root: string,
+  fs: ScanFs = defaultFs,
+  extensions: ReadonlySet<string> = AUDIO_EXTENSIONS,
+): AsyncIterable<string> {
   let entries: ScanEntry[];
   try {
     entries = await fs.readdir(root);
@@ -45,8 +50,8 @@ export async function* scanAudioFiles(root: string, fs: ScanFs = defaultFs): Asy
     if (entry.name.startsWith(".")) continue;
     const full = join(root, entry.name);
     if (entry.isDirectory()) {
-      yield* scanAudioFiles(full, fs);
-    } else if (entry.isFile() && AUDIO_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+      yield* scanAudioFiles(full, fs, extensions);
+    } else if (entry.isFile() && extensions.has(extname(entry.name).toLowerCase())) {
       yield full;
     }
   }

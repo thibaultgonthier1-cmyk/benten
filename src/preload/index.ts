@@ -1,15 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { CHANNELS } from "../shared/channels";
+import { CHANNELS, type ChannelName } from "../shared/channels";
 import type { BentenApi } from "../shared/types";
 
+/** `ipcRenderer.invoke` type : le type de retour vient de la signature de `BentenApi`. */
+const invoke = <T>(channel: ChannelName, ...args: unknown[]): Promise<T> =>
+  ipcRenderer.invoke(channel, ...args) as Promise<T>;
+
 const api: BentenApi = {
-  ping: () => ipcRenderer.invoke(CHANNELS.PING),
+  ping: () => invoke(CHANNELS.PING),
   library: {
-    query: (args) => ipcRenderer.invoke(CHANNELS.LIBRARY_QUERY, args),
-    scan: (paths) => ipcRenderer.invoke(CHANNELS.LIBRARY_SCAN, paths),
+    query: (args) => invoke(CHANNELS.LIBRARY_QUERY, args),
+    scan: (paths) => invoke(CHANNELS.LIBRARY_SCAN, paths),
   },
   audio: {
-    defaultDevice: () => ipcRenderer.invoke(CHANNELS.AUDIO_DEFAULT_DEVICE),
+    defaultDevice: () => invoke(CHANNELS.AUDIO_DEFAULT_DEVICE),
   },
 };
 
