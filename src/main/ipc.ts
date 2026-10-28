@@ -302,7 +302,10 @@ export interface IpcHooks {
 
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
-  ipcMain.handle(CHANNELS.PING, (): "pong" => "pong");
+  ipcMain.handle(CHANNELS.PING, (event): "pong" => {
+    assertTrusted(event);
+    return "pong";
+  });
 
   ipcMain.handle(CHANNELS.LIBRARY_QUERY, (event, args: unknown): LibraryQueryResult => {
     assertTrusted(event);

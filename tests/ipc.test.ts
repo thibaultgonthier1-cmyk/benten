@@ -79,6 +79,11 @@ describe("registerIpc", () => {
     ]);
   });
 
+  it("app:ping repond 'pong' a un expediteur fiable et refuse un expediteur non fiable", async () => {
+    expect(await call("app:ping", trusted)).toBe("pong");
+    await expect(call("app:ping", evil)).rejects.toThrow(/untrusted sender/);
+  });
+
   it("state:set persiste une valeur, state:get la relit, valide les chaines et refuse l'expediteur non fiable", async () => {
     expect(await call("state:get", trusted, "player")).toBeUndefined();
     await call("state:set", trusted, "player", '{"volume":0.5}');

@@ -18,8 +18,25 @@ class FakeNode {
     this.connectedTo = null;
   }
 }
+/**
+ * Parametre de gain mocke : enregistre les rampes planifiees (anti-clic) pour les tests, et tient
+ * `.value` a jour sur `setValueAtTime`/`linearRampToValueAtTime` (le moteur emprunte alors le chemin
+ * AudioParam reel au lieu du repli `value =`).
+ */
+class FakeGainParam {
+  value = 1;
+  ramps: { to: number; at: number }[] = [];
+  cancelScheduledValues(_at: number): void {}
+  setValueAtTime(v: number, _at: number): void {
+    this.value = v;
+  }
+  linearRampToValueAtTime(v: number, at: number): void {
+    this.ramps.push({ to: v, at });
+    this.value = v;
+  }
+}
 class FakeGain extends FakeNode {
-  gain = { value: 1 };
+  gain = new FakeGainParam();
 }
 class FakeAnalyser extends FakeNode {}
 class FakeBufferSource extends FakeNode {
@@ -29,6 +46,7 @@ class FakeBufferSource extends FakeNode {
   stopped = false;
   startWhen?: number;
   startOffset?: number;
+  stopWhen?: number;
   constructor(private readonly ctx: FakeAudioContext) {
     super();
   }
@@ -38,8 +56,9 @@ class FakeBufferSource extends FakeNode {
     this.startOffset = offset;
     this.ctx.sources.push(this);
   }
-  stop(): void {
+  stop(when?: number): void {
     this.stopped = true;
+    this.stopWhen = when;
   }
 }
 class FakeAudioBuffer {
@@ -398,6 +417,35 @@ describe("AudioEngine", () => {
       // Le graphe est reconstruit sur le NOUVEAU contexte (un seul contexte vivant a la fois).
       expect(ctx2.gainCount).toBe(2);
       expect(ctx2.analyserCount).toBe(1);
+    });
+
+    it("EN LECTURE, rampe le gain vers ~0 (anti-clic) PUIS stoppe, et finit en pause", async () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(200)));
+      await engine.load(track({ id: 42, durationSec: 200 }));
+      engine.play();
+      ctx.currentTime = 37;
+      const oldSource = ctx.sources[0]!;
+      const oldGain = oldSource.connectedTo as FakeGain; // noeud `gain` (fondus anti-clic)
+
+      const ctx2 = new FakeAudioContext();
+      await engine.rebuildContext(
+        ctx2 as unknown as AudioContext,
+        okDecoder(new FakeAudioBuffer(200)),
+      );
+
+      // Anti-clic : le gain a ete RAMPE vers ~0 (et non coupe net) avant l'arret de la source.
+      expect(oldGain.gain.ramps.length).toBeGreaterThan(0);
+      const lastRamp = oldGain.gain.ramps.at(-1)!;
+      expect(lastRamp.to).toBeLessThanOrEqual(0.01); // cible quasi silencieuse
+      // La source a ete stoppee APRES la rampe (a la fin du fondu, pas a l'instant courant).
+      expect(oldSource.stopped).toBe(true);
+      expect(oldSource.stopWhen).toBeGreaterThan(ctx.currentTime);
+
+      // Etat final INCHANGE : pause a la position memorisee, piste conservee.
+      const s = engine.getState();
+      expect(s.status).toBe("paused");
+      expect(s.trackId).toBe(42);
+      expect(s.positionSec).toBeCloseTo(37, 5);
     });
 
     it("reapplique le volume utilisateur sur le nouveau contexte", async () => {

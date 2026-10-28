@@ -1122,9 +1122,19 @@ export class AudioEngine {
     const savedTrack = this.currentTrackRow;
 
     // 2) Annule toute source de l'ancien contexte (plus aucune source vivante cote ancien graphe).
-    //    `load` plus bas incremente `loadToken`, ce qui defuse en plus tout decode encore en vol.
-    this.teardownSource();
-    this.teardownScheduled();
+    //    EN LECTURE, on passe par le fondu anti-clic (meme machinerie que les changements manuels :
+    //    rampe du gain vers ~0 sur `FADE_SEC` PUIS stop a la fin de la rampe) pour que la bascule
+    //    vers le rebuild hors-lecture soit SANS CLIC — le design veut « on met en pause, on
+    //    reconstruit ». Hors lecture (ready/paused/ended/idle), aucune source audible : un teardown
+    //    direct suffit, aucun fondu necessaire. `cancelAllSourcesAntiClick` annule aussi la source
+    //    PROGRAMMEE (gapless). `load` plus bas incremente `loadToken`, ce qui defuse en plus tout
+    //    decode encore en vol.
+    if (this.status === "playing") {
+      this.cancelAllSourcesAntiClick();
+    } else {
+      this.teardownSource();
+      this.teardownScheduled();
+    }
     this.clearPreload();
 
     // 3) Bascule contexte + decodeur, reconstruit le graphe dessus (volume reapplique).
