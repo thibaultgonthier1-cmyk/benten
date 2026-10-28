@@ -2,10 +2,35 @@
 
 export type LibraryView = "albums" | "tracks" | "artists";
 
+/** Sens de tri. Mappé côté repository vers le littéral SQL `ASC`/`DESC` (jamais interpolé brut). */
+export type SortDir = "asc" | "desc";
+
+/**
+ * Champs de tri acceptés : ÉNUMÉRATION FERMÉE (liste blanche). Chaque champ est mappé, côté
+ * repository, vers une expression de colonne sûre ; la chaîne brute n'atteint JAMAIS le SQL.
+ * Albums : `title|artist|created_at|duration` ; pistes : `title|artist|album|duration|track_no`.
+ * Un champ hors-liste (ou inconnu pour la vue) retombe sur le tri par défaut (`title`).
+ */
+export type SortField = "title" | "artist" | "album" | "created_at" | "duration" | "track_no";
+
+/** Filtres de bibliothèque, cumulables. Tout absent/faux = aucun filtre. */
+export interface LibraryFilter {
+  /** Ne garder que les favoris (jointure `favorites`). */
+  favoritesOnly?: boolean;
+  /** Ne garder que le sans-perte (`bit_depth IS NOT NULL`). */
+  losslessOnly?: boolean;
+}
+
 export interface LibraryQueryArgs {
   view: LibraryView;
   limit?: number;
   offset?: number;
+  /** Champ de tri (liste blanche) ; défaut `title`. */
+  sort?: SortField;
+  /** Sens de tri ; défaut `asc`. */
+  dir?: SortDir;
+  /** Filtres cumulables. */
+  filter?: LibraryFilter;
 }
 
 /** Arguments de `library:search` : terme libre + limite optionnelle. */

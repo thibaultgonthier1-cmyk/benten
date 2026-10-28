@@ -2,13 +2,23 @@ import type Database from "better-sqlite3";
 import type {
   AlbumRow,
   ArtistRow,
+  LibraryFilter,
   Page,
+  SortDir,
+  SortField,
   SourceRow,
   TrackInput,
   TrackRow,
 } from "../../shared/types";
 
 type Db = Database.Database;
+
+/** Options de tri/filtre partagées par `getAlbums`/`getAllTracks`. */
+export interface SortOpts {
+  sort?: SortField;
+  dir?: SortDir;
+  filter?: LibraryFilter;
+}
 
 const UNKNOWN_ARTIST = "Unknown Artist";
 const UNKNOWN_ALBUM = "Unknown Album";
@@ -53,24 +63,11 @@ function statements(db: Db) {
         bit_depth = excluded.bit_depth, playable = excluded.playable,
         art_key = excluded.art_key, mtime_ms = excluded.mtime_ms,
         size_bytes = excluded.size_bytes`),
-    albums: db.prepare(`
-      SELECT al.id, al.title, ar.name AS artist, al.art_key AS artKey,
-             COUNT(t.id) AS trackCount
-      FROM albums al
-      JOIN artists ar ON ar.id = al.artist_id
-      JOIN tracks t ON t.album_id = al.id
-      GROUP BY al.id
-      ORDER BY al.title COLLATE NOCASE, ar.name COLLATE NOCASE, al.id
-      LIMIT @limit OFFSET @offset`),
     tracksByAlbum: db.prepare(`
       SELECT ${TRACK_COLUMNS} FROM tracks t
       WHERE t.album_id = ?
       ORDER BY t.disc_no IS NULL, t.disc_no, t.track_no IS NULL, t.track_no,
                t.title COLLATE NOCASE, t.id`),
-    allTracks: db.prepare(`
-      SELECT ${TRACK_COLUMNS} FROM tracks t
-      ORDER BY t.title COLLATE NOCASE, t.id
-      LIMIT @limit OFFSET @offset`),
     searchTracks: db.prepare(`
       SELECT ${TRACK_COLUMNS} FROM tracks t
       WHERE t.title  COLLATE NOCASE LIKE @pat ESCAPE '\\'
@@ -108,6 +105,109 @@ function stmts(db: Db): ReturnType<typeof statements> {
     cache.set(db, s);
   }
   return s;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * TRI & FILTRE — anti-injection par LISTE BLANCHE.
+ *
+ * `sort` et `dir` ne sont JAMAIS interpolés bruts dans le SQL. Un champ de tri est une clé d'une
+ * énumération FERMÉE, mappée vers une expression de colonne qui est une CONSTANTE du code source ;
+ * `dir` est mappé vers le littéral `ASC`/`DESC`. Les fragments de filtre (`INNER JOIN favorites`,
+ * `WHERE ... bit_depth IS NOT NULL`) sont eux aussi des constantes. La SEULE partie dynamique des
+ * requêtes construites plus bas est donc ce vocabulaire fixe : aucune chaîne fournie par l'appelant
+ * n'atteint le SQL. Toute clé inconnue (y compris une tentative d'injection) retombe sur le défaut.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Tri des albums : clé (liste blanche) -> expression de colonne sûre. `duration` = somme des pistes. */
+const ALBUM_SORTS: Readonly<Record<string, string>> = {
+  title: "al.title COLLATE NOCASE",
+  artist: "ar.name COLLATE NOCASE",
+  created_at: "al.created_at",
+  duration: "SUM(t.duration_sec)",
+};
+
+/** Tri des pistes : clé (liste blanche) -> expression de colonne sûre. */
+const TRACK_SORTS: Readonly<Record<string, string>> = {
+  title: "t.title COLLATE NOCASE",
+  artist: "t.artist COLLATE NOCASE",
+  album: "t.album COLLATE NOCASE",
+  duration: "t.duration_sec",
+  track_no: "t.track_no",
+};
+
+/** Champ de tri par défaut (et repli pour toute clé hors-liste). */
+const DEFAULT_SORT = "title";
+
+/** Littéral SQL depuis `dir` : tout ce qui n'est pas `"desc"` donne `ASC` (défaut, jamais brut). */
+function dirLiteral(dir: SortDir | undefined): "ASC" | "DESC" {
+  return dir === "desc" ? "DESC" : "ASC";
+}
+
+/** Expression de tri PRISE DANS LA LISTE BLANCHE ; clé absente/inconnue -> défaut `title`. */
+function sortExpr(map: Readonly<Record<string, string>>, sort: SortField | undefined): string {
+  return (sort !== undefined && map[sort]) || map[DEFAULT_SORT]!;
+}
+
+/** Fragment de filtre : jointure favoris (restrictive) — constante, activée par booléen. */
+function favJoin(filter: LibraryFilter | undefined): string {
+  return filter?.favoritesOnly ? "INNER JOIN favorites f ON f.track_id = t.id" : "";
+}
+
+/** Fragment de filtre : sans-perte — constante, activée par booléen. */
+function losslessWhere(filter: LibraryFilter | undefined): string {
+  return filter?.losslessOnly ? "WHERE t.bit_depth IS NOT NULL" : "";
+}
+
+/**
+ * Cache de requêtes CONSTRUITES (tri/filtre) par texte SQL, par connexion. Comme le SQL n'est bâti
+ * qu'à partir du vocabulaire en liste blanche ci-dessus, l'ensemble des textes possibles est fini et
+ * borné : on prépare chaque variante une seule fois.
+ */
+const dynCache = new WeakMap<Db, Map<string, Database.Statement>>();
+function prepareCached(db: Db, sql: string): Database.Statement {
+  let m = dynCache.get(db);
+  if (!m) {
+    m = new Map();
+    dynCache.set(db, m);
+  }
+  let st = m.get(sql);
+  if (!st) {
+    st = db.prepare(sql);
+    m.set(sql, st);
+  }
+  return st;
+}
+
+/**
+ * Requête « albums ». Parties dynamiques = UNIQUEMENT des constantes en liste blanche (`order`,
+ * littéral `dir`, fragments de filtre) ; aucune chaîne de l'appelant n'y figure (anti-injection).
+ */
+function buildAlbumsQuery(opts: SortOpts): string {
+  const order = sortExpr(ALBUM_SORTS, opts.sort);
+  const dir = dirLiteral(opts.dir);
+  return `
+    SELECT al.id, al.title, ar.name AS artist, al.art_key AS artKey,
+           COUNT(t.id) AS trackCount
+    FROM albums al
+    JOIN artists ar ON ar.id = al.artist_id
+    JOIN tracks t ON t.album_id = al.id
+    ${favJoin(opts.filter)}
+    ${losslessWhere(opts.filter)}
+    GROUP BY al.id
+    ORDER BY ${order} ${dir}, al.id
+    LIMIT @limit OFFSET @offset`;
+}
+
+/** Requête « tracks ». Mêmes garanties anti-injection que `buildAlbumsQuery`. */
+function buildAllTracksQuery(opts: SortOpts): string {
+  const order = sortExpr(TRACK_SORTS, opts.sort);
+  const dir = dirLiteral(opts.dir);
+  return `
+    SELECT ${TRACK_COLUMNS} FROM tracks t
+    ${favJoin(opts.filter)}
+    ${losslessWhere(opts.filter)}
+    ORDER BY ${order} ${dir}, t.id
+    LIMIT @limit OFFSET @offset`;
 }
 
 /** Insère ou met à jour les pistes (idempotent sur `path`) dans une seule transaction. */
@@ -148,16 +248,27 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
   })(tracks);
 }
 
-export function getAlbums(db: Db, page: Page): AlbumRow[] {
-  return stmts(db).albums.all(page) as AlbumRow[];
+/**
+ * Albums paginés. `opts` (facultatif) applique un tri en liste blanche (`title|artist|created_at|
+ * duration`, défaut `title`), un sens (`asc|desc`, défaut `asc`) et des filtres cumulables
+ * (`favoritesOnly` via jointure `favorites`, `losslessOnly` via `bit_depth IS NOT NULL`). Les parties
+ * dynamiques du SQL sont exclusivement des constantes en liste blanche (voir `buildAlbumsQuery`).
+ */
+export function getAlbums(db: Db, page: Page, opts: SortOpts = {}): AlbumRow[] {
+  return prepareCached(db, buildAlbumsQuery(opts)).all(page) as AlbumRow[];
 }
 
 export function getTracksByAlbum(db: Db, albumId: number): TrackRow[] {
   return (stmts(db).tracksByAlbum.all(albumId) as RawTrack[]).map(toTrackRow);
 }
 
-export function getAllTracks(db: Db, page: Page): TrackRow[] {
-  return (stmts(db).allTracks.all(page) as RawTrack[]).map(toTrackRow);
+/**
+ * Pistes paginées. `opts` (facultatif) : tri en liste blanche (`title|artist|album|duration|
+ * track_no`, défaut `title`), sens (`asc|desc`, défaut `asc`) et filtres cumulables (`favoritesOnly`,
+ * `losslessOnly`). Mêmes garanties anti-injection que `getAlbums` (voir `buildAllTracksQuery`).
+ */
+export function getAllTracks(db: Db, page: Page, opts: SortOpts = {}): TrackRow[] {
+  return (prepareCached(db, buildAllTracksQuery(opts)).all(page) as RawTrack[]).map(toTrackRow);
 }
 
 /**

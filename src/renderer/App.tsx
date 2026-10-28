@@ -4,10 +4,17 @@ import { AudioEngine } from "./audio/engine";
 import { NativeDecoder } from "./audio/decoder";
 import { bindEngine, playerStore, usePlayer } from "./state/player";
 import { createControls } from "./components/controls";
-import { groupTracksToAlbums, type Album } from "./lib/library";
+import {
+  DEFAULT_SORT_FILTER,
+  groupTracksToAlbums,
+  sortFilterAlbums,
+  type Album,
+  type AlbumSortFilter,
+} from "./lib/library";
 import { makeThrottle } from "./lib/throttle";
 import type { TrackRow } from "../shared/types";
 import { LibraryGrid } from "./components/LibraryGrid";
+import { SortFilterBar } from "./components/SortFilterBar";
 import { SearchResults } from "./components/SearchResults";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
@@ -44,6 +51,7 @@ export function App(): JSX.Element {
   const controls = useMemo(() => createControls(engine, playerStore), [engine]);
 
   const [albums, setAlbums] = useState<Album[]>([]);
+  const [sortFilter, setSortFilter] = useState<AlbumSortFilter>(DEFAULT_SORT_FILTER);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TrackRow[]>([]);
@@ -163,6 +171,10 @@ export function App(): JSX.Element {
     setScanPath(KNOWN_LIBRARY);
     void runScan(KNOWN_LIBRARY);
   }, [scanning, runScan]);
+
+  // Tri + filtres appliqués côté vue (la SortFilterBar pilote la liste affichée). Même liste
+  // blanche que le repository `getAlbums` ; voir `sortFilterAlbums`.
+  const shownAlbums = useMemo(() => sortFilterAlbums(albums, sortFilter), [albums, sortFilter]);
 
   const empty = !loading && albums.length === 0;
   const searching = query.trim().length > 0;
@@ -299,10 +311,13 @@ export function App(): JSX.Element {
             <section className="section">
               <div className="section-head">
                 <h2>Albums</h2>
-                <span className="count">{loading ? "chargement…" : `${albums.length} albums`}</span>
+                <SortFilterBar value={sortFilter} onChange={setSortFilter} />
+                <span className="count">
+                  {loading ? "chargement…" : `${shownAlbums.length} albums`}
+                </span>
               </div>
               <LibraryGrid
-                albums={albums}
+                albums={shownAlbums}
                 scrollRef={mainRef}
                 playingAlbumId={currentAlbumId}
                 onPlay={playAlbum}

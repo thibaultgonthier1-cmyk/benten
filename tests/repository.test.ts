@@ -17,7 +17,7 @@ import {
   searchTracks,
   upsertTracks,
 } from "../src/main/library/repository";
-import type { TrackInput } from "../src/shared/types";
+import type { SortField, TrackInput } from "../src/shared/types";
 
 function track(over: Partial<TrackInput> & { path: string }): TrackInput {
   return {
@@ -215,6 +215,66 @@ describe("repository", () => {
       track({ path: "/l/3.flac", title: "match three", album: "ZZ" }),
     ]);
     expect(searchTracks(db, "match", { limit: 2, offset: 0 })).toHaveLength(2);
+  });
+
+  it("sorts albums by title NOCASE, asc then desc (whitelisted order)", () => {
+    upsertTracks(db, [
+      track({ path: "/o/b.flac", album: "b", albumArtist: "Band" }),
+      track({ path: "/o/a.flac", album: "A", albumArtist: "Band" }),
+      track({ path: "/o/c.flac", album: "c", albumArtist: "Band" }),
+    ]);
+    const asc = getAlbums(db, { limit: 50, offset: 0 }, { sort: "title", dir: "asc" });
+    expect(asc.map((a) => a.title)).toEqual(["A", "b", "c"]);
+    const desc = getAlbums(db, { limit: 50, offset: 0 }, { sort: "title", dir: "desc" });
+    expect(desc.map((a) => a.title)).toEqual(["c", "b", "A"]);
+  });
+
+  it("sorts albums by total duration (SUM of track durations)", () => {
+    upsertTracks(db, [
+      track({ path: "/dur/short.flac", album: "Short", albumArtist: "Band", durationSec: 100 }),
+      track({ path: "/dur/mid.flac", album: "Mid", albumArtist: "Band", durationSec: 200 }),
+      track({ path: "/dur/long1.flac", album: "Long", albumArtist: "Band", durationSec: 200 }),
+      track({ path: "/dur/long2.flac", album: "Long", albumArtist: "Band", durationSec: 250, trackNo: 2 }),
+    ]);
+    const asc = getAlbums(db, { limit: 50, offset: 0 }, { sort: "duration", dir: "asc" });
+    expect(asc.map((a) => a.title)).toEqual(["Short", "Mid", "Long"]);
+    const desc = getAlbums(db, { limit: 50, offset: 0 }, { sort: "duration", dir: "desc" });
+    expect(desc.map((a) => a.title)).toEqual(["Long", "Mid", "Short"]);
+  });
+
+  it("falls back to the default sort for an unknown/injection sort field (no throw, no injection)", () => {
+    upsertTracks(db, [
+      track({ path: "/x/b.flac", album: "b", albumArtist: "Band" }),
+      track({ path: "/x/a.flac", album: "A", albumArtist: "Band" }),
+      track({ path: "/x/c.flac", album: "c", albumArtist: "Band" }),
+    ]);
+    const evil = "al.title); DROP TABLE albums;--" as unknown as SortField;
+    const rows = getAlbums(db, { limit: 50, offset: 0 }, { sort: evil, dir: "asc" });
+    // Retombe sur le tri par défaut (title asc), sans lever ni exécuter le DROP.
+    expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+    // La table est intacte : une requête ultérieure renvoie toujours les 3 albums.
+    expect(getAlbums(db, { limit: 50, offset: 0 })).toHaveLength(3);
+  });
+
+  it("filter.losslessOnly keeps only albums/tracks with a non-null bit_depth", () => {
+    upsertTracks(db, [
+      track({ path: "/ll/flac.flac", album: "Lossless", albumArtist: "Band", bitDepth: 16 }),
+      track({ path: "/ll/mp3.mp3", album: "Lossy", albumArtist: "Band", bitDepth: null, format: "mp3" }),
+    ]);
+    const albums = getAlbums(db, { limit: 50, offset: 0 }, { filter: { losslessOnly: true } });
+    expect(albums.map((a) => a.title)).toEqual(["Lossless"]);
+    const tracks = getAllTracks(db, { limit: 50, offset: 0 }, { filter: { losslessOnly: true } });
+    expect(tracks.map((t) => t.path)).toEqual(["/ll/flac.flac"]);
+  });
+
+  it("filter.favoritesOnly keeps only favorited albums/tracks (favorites inserted via raw SQL)", () => {
+    upsertTracks(db, records());
+    const fav = getTrackByPath(db, "/m/a/01.flac")!;
+    db.prepare("INSERT INTO favorites (track_id, added_at) VALUES (?, ?)").run(fav.id, Date.now());
+    const albums = getAlbums(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } });
+    expect(albums.map((a) => a.title)).toEqual(["Album X"]);
+    const tracks = getAllTracks(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } });
+    expect(tracks.map((t) => t.path)).toEqual(["/m/a/01.flac"]);
   });
 
   it("migrates by user_version and is reopenable", () => {

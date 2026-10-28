@@ -426,6 +426,69 @@ body {
   text-transform: uppercase;
 }
 
+/* --- Barre de tri / filtres (SortFilterBar) --- */
+.sortbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-self: center;
+}
+.sortsel {
+  display: inline-flex;
+}
+.sortsel select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--ink-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239b96a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 12px;
+  border: 1px solid var(--line);
+  color: var(--paper);
+  border-radius: 999px;
+  padding: 8px 32px 8px 14px;
+  font-family: var(--ui);
+  font-size: 12.5px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.sortsel select:hover,
+.sortsel select:focus-visible {
+  border-color: var(--sumi-dim);
+}
+.sortsel select option {
+  background: var(--ink-2);
+  color: var(--paper);
+}
+.sortbar .chip {
+  padding: 8px 13px;
+}
+.sortbar .chip svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.chip.on {
+  color: var(--paper);
+  border-color: var(--magenta);
+  background: var(--magenta-soft);
+}
+.chip.on svg {
+  color: var(--magenta);
+}
+.sortbar .chip:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 2px;
+}
+
 /* --- Grille / carte album --- */
 .grid {
   display: grid;

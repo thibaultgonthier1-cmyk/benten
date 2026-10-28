@@ -1,4 +1,4 @@
-import type { TrackRow } from "../../shared/types";
+import type { SortDir, TrackRow } from "../../shared/types";
 
 /** Album agrege cote Renderer : metadonnees + pistes ordonnees (pour `setQueue`). */
 export interface Album {
@@ -8,6 +8,75 @@ export interface Album {
   /** Cle de pochette (premiere piste qui en a une), `null` sinon. */
   artKey: string | null;
   tracks: readonly TrackRow[];
+}
+
+/** Champs de tri proposés sur la vue albums (sous-ensemble client de la liste blanche backend). */
+export type AlbumSortField = "title" | "artist" | "duration";
+
+/** État de tri + filtres piloté par la `SortFilterBar`. */
+export interface AlbumSortFilter {
+  sort: AlbumSortField;
+  dir: SortDir;
+  favoritesOnly: boolean;
+  losslessOnly: boolean;
+}
+
+/** État par défaut : tri par titre croissant, aucun filtre. */
+export const DEFAULT_SORT_FILTER: AlbumSortFilter = {
+  sort: "title",
+  dir: "asc",
+  favoritesOnly: false,
+  losslessOnly: false,
+};
+
+/** Durée totale d'un album = somme des durées de ses pistes. */
+function albumDuration(a: Album): number {
+  return a.tracks.reduce((sum, t) => sum + (Number.isFinite(t.durationSec) ? t.durationSec : 0), 0);
+}
+
+/** Album « sans perte » : au moins une piste avec profondeur de bits connue (`bitDepth != null`). */
+function albumIsLossless(a: Album): boolean {
+  return a.tracks.some((t) => t.bitDepth != null);
+}
+
+/**
+ * Album « favori » : au moins une de ses pistes l'est. Le drapeau `favorite` sur la piste arrive en
+ * Task 9 ; tant qu'il est absent, ce prédicat reste faux — le filtre est câblé de bout en bout mais
+ * ne retient rien pour l'instant (miroir côté vue de la jointure `favorites` du repository).
+ */
+function albumIsFavorite(a: Album): boolean {
+  return a.tracks.some((t) => (t as TrackRow & { favorite?: boolean }).favorite === true);
+}
+
+/**
+ * Applique tri + filtres à une liste d'albums déjà regroupée (pure, stable, n'altère pas l'entrée).
+ * Reflète côté vue la même liste blanche que `getAlbums` du repository : tri `title|artist|duration`,
+ * sens `asc|desc`, filtres `favoritesOnly`/`losslessOnly`. Départage stable par titre puis id.
+ */
+export function sortFilterAlbums(albums: readonly Album[], sf: AlbumSortFilter): Album[] {
+  const filtered = albums.filter((a) => {
+    if (sf.losslessOnly && !albumIsLossless(a)) return false;
+    if (sf.favoritesOnly && !albumIsFavorite(a)) return false;
+    return true;
+  });
+  const dirMul = sf.dir === "desc" ? -1 : 1;
+  const compare = (a: Album, b: Album): number => {
+    let base: number;
+    switch (sf.sort) {
+      case "artist":
+        base = a.artist.localeCompare(b.artist, undefined, { sensitivity: "base" });
+        break;
+      case "duration":
+        base = albumDuration(a) - albumDuration(b);
+        break;
+      default:
+        base = a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    }
+    if (base !== 0) return base * dirMul;
+    const byTitle = a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+    return byTitle !== 0 ? byTitle : a.id - b.id;
+  };
+  return [...filtered].sort(compare);
 }
 
 /**

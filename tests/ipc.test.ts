@@ -18,12 +18,14 @@ import {
   isPathWithinRoots,
   isTrustedUrl,
   normalizePage,
+  queryLibrary,
   readAudioFile,
   registerIpc,
   validateScanPaths,
 } from "../src/main/ipc";
 import { openDb } from "../src/main/library/db";
-import { addSource, getSources } from "../src/main/library/repository";
+import { addSource, getSources, upsertTracks } from "../src/main/library/repository";
+import type { AlbumRow, SortField, TrackInput, TrackRow } from "../src/shared/types";
 
 const FIX = join(__dirname, "fixtures");
 // ipc.ts resout l'UI empaquetee relativement a son propre dossier (src/main sous vitest).
@@ -313,6 +315,70 @@ describe("isPathWithinRoots", () => {
   it("utilise le separateur de la plateforme pour la frontiere", () => {
     // Sanity : la frontiere s'appuie sur path.sep.
     expect(typeof sep).toBe("string");
+  });
+});
+
+describe("queryLibrary sort / filter", () => {
+  let dir: string;
+  let db: Database.Database;
+  const mk = (over: Partial<TrackInput> & { path: string }): TrackInput => ({
+    title: "T",
+    artist: "Artist A",
+    album: "Album",
+    albumArtist: "Band",
+    trackNo: 1,
+    discNo: null,
+    durationSec: 180,
+    format: "flac",
+    sampleRate: 44100,
+    bitDepth: 16,
+    playable: true,
+    artKey: null,
+    mtimeMs: null,
+    sizeBytes: null,
+    ...over,
+  });
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "benten-q-"));
+    db = openDb(join(dir, "q.db"));
+    upsertTracks(db, [
+      mk({ path: "/q/b.flac", album: "b" }),
+      mk({ path: "/q/a.flac", album: "A" }),
+      mk({ path: "/q/c.flac", album: "c" }),
+    ]);
+  });
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("accepte sort/dir et ordonne les albums en conséquence", () => {
+    const desc = queryLibrary(db, { view: "albums", sort: "title", dir: "desc" }).rows as AlbumRow[];
+    expect(desc.map((a) => a.title)).toEqual(["c", "b", "A"]);
+    const asc = queryLibrary(db, { view: "albums", sort: "title", dir: "asc" }).rows as AlbumRow[];
+    expect(asc.map((a) => a.title)).toEqual(["A", "b", "c"]);
+  });
+
+  it("normalise un sort inconnu vers le défaut (aucune erreur, ordre par défaut)", () => {
+    const rows = queryLibrary(db, { view: "albums", sort: "bogus" as unknown as SortField })
+      .rows as AlbumRow[];
+    expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+  });
+
+  it("empêche une chaîne d'injection dans sort d'atteindre le SQL (repli, table intacte)", () => {
+    const injection = "al.title); DROP TABLE albums;--" as unknown as SortField;
+    const rows = queryLibrary(db, { view: "albums", sort: injection, dir: "asc" }).rows as AlbumRow[];
+    expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+    // La table existe toujours : la requête par défaut renvoie les 3 albums.
+    expect(queryLibrary(db, { view: "albums" }).rows).toHaveLength(3);
+  });
+
+  it("accepte un argument filter (losslessOnly / favoritesOnly) sans erreur", () => {
+    const lossless = queryLibrary(db, { view: "tracks", filter: { losslessOnly: true } })
+      .rows as TrackRow[];
+    expect(lossless).toHaveLength(3);
+    // Aucun favori inséré -> la vue favoris est vide (donnée arrive en Task 9).
+    expect(queryLibrary(db, { view: "albums", filter: { favoritesOnly: true } }).rows).toHaveLength(0);
   });
 });
 

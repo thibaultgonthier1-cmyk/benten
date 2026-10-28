@@ -7,12 +7,15 @@ import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electro
 import { CHANNELS } from "../shared/channels";
 import type {
   AudioDeviceInfo,
+  LibraryFilter,
   LibraryQueryArgs,
   LibraryQueryResult,
   LibraryView,
   Page,
   ScanSummary,
   SearchArgs,
+  SortDir,
+  SortField,
   SourceRow,
   TrackRow,
 } from "../shared/types";
@@ -26,6 +29,7 @@ import {
   getSources,
   removeSource,
   searchTracks,
+  type SortOpts,
 } from "./library/repository";
 
 const DEFAULT_LIMIT = 200;
@@ -196,16 +200,39 @@ export function normalizePage(args: Partial<Pick<LibraryQueryArgs, "limit" | "of
   };
 }
 
+/**
+ * Normalise tri/filtre côté IPC AVANT le repository. `dir` n'est accepté que parmi `asc|desc`
+ * (sinon ignoré -> défaut) ; `sort` n'est transmis que s'il s'agit d'une chaîne, et c'est la LISTE
+ * BLANCHE du repository qui garantit qu'une valeur inconnue (ou une tentative d'injection) retombe
+ * sur le défaut sans jamais atteindre le SQL. `filter` est réduit à des booléens stricts.
+ */
+export function normalizeSortOpts(args: {
+  sort?: unknown;
+  dir?: unknown;
+  filter?: unknown;
+}): SortOpts {
+  const sort = typeof args.sort === "string" ? (args.sort as SortField) : undefined;
+  const dir: SortDir | undefined =
+    args.dir === "asc" || args.dir === "desc" ? args.dir : undefined;
+  let filter: LibraryFilter | undefined;
+  if (typeof args.filter === "object" && args.filter !== null) {
+    const f = args.filter as Record<string, unknown>;
+    filter = { favoritesOnly: f["favoritesOnly"] === true, losslessOnly: f["losslessOnly"] === true };
+  }
+  return { sort, dir, filter };
+}
+
 export function queryLibrary(db: Database.Database, args: unknown): LibraryQueryResult {
   if (typeof args !== "object" || args === null) throw new Error("library:query: invalid args");
-  const { view, ...rest } = args as Partial<LibraryQueryArgs>;
+  const { view, sort, dir, filter, ...rest } = args as Partial<LibraryQueryArgs>;
   if (typeof view !== "string" || !VIEWS.has(view)) throw new Error("library:query: invalid view");
   const page = normalizePage(rest);
+  const opts = normalizeSortOpts({ sort, dir, filter });
   switch (view) {
     case "albums":
-      return { view, rows: getAlbums(db, page) };
+      return { view, rows: getAlbums(db, page, opts) };
     case "tracks":
-      return { view, rows: getAllTracks(db, page) };
+      return { view, rows: getAllTracks(db, page, opts) };
     default:
       return { view: "artists", rows: getArtists(db).slice(page.offset, page.offset + page.limit) };
   }
