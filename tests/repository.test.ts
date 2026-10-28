@@ -91,6 +91,44 @@ describe("repository", () => {
     expect(artists[0]!.trackCount).toBe(2);
   });
 
+  it("groups a compilation under its albumArtist (one album, track artists differ)", () => {
+    upsertTracks(db, [
+      track({ path: "/c/01.flac", title: "T1", artist: "Artist One", album: "Comp", albumArtist: "Various Artists", trackNo: 1 }),
+      track({ path: "/c/02.flac", title: "T2", artist: "Artist Two", album: "Comp", albumArtist: "Various Artists", trackNo: 2 }),
+    ]);
+    const albums = getAlbums(db, { limit: 50, offset: 0 });
+    const comp = albums.filter((a) => a.title === "Comp");
+    expect(comp).toHaveLength(1);
+    expect(comp[0]!.trackCount).toBe(2);
+    expect(comp[0]!.artist).toBe("Various Artists");
+  });
+
+  it("sorts an album's tracks by disc then track (disc 1 before disc 2)", () => {
+    upsertTracks(db, [
+      track({ path: "/d/d2t1.flac", title: "Disc2", album: "Multi", albumArtist: "Band", discNo: 2, trackNo: 1 }),
+      track({ path: "/d/d1t1.flac", title: "Disc1", album: "Multi", albumArtist: "Band", discNo: 1, trackNo: 1 }),
+    ]);
+    const multi = getAlbums(db, { limit: 50, offset: 0 }).find((a) => a.title === "Multi")!;
+    const rows = getTracksByAlbum(db, multi.id);
+    expect(rows.map((r) => r.title)).toEqual(["Disc1", "Disc2"]);
+    expect(rows.map((r) => r.discNo)).toEqual([1, 2]);
+  });
+
+  it("round-trips albumArtist/discNo (not undefined) through getAllTracks/getTracksByAlbum", () => {
+    upsertTracks(db, [
+      track({ path: "/r/01.flac", title: "Round", artist: "Track Artist", album: "RT", albumArtist: "Album Artist", discNo: 3, trackNo: 7 }),
+    ]);
+    const all = getAllTracks(db, { limit: 10, offset: 0 });
+    const row = all.find((t) => t.path === "/r/01.flac")!;
+    expect(row.albumArtist).toBe("Album Artist");
+    expect(row.discNo).toBe(3);
+    expect(row.artist).toBe("Track Artist");
+    const album = getAlbums(db, { limit: 50, offset: 0 }).find((a) => a.title === "RT")!;
+    const byAlbum = getTracksByAlbum(db, album.id)[0]!;
+    expect(byAlbum.albumArtist).toBe("Album Artist");
+    expect(byAlbum.discNo).toBe(3);
+  });
+
   it("migrates by user_version and is reopenable", () => {
     expect(db.pragma("user_version", { simple: true })).toBe(2);
     upsertTracks(db, records());

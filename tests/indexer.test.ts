@@ -26,9 +26,10 @@ describe("indexLibrary", () => {
 
   it("indexe les fichiers lisibles et compte .m4p + fichier corrompu en skipped", async () => {
     const res = await indexLibrary(db, [FIX]);
-    // 6 (library) + 1 (untagged) lisibles ; 1 .m4p + 1 flac tronque ignores.
-    expect(res).toEqual({ added: 7, skipped: 2 });
-    expect(count()).toBe(7);
+    // 6 (library) + 1 (untagged) + 1 (compilation) + 1 (multidisc) lisibles ;
+    // 1 .m4p + 1 flac tronque ignores.
+    expect(res).toEqual({ added: 9, skipped: 2 });
+    expect(count()).toBe(9);
     // Aucune piste illisible n'est inseree.
     expect(getAllTracks(db, { limit: 100, offset: 0 }).every((t) => t.playable)).toBe(true);
   });
@@ -38,7 +39,7 @@ describe("indexLibrary", () => {
     const again = await indexLibrary(db, [FIX]);
     expect(again.added).toBe(0);
     expect(again.skipped).toBe(2);
-    expect(count()).toBe(7);
+    expect(count()).toBe(9);
   });
 
   it("emet la progression au moins une fois, avec un dernier etat coherent", async () => {
@@ -46,7 +47,7 @@ describe("indexLibrary", () => {
     const res = await indexLibrary(db, [FIX], (p) => events.push({ ...p }));
     expect(events.length).toBeGreaterThanOrEqual(1);
     const last = events[events.length - 1]!;
-    expect(last.scanned).toBe(9);
+    expect(last.scanned).toBe(11);
     expect(last.added).toBe(res.added);
     expect(last.skipped).toBe(res.skipped);
     // Monotone.

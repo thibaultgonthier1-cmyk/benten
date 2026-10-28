@@ -70,4 +70,30 @@ describe("readMetadata", () => {
     const t = await readMetadata(join(FIX, "nope", "Nobody", "Nothing", "01 - Rien.flac"));
     expect(t.playable).toBe(false);
   });
+
+  // v2 : albumArtist extrait du tag ALBUMARTIST. Discriminant : l'artiste d'album
+  // (« 2ndMoonx ») differe de l'artiste de piste (« 2ndMoonx, ANMANE & HERMI »).
+  it("extrait albumArtist du tag (distinct de l'artiste de piste)", async () => {
+    const t = await readMetadata(join(FIX, "compilation", "01 - PALADIN.flac"));
+    expect(t.albumArtist).toBe("2ndMoonx");
+    expect(t.artist).toBe("2ndMoonx, ANMANE & HERMI");
+    expect(t.title).toBe("PALADIN");
+    expect(t.playable).toBe(true);
+  });
+
+  // v2 : discNo extrait du tag DISCNUMBER (ici disque 2 d'une compilation multi-disque).
+  it("extrait discNo du tag DISCNUMBER", async () => {
+    const t = await readMetadata(join(FIX, "multidisc", "03 - Gimme More (Remastered).flac"));
+    expect(t.discNo).toBe(2);
+    expect(t.albumArtist).toBe("Britney Spears");
+    expect(t.title).toBe("Gimme More (Remastered)");
+    expect(t.playable).toBe(true);
+  });
+
+  // Repli null : un FLAC sans ALBUMARTIST/DISCNUMBER donne albumArtist/discNo null.
+  it("replie albumArtist/discNo sur null quand les tags manquent", async () => {
+    const t = await readMetadata(join(FIX, "untagged", "Artiste X", "Album Y", "03 - Titre.flac"));
+    expect(t.albumArtist).toBeNull();
+    expect(t.discNo).toBeNull();
+  });
 });

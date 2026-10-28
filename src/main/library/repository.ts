@@ -13,8 +13,9 @@ const UNKNOWN_ARTIST = "Unknown Artist";
 const UNKNOWN_ALBUM = "Unknown Album";
 
 const TRACK_COLUMNS = `
-  t.id, t.path, t.title, t.artist, t.album, t.album_id AS albumId,
-  t.track_no AS trackNo, t.duration_sec AS durationSec, t.format,
+  t.id, t.path, t.title, t.artist, t.album, t.album_artist AS albumArtist,
+  t.album_id AS albumId, t.track_no AS trackNo, t.disc_no AS discNo,
+  t.duration_sec AS durationSec, t.format,
   t.sample_rate AS sampleRate, t.bit_depth AS bitDepth, t.playable,
   t.art_key AS artKey`;
 
@@ -29,20 +30,22 @@ function statements(db: Db) {
   return {
     insertArtist: db.prepare("INSERT OR IGNORE INTO artists (name) VALUES (?)"),
     artistId: db.prepare("SELECT id FROM artists WHERE name = ?").pluck(),
-    insertAlbum: db.prepare("INSERT OR IGNORE INTO albums (title, artist_id) VALUES (?, ?)"),
+    insertAlbum: db.prepare("INSERT OR IGNORE INTO albums (title, artist_id, created_at) VALUES (?, ?, ?)"),
     albumId: db.prepare("SELECT id FROM albums WHERE title = ? AND artist_id = ?").pluck(),
     setAlbumArt: db.prepare("UPDATE albums SET art_key = ? WHERE id = ? AND art_key IS NULL"),
     upsertTrack: db.prepare(`
       INSERT INTO tracks
-        (path, title, artist, album, artist_id, album_id, track_no, duration_sec,
-         format, sample_rate, bit_depth, playable, art_key)
+        (path, title, artist, album, album_artist, artist_id, album_id, track_no,
+         disc_no, duration_sec, format, sample_rate, bit_depth, playable, art_key)
       VALUES
-        (@path, @title, @artist, @album, @artistId, @albumId, @trackNo, @durationSec,
-         @format, @sampleRate, @bitDepth, @playable, @artKey)
+        (@path, @title, @artist, @album, @albumArtist, @artistId, @albumId, @trackNo,
+         @discNo, @durationSec, @format, @sampleRate, @bitDepth, @playable, @artKey)
       ON CONFLICT(path) DO UPDATE SET
         title = excluded.title, artist = excluded.artist, album = excluded.album,
+        album_artist = excluded.album_artist,
         artist_id = excluded.artist_id, album_id = excluded.album_id,
-        track_no = excluded.track_no, duration_sec = excluded.duration_sec,
+        track_no = excluded.track_no, disc_no = excluded.disc_no,
+        duration_sec = excluded.duration_sec,
         format = excluded.format, sample_rate = excluded.sample_rate,
         bit_depth = excluded.bit_depth, playable = excluded.playable,
         art_key = excluded.art_key`),
@@ -58,7 +61,8 @@ function statements(db: Db) {
     tracksByAlbum: db.prepare(`
       SELECT ${TRACK_COLUMNS} FROM tracks t
       WHERE t.album_id = ?
-      ORDER BY t.track_no IS NULL, t.track_no, t.title COLLATE NOCASE, t.id`),
+      ORDER BY t.disc_no IS NULL, t.disc_no, t.track_no IS NULL, t.track_no,
+               t.title COLLATE NOCASE, t.id`),
     allTracks: db.prepare(`
       SELECT ${TRACK_COLUMNS} FROM tracks t
       ORDER BY t.title COLLATE NOCASE, t.id
@@ -90,19 +94,24 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
     for (const t of batch) {
       const artist = t.artist.trim() || UNKNOWN_ARTIST;
       const album = t.album.trim() || UNKNOWN_ALBUM;
-      s.insertArtist.run(artist);
-      const artistId = s.artistId.get(artist) as number;
-      s.insertAlbum.run(album, artistId);
-      const albumId = s.albumId.get(album, artistId) as number;
+      // L'artiste d'album regroupe les pistes : COALESCE(NULLIF(TRIM(albumArtist),''), artist).
+      // Une piste de compilation est donc filee sous l'artiste d'album, pas son artiste de piste.
+      const albumArtistName = (t.albumArtist && t.albumArtist.trim()) || artist;
+      s.insertArtist.run(albumArtistName);
+      const albumArtistId = s.artistId.get(albumArtistName) as number;
+      s.insertAlbum.run(album, albumArtistId, Date.now());
+      const albumId = s.albumId.get(album, albumArtistId) as number;
       if (t.artKey) s.setAlbumArt.run(t.artKey, albumId);
       s.upsertTrack.run({
         path: t.path,
         title: t.title,
         artist,
         album,
-        artistId,
+        albumArtist: t.albumArtist,
+        artistId: albumArtistId,
         albumId,
         trackNo: t.trackNo,
+        discNo: t.discNo,
         durationSec: t.durationSec,
         format: t.format,
         sampleRate: t.sampleRate,
