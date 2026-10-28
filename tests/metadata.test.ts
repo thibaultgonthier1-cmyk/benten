@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { readMetadata } from "../src/main/library/metadata";
 
 const FIX = join(__dirname, "fixtures");
@@ -18,11 +18,24 @@ describe("readMetadata", () => {
     expect(t.artKey).toBeNull();
   });
 
-  it("derive titre/artiste/album/trackNo des tags", async () => {
+  it("derive titre/artiste/album/trackNo des tags (valeurs exactes)", async () => {
     const t = await readMetadata(TAGGED);
-    expect(t.artist.length).toBeGreaterThan(0);
-    expect(t.album.length).toBeGreaterThan(0);
+    expect(t.title).toBe("Pardon");
+    expect(t.artist).toBe("Ridsa");
+    expect(t.album).toBe("Tranquille");
     expect(t.trackNo).toBe(13);
+  });
+
+  // Discriminant : le tag (« *NSYNC ») differe du dossier (« NSYNC »). Si la lecture
+  // des tags etait cassee et que le repli sur le chemin gagnait, ce test echouerait.
+  it("le tag gagne sur le dossier quand les deux different", async () => {
+    const p = join(FIX, "library", "NSYNC", "No Strings Attached", "01 - Bye Bye Bye.flac");
+    expect(basename(dirname(dirname(p)))).toBe("NSYNC");
+    const t = await readMetadata(p);
+    expect(t.artist).toBe("*NSYNC");
+    expect(t.title).toBe("Bye Bye Bye");
+    expect(t.album).toBe("No Strings Attached");
+    expect(t.trackNo).toBe(1);
   });
 
   it("replie sur l'arborescence Artiste/Album/NN - Titre quand les tags manquent", async () => {
