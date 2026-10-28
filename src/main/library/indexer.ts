@@ -1,8 +1,9 @@
+import { promises as fs } from "node:fs";
 import type Database from "better-sqlite3";
 import type { ScanSummary, TrackInput } from "../../shared/types";
 import { getOrCreateArt } from "./artcache";
 import { readMetadata as defaultReadMetadata } from "./metadata";
-import { upsertTracks } from "./repository";
+import { getTrackStat, upsertTracks } from "./repository";
 import { AUDIO_EXTENSIONS, scanAudioFiles } from "./scanner";
 
 type Db = Database.Database;
@@ -30,6 +31,8 @@ export interface IndexOptions {
   readMetadata?: (path: string) => Promise<TrackInput>;
   /** Extraction/cache de pochette (injectable pour les tests) ; defaut : `getOrCreateArt`. */
   getArt?: (path: string) => Promise<string | null>;
+  /** Stat du fichier (injectable pour les tests) ; defaut : `fs.promises.stat`. */
+  stat?: (path: string) => Promise<{ mtimeMs: number; size: number }>;
   concurrency?: number;
   batchSize?: number;
 }
@@ -66,6 +69,7 @@ export async function indexLibrary(
 ): Promise<IndexResult> {
   const read = options.readMetadata ?? defaultReadMetadata;
   const getArt = options.getArt ?? ((path: string) => getOrCreateArt({ path }));
+  const stat = options.stat ?? ((path: string) => fs.stat(path));
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? DEFAULT_CONCURRENCY));
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? DEFAULT_BATCH_SIZE));
 
@@ -111,12 +115,38 @@ export async function indexLibrary(
           stats.skipped++;
           continue;
         }
-        // Une pochette manquante ou en erreur n'empeche jamais d'indexer la piste.
+        // Stat du fichier pour l'indexation incrementale. mtimeMs est arrondi : la
+        // colonne est INTEGER et la comparaison de saut doit porter sur la meme valeur.
+        let mtimeMs: number | null = null;
+        let sizeBytes: number | null = null;
         try {
-          track = { ...track, artKey: await getArt(track.path) };
+          const st = await stat(track.path);
+          mtimeMs = Math.round(st.mtimeMs);
+          sizeBytes = st.size;
         } catch {
-          track = { ...track, artKey: null };
+          // Stat indisponible : on laisse null (la pochette sera (re)lue).
         }
+        // Saut de pochette : si la piste existe deja avec un art_key et un mtime/size
+        // identiques, on reutilise la cle sans rappeler getArt (fix pochette).
+        const prev = getTrackStat(db, track.path);
+        let artKey: string | null;
+        if (
+          prev !== undefined &&
+          prev.artKey !== null &&
+          mtimeMs !== null &&
+          prev.mtimeMs === mtimeMs &&
+          prev.sizeBytes === sizeBytes
+        ) {
+          artKey = prev.artKey;
+        } else {
+          // Une pochette manquante ou en erreur n'empeche jamais d'indexer la piste.
+          try {
+            artKey = await getArt(track.path);
+          } catch {
+            artKey = null;
+          }
+        }
+        track = { ...track, artKey, mtimeMs, sizeBytes };
         buffer.push(track);
         if (buffer.length >= batchSize) flush();
       }

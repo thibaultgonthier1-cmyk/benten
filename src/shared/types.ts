@@ -32,6 +32,10 @@ export interface TrackRow {
   playable: boolean;
   /** Clé de la pochette dans le cache d'art ; `null` si aucune. */
   artKey: string | null;
+  /** mtime du fichier en millisecondes (indexation incrémentale) ; `null` si inconnu. */
+  mtimeMs: number | null;
+  /** Taille du fichier en octets (indexation incrémentale) ; `null` si inconnue. */
+  sizeBytes: number | null;
 }
 
 /** Piste à insérer / mettre à jour (clé naturelle : `path`). */

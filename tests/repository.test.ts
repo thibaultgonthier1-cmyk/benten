@@ -8,7 +8,9 @@ import {
   getAlbums,
   getAllTracks,
   getArtists,
+  getTrackByPath,
   getTracksByAlbum,
+  removeTracks,
   upsertTracks,
 } from "../src/main/library/repository";
 import type { TrackInput } from "../src/shared/types";
@@ -27,6 +29,8 @@ function track(over: Partial<TrackInput> & { path: string }): TrackInput {
     bitDepth: 16,
     playable: true,
     artKey: null,
+    mtimeMs: null,
+    sizeBytes: null,
     ...over,
   };
 }
@@ -127,6 +131,26 @@ describe("repository", () => {
     const byAlbum = getTracksByAlbum(db, album.id)[0]!;
     expect(byAlbum.albumArtist).toBe("Album Artist");
     expect(byAlbum.discNo).toBe(3);
+  });
+
+  it("removeTracks retire la piste, purge album/artiste vides, cascade les favoris et renvoie le compte", () => {
+    upsertTracks(db, records());
+    const target = getTrackByPath(db, "/m/b/01.mp3")!;
+    expect(target).toBeDefined();
+    // Un favori pointe cette piste : il doit disparaitre en cascade.
+    db.prepare("INSERT INTO favorites (track_id, added_at) VALUES (?, ?)").run(target.id, Date.now());
+
+    const removed = removeTracks(db, ["/m/b/01.mp3"]);
+    expect(removed).toBe(1);
+    expect(getTrackByPath(db, "/m/b/01.mp3")).toBeUndefined();
+
+    // Album Y / Artist B n'etaient references que par cette piste -> purges.
+    expect(getAlbums(db, { limit: 50, offset: 0 }).map((a) => a.title)).toEqual(["Album X"]);
+    expect(getArtists(db).map((a) => a.name)).toEqual(["Artist A"]);
+    expect(db.prepare("SELECT COUNT(*) FROM favorites").pluck().get()).toBe(0);
+
+    // Album X / Artist A restent references par deux pistes -> conserves.
+    expect(getAllTracks(db, { limit: 100, offset: 0 })).toHaveLength(2);
   });
 
   it("migrates by user_version and is reopenable", () => {

@@ -76,6 +76,8 @@ export async function readMetadata(path: string): Promise<TrackInput> {
     bitDepth: null,
     playable: false,
     artKey: null,
+    mtimeMs: null,
+    sizeBytes: null,
   };
 
   if (DRM_EXTENSIONS.has(ext)) return unplayable;
@@ -100,6 +102,8 @@ export async function readMetadata(path: string): Promise<TrackInput> {
       bitDepth: format.bitsPerSample ?? null,
       playable: true,
       artKey: null,
+      mtimeMs: null,
+      sizeBytes: null,
     };
   } catch {
     return unplayable;

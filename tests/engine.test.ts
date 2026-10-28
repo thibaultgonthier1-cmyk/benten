@@ -99,6 +99,8 @@ const track = (over: Partial<TrackRow> = {}): TrackRow => ({
   bitDepth: 24,
   playable: true,
   artKey: null,
+  mtimeMs: null,
+  sizeBytes: null,
   ...over,
 });
 

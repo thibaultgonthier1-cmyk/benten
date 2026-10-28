@@ -17,7 +17,7 @@ const TRACK_COLUMNS = `
   t.album_id AS albumId, t.track_no AS trackNo, t.disc_no AS discNo,
   t.duration_sec AS durationSec, t.format,
   t.sample_rate AS sampleRate, t.bit_depth AS bitDepth, t.playable,
-  t.art_key AS artKey`;
+  t.art_key AS artKey, t.mtime_ms AS mtimeMs, t.size_bytes AS sizeBytes`;
 
 interface RawTrack extends Omit<TrackRow, "playable"> {
   playable: number;
@@ -36,10 +36,12 @@ function statements(db: Db) {
     upsertTrack: db.prepare(`
       INSERT INTO tracks
         (path, title, artist, album, album_artist, artist_id, album_id, track_no,
-         disc_no, duration_sec, format, sample_rate, bit_depth, playable, art_key)
+         disc_no, duration_sec, format, sample_rate, bit_depth, playable, art_key,
+         mtime_ms, size_bytes)
       VALUES
         (@path, @title, @artist, @album, @albumArtist, @artistId, @albumId, @trackNo,
-         @discNo, @durationSec, @format, @sampleRate, @bitDepth, @playable, @artKey)
+         @discNo, @durationSec, @format, @sampleRate, @bitDepth, @playable, @artKey,
+         @mtimeMs, @sizeBytes)
       ON CONFLICT(path) DO UPDATE SET
         title = excluded.title, artist = excluded.artist, album = excluded.album,
         album_artist = excluded.album_artist,
@@ -48,7 +50,8 @@ function statements(db: Db) {
         duration_sec = excluded.duration_sec,
         format = excluded.format, sample_rate = excluded.sample_rate,
         bit_depth = excluded.bit_depth, playable = excluded.playable,
-        art_key = excluded.art_key`),
+        art_key = excluded.art_key, mtime_ms = excluded.mtime_ms,
+        size_bytes = excluded.size_bytes`),
     albums: db.prepare(`
       SELECT al.id, al.title, ar.name AS artist, al.art_key AS artKey,
              COUNT(t.id) AS trackCount
@@ -74,6 +77,15 @@ function statements(db: Db) {
       JOIN tracks t ON t.artist_id = ar.id
       GROUP BY ar.id
       ORDER BY ar.name COLLATE NOCASE, ar.id`),
+    trackByPath: db.prepare(`SELECT ${TRACK_COLUMNS} FROM tracks t WHERE t.path = ?`),
+    trackStat: db.prepare(
+      "SELECT mtime_ms AS mtimeMs, size_bytes AS sizeBytes, art_key AS artKey FROM tracks WHERE path = ?",
+    ),
+    deleteTrack: db.prepare("DELETE FROM tracks WHERE path = ?"),
+    // Purge des albums/artistes orphelins : album_id/artist_id sont NOT NULL, donc
+    // les sous-requetes ne renvoient pas de NULL et le `NOT IN` reste correct.
+    pruneAlbums: db.prepare("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)"),
+    pruneArtists: db.prepare("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)"),
   };
 }
 
@@ -118,6 +130,8 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
         bitDepth: t.bitDepth,
         playable: t.playable ? 1 : 0,
         artKey: t.artKey,
+        mtimeMs: t.mtimeMs,
+        sizeBytes: t.sizeBytes,
       });
     }
   })(tracks);
@@ -137,4 +151,37 @@ export function getAllTracks(db: Db, page: Page): TrackRow[] {
 
 export function getArtists(db: Db): ArtistRow[] {
   return stmts(db).artists.all() as ArtistRow[];
+}
+
+/** Piste par chemin, ou `undefined` si absente. */
+export function getTrackByPath(db: Db, path: string): TrackRow | undefined {
+  const r = stmts(db).trackByPath.get(path) as RawTrack | undefined;
+  return r ? toTrackRow(r) : undefined;
+}
+
+/** Stat persisté + clé de pochette d'une piste, pour décider d'un saut de ré-extraction. */
+export function getTrackStat(
+  db: Db,
+  path: string,
+): { mtimeMs: number | null; sizeBytes: number | null; artKey: string | null } | undefined {
+  return stmts(db).trackStat.get(path) as
+    | { mtimeMs: number | null; sizeBytes: number | null; artKey: string | null }
+    | undefined;
+}
+
+/**
+ * Supprime les pistes par `path` (transaction), puis purge les albums et artistes
+ * devenus sans piste. Les favoris et entrées de playlist référençant ces pistes
+ * disparaissent via `ON DELETE CASCADE` (foreign_keys = ON). Renvoie le nombre de
+ * pistes réellement supprimées.
+ */
+export function removeTracks(db: Db, paths: readonly string[]): number {
+  const s = stmts(db);
+  return db.transaction((ps: readonly string[]) => {
+    let removed = 0;
+    for (const p of ps) removed += s.deleteTrack.run(p).changes;
+    s.pruneAlbums.run();
+    s.pruneArtists.run();
+    return removed;
+  })(paths);
 }
