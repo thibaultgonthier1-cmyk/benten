@@ -1241,6 +1241,36 @@ body {
   color: var(--vermillion);
   border-color: var(--vermillion);
 }
+.pl-btn.accent {
+  color: #fff;
+  background: var(--magenta);
+  border-color: var(--magenta);
+}
+.pl-btn.accent:hover:not(:disabled) {
+  background: #f04d8f;
+  color: #fff;
+}
+/* Renommage inline : reprend le look des champs `.scan-row input`. */
+.pl-row.editing {
+  border-color: var(--magenta);
+  background: var(--magenta-soft);
+}
+.pl-rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 12px;
+  color: var(--paper);
+  font-family: var(--ui);
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+}
+.pl-rename-input:focus {
+  border-color: var(--magenta);
+}
 .pl-btn svg {
   width: 14px;
   height: 14px;

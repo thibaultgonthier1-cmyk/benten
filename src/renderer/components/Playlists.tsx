@@ -27,6 +27,10 @@ export function Playlists({ onPlay }: PlaylistsProps): JSX.Element {
   const [tracks, setTracks] = useState<TrackRow[]>([]);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
+  // Renommage INLINE (Electron Chromium n'implemente pas window.prompt) : la ligne editee devient
+  // un <input> ; Entree valide, Echap annule.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
 
   const reloadList = useCallback(async (): Promise<void> => {
     const api = playlistsApi();
@@ -67,17 +71,29 @@ export function Playlists({ onPlay }: PlaylistsProps): JSX.Element {
     }
   }, [newName, busy, reloadList, open]);
 
-  const rename = useCallback(
-    async (p: PlaylistRow): Promise<void> => {
-      const api = playlistsApi();
-      if (!api) return;
-      const next = window.prompt("Renommer la playlist", p.name)?.trim();
-      if (!next || next === p.name) return;
-      await api.rename(p.id, next);
-      await reloadList();
-    },
-    [reloadList],
-  );
+  const startRename = useCallback((p: PlaylistRow): void => {
+    setEditingId(p.id);
+    setEditName(p.name);
+  }, []);
+
+  const cancelRename = useCallback((): void => {
+    setEditingId(null);
+    setEditName("");
+  }, []);
+
+  const commitRename = useCallback(async (): Promise<void> => {
+    const api = playlistsApi();
+    const id = editingId;
+    if (id == null) return;
+    const next = editName.trim();
+    const current = playlists.find((p) => p.id === id);
+    setEditingId(null);
+    setEditName("");
+    // Rien a faire si vide ou inchange (ou hors fenetre) : on a deja referme l'edition.
+    if (!api || !next || next === current?.name) return;
+    await api.rename(id, next);
+    await reloadList();
+  }, [editingId, editName, playlists, reloadList]);
 
   const remove = useCallback(
     async (p: PlaylistRow): Promise<void> => {
@@ -155,34 +171,68 @@ export function Playlists({ onPlay }: PlaylistsProps): JSX.Element {
         <div className="scan-note">Aucune playlist pour l'instant. Cree-en une ci-dessus.</div>
       ) : (
         <ul className="pl-list">
-          {playlists.map((p) => (
-            <li key={p.id} className={"pl-row" + (p.id === openId ? " open" : "")}>
-              <button className="pl-main" type="button" onClick={() => void open(p.id)}>
-                <span className="pl-name">{p.name}</span>
-                <span className="pl-count">{p.trackCount} pistes</span>
-              </button>
-              <div className="pl-actions">
-                <button
-                  className="pl-btn"
-                  type="button"
-                  onClick={() => void playPlaylist(p)}
-                  disabled={p.trackCount === 0}
-                  aria-label={`Lire ${p.name}`}
-                  title="Lire"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                </button>
-                <button className="pl-btn" type="button" onClick={() => void rename(p)} title="Renommer">
-                  Renommer
-                </button>
-                <button className="pl-btn danger" type="button" onClick={() => void remove(p)} title="Supprimer">
-                  Supprimer
-                </button>
-              </div>
-            </li>
-          ))}
+          {playlists.map((p) => {
+            const editing = p.id === editingId;
+            return (
+              <li
+                key={p.id}
+                className={"pl-row" + (p.id === openId ? " open" : "") + (editing ? " editing" : "")}
+              >
+                {editing ? (
+                  <input
+                    className="pl-rename-input"
+                    value={editName}
+                    autoFocus
+                    spellCheck={false}
+                    aria-label="Nouveau nom de la playlist"
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void commitRename();
+                      else if (e.key === "Escape") cancelRename();
+                    }}
+                  />
+                ) : (
+                  <button className="pl-main" type="button" onClick={() => void open(p.id)}>
+                    <span className="pl-name">{p.name}</span>
+                    <span className="pl-count">{p.trackCount} pistes</span>
+                  </button>
+                )}
+                <div className="pl-actions">
+                  {editing ? (
+                    <>
+                      <button className="pl-btn accent" type="button" onClick={() => void commitRename()} title="Valider">
+                        OK
+                      </button>
+                      <button className="pl-btn" type="button" onClick={cancelRename} title="Annuler">
+                        Annuler
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="pl-btn"
+                        type="button"
+                        onClick={() => void playPlaylist(p)}
+                        disabled={p.trackCount === 0}
+                        aria-label={`Lire ${p.name}`}
+                        title="Lire"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </button>
+                      <button className="pl-btn" type="button" onClick={() => startRename(p)} title="Renommer">
+                        Renommer
+                      </button>
+                      <button className="pl-btn danger" type="button" onClick={() => void remove(p)} title="Supprimer">
+                        Supprimer
+                      </button>
+                    </>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 
