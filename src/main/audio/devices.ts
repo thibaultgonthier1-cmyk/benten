@@ -1,4 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Peripherique de sortie audio par defaut, vu depuis le process Main.
@@ -19,22 +22,25 @@ const FALLBACK: OutputDevice = { name: "Sortie systeme par defaut" };
 
 /**
  * Meilleur effort : nom convivial d'un peripherique de rendu audio actif sous Windows, via une
- * breve requete CIM PowerShell. Borne dans le temps, sortie masquee, et TOUT est avale : la
- * fonction renvoie `null` plutot que de lever.
+ * breve requete CIM PowerShell. ASYNCHRONE (promisifiee) pour ne PAS geler le process principal
+ * mono-thread d'Electron : une sonde synchrone bloquerait tout autre IPC du main — dont
+ * `audio:read-file` qui alimente le prechargement gapless (risque de trou/jank pres d'une
+ * frontiere de piste). Bornee dans le temps, sortie masquee, et TOUT est avale : renvoie `null`
+ * plutot que de lever.
  */
-function queryWindowsDeviceName(): string | null {
+async function queryWindowsDeviceName(): Promise<string | null> {
   try {
     const script =
       "$ErrorActionPreference='SilentlyContinue';" +
       "(Get-CimInstance Win32_SoundDevice |" +
       " Where-Object { $_.Status -eq 'OK' } |" +
       " Select-Object -First 1 -ExpandProperty Name)";
-    const out = execFileSync(
+    const { stdout } = await execFileAsync(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", script],
-      { timeout: 2500, windowsHide: true, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      { timeout: 2500, windowsHide: true, encoding: "utf8" },
     );
-    const name = out.split(/\r?\n/)[0]?.trim();
+    const name = stdout.split(/\r?\n/)[0]?.trim();
     return name && name.length > 0 ? name : null;
   } catch {
     return null;
@@ -42,14 +48,15 @@ function queryWindowsDeviceName(): string | null {
 }
 
 /**
- * Peripherique de sortie par defaut. Ne leve JAMAIS : en cas d'indisponibilite (plateforme non
- * geree, enumeration en echec, timeout), renvoie un repli nomme. `sampleRate` reste absent tant
- * qu'on ne peut pas l'obtenir de facon fiable sans dependance supplementaire.
+ * Peripherique de sortie par defaut. ASYNCHRONE (la sonde OS ne doit pas bloquer le main). Ne
+ * rejette JAMAIS : en cas d'indisponibilite (plateforme non geree, enumeration en echec, timeout),
+ * renvoie un repli nomme. `sampleRate` reste absent tant qu'on ne peut pas l'obtenir de facon
+ * fiable sans dependance supplementaire.
  */
-export function defaultOutputDevice(): OutputDevice {
+export async function defaultOutputDevice(): Promise<OutputDevice> {
   try {
     if (process.platform === "win32") {
-      const name = queryWindowsDeviceName();
+      const name = await queryWindowsDeviceName();
       if (name) return { name };
     }
     return FALLBACK;

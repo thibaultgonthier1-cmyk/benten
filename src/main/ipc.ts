@@ -151,7 +151,7 @@ export function registerIpc(db: Database.Database): void {
     return { ...last, added, skipped };
   });
 
-  ipcMain.handle(CHANNELS.AUDIO_DEFAULT_DEVICE, (event): AudioDeviceInfo => {
+  ipcMain.handle(CHANNELS.AUDIO_DEFAULT_DEVICE, (event): Promise<AudioDeviceInfo> => {
     assertTrusted(event);
     return defaultOutputDevice();
   });
