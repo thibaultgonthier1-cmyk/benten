@@ -8,10 +8,15 @@ import { groupTracksToAlbums, type Album } from "./lib/library";
 import { makeThrottle } from "./lib/throttle";
 import type { TrackRow } from "../shared/types";
 import { LibraryGrid } from "./components/LibraryGrid";
+import { SearchResults } from "./components/SearchResults";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
 
 const PAGE = 1000;
+/** Nombre max de pistes renvoyees par une recherche (regroupees ensuite en albums). */
+const SEARCH_LIMIT = 200;
+/** Anti-rebond de la barre de recherche (ms) : une frappe rapide ne lance qu'une requete. */
+const SEARCH_DEBOUNCE_MS = 150;
 
 /** Bibliotheque locale connue : proposee en raccourci sur l'ecran d'accueil. */
 const KNOWN_LIBRARY = "C:\\Users\\Dream\\Downloads\\REA DS\\.prism-profile\\documents\\Prism Library";
@@ -40,6 +45,8 @@ export function App(): JSX.Element {
 
   const [albums, setAlbums] = useState<Album[]>([]);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<TrackRow[]>([]);
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
@@ -84,6 +91,39 @@ export function App(): JSX.Element {
     void reload();
   }, [reload]);
 
+  // Recherche avec anti-rebond : terme vide -> on vide les resultats sans interroger. Un drapeau
+  // `cancelled` ignore une reponse qui arrive apres un nouveau terme (course de frappe rapide).
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    const id = setTimeout(() => {
+      window.benten.library
+        .search({ q, limit: SEARCH_LIMIT })
+        .then((rows) => {
+          if (!cancelled) setResults(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setResults([]);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [query]);
+
+  const playAlbum = useCallback(
+    (album: Album): void => {
+      controls.playAlbum(album, 0);
+      playerStore.getState().setNowPlayingOpen(true);
+    },
+    [controls],
+  );
+
   const runScan = useCallback(
     async (pathArg?: string): Promise<void> => {
       const path = (pathArg ?? scanPath).trim();
@@ -125,6 +165,7 @@ export function App(): JSX.Element {
   }, [scanning, runScan]);
 
   const empty = !loading && albums.length === 0;
+  const searching = query.trim().length > 0;
 
   return (
     <>
@@ -165,13 +206,19 @@ export function App(): JSX.Element {
 
         <main className="main" ref={mainRef}>
           <div className="topbar">
-            <label className="search soon-search" aria-disabled="true">
+            <label className="search">
               <svg viewBox="0 0 24 24">
                 <circle cx="11" cy="11" r="7" />
                 <path d="M21 21l-4-4" />
               </svg>
-              <input placeholder="Recherche — bientot" disabled aria-label="Recherche (bientot disponible)" />
-              <span className="soon">bientot</span>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Recherche"
+                aria-label="Recherche"
+                spellCheck={false}
+                type="search"
+              />
             </label>
             <div className="top-actions">
               <span className="chip">
@@ -190,7 +237,15 @@ export function App(): JSX.Element {
             </p>
           </header>
 
-          {empty ? (
+          {searching ? (
+            <SearchResults
+              tracks={results}
+              query={query}
+              scrollRef={mainRef}
+              playingAlbumId={currentAlbumId}
+              onPlay={playAlbum}
+            />
+          ) : empty ? (
             <section className="section">
               <div className="empty">
                 <div className="mark">弁</div>
@@ -250,10 +305,7 @@ export function App(): JSX.Element {
                 albums={albums}
                 scrollRef={mainRef}
                 playingAlbumId={currentAlbumId}
-                onPlay={(album) => {
-                  controls.playAlbum(album, 0);
-                  playerStore.getState().setNowPlayingOpen(true);
-                }}
+                onPlay={playAlbum}
               />
             </section>
           )}

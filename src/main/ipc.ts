@@ -12,7 +12,9 @@ import type {
   LibraryView,
   Page,
   ScanSummary,
+  SearchArgs,
   SourceRow,
+  TrackRow,
 } from "../shared/types";
 import { defaultOutputDevice } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
@@ -23,6 +25,7 @@ import {
   getArtists,
   getSources,
   removeSource,
+  searchTracks,
 } from "./library/repository";
 
 const DEFAULT_LIMIT = 200;
@@ -208,6 +211,17 @@ export function queryLibrary(db: Database.Database, args: unknown): LibraryQuery
   }
 }
 
+/**
+ * Valide les arguments de `library:search` et délègue à `searchTracks`. `q` doit être une
+ * chaîne (sinon rejet) ; `limit` est borné via `normalizePage` (offset implicite = 0).
+ */
+export function searchLibrary(db: Database.Database, args: unknown): TrackRow[] {
+  if (typeof args !== "object" || args === null) throw new Error("library:search: invalid args");
+  const { q, limit } = args as Partial<SearchArgs>;
+  if (typeof q !== "string") throw new Error("library:search: q must be a string");
+  return searchTracks(db, q, normalizePage({ limit }));
+}
+
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database): void {
   ipcMain.handle(CHANNELS.PING, (): "pong" => "pong");
@@ -215,6 +229,11 @@ export function registerIpc(db: Database.Database): void {
   ipcMain.handle(CHANNELS.LIBRARY_QUERY, (event, args: unknown): LibraryQueryResult => {
     assertTrusted(event);
     return queryLibrary(db, args);
+  });
+
+  ipcMain.handle(CHANNELS.LIBRARY_SEARCH, (event, args: unknown): TrackRow[] => {
+    assertTrusted(event);
+    return searchLibrary(db, args);
   });
 
   ipcMain.handle(CHANNELS.LIBRARY_SCAN, async (event, paths: unknown): Promise<ScanSummary> => {

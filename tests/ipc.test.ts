@@ -57,6 +57,7 @@ describe("registerIpc", () => {
       "dialog:pick-folder",
       "library:query",
       "library:scan",
+      "library:search",
       "sources:list",
       "sources:remove",
     ]);
@@ -92,6 +93,27 @@ describe("registerIpc", () => {
       rows: unknown[];
     };
     expect(nan.rows).toHaveLength(6);
+  });
+
+  it("library:search valide q, delegue a searchTracks et rejette les mauvais arguments", async () => {
+    await call("library:scan", trusted, [join(FIX, "library")]);
+    const rows = (await call("library:search", trusted, { q: "montagem", limit: 50 })) as {
+      title: string;
+      artist: string;
+      album: string;
+    }[];
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const hay = `${r.title} ${r.artist} ${r.album}`.toLowerCase();
+      expect(hay).toContain("montagem");
+    }
+    // Arguments invalides : q non chaine, args absents, q manquant.
+    await expect(call("library:search", trusted, { q: 42 })).rejects.toThrow(/library:search/);
+    await expect(call("library:search", trusted, undefined)).rejects.toThrow(/library:search/);
+    await expect(call("library:search", trusted, { limit: 10 })).rejects.toThrow(/library:search/);
+    // Expediteur non fiable.
+    await expect(call("library:search", evil, { q: "montagem" })).rejects.toThrow(/untrusted sender/);
   });
 
   it("rejette une vue inconnue ou des arguments invalides", async () => {

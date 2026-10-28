@@ -14,6 +14,7 @@ import {
   getTracksByAlbum,
   removeSource,
   removeTracks,
+  searchTracks,
   upsertTracks,
 } from "../src/main/library/repository";
 import type { TrackInput } from "../src/shared/types";
@@ -175,6 +176,45 @@ describe("repository", () => {
     const toRemove = getSources(db).find((s) => s.path === "/m/a")!;
     removeSource(db, toRemove.id);
     expect(getSources(db).map((s) => s.path)).toEqual(["/m/b"]);
+  });
+
+  it("searchTracks matches title/artist/album case-insensitively (NOCASE, cross-column)", () => {
+    upsertTracks(db, [
+      track({ path: "/s/1.flac", title: "Café", artist: "Nobody", album: "Album Z" }),
+      track({ path: "/s/2.flac", title: "Plain", artist: "CAFÉ latte", album: "Album Z" }),
+      track({ path: "/s/3.flac", title: "x", artist: "Someone", album: "Café Bar" }),
+      track({ path: "/s/4.flac", title: "unrelated", artist: "zzz", album: "Other" }),
+    ]);
+    const rows = searchTracks(db, "caf", { limit: 50, offset: 0 });
+    expect(rows.map((r) => r.path).sort()).toEqual(["/s/1.flac", "/s/2.flac", "/s/3.flac"]);
+  });
+
+  it("searchTracks treats LIKE metacharacters (% and _) in the query literally (escaped)", () => {
+    upsertTracks(db, [
+      track({ path: "/p/1.flac", title: "50% Off", artist: "A", album: "AA" }),
+      track({ path: "/p/2.flac", title: "50 Fifty", artist: "A", album: "AA" }),
+      track({ path: "/p/3.flac", title: "a_b", artist: "A", album: "AA" }),
+      track({ path: "/p/4.flac", title: "axb", artist: "A", album: "AA" }),
+    ]);
+    // `%` ne doit PAS agir comme joker : seule la piste contenant un `%` littéral matche.
+    expect(searchTracks(db, "50%", { limit: 50, offset: 0 }).map((r) => r.path)).toEqual(["/p/1.flac"]);
+    // `_` idem : littéral, pas « n'importe quel caractère ».
+    expect(searchTracks(db, "a_b", { limit: 50, offset: 0 }).map((r) => r.path)).toEqual(["/p/3.flac"]);
+  });
+
+  it("searchTracks returns [] for empty/whitespace query without querying", () => {
+    upsertTracks(db, records());
+    expect(searchTracks(db, "", { limit: 50, offset: 0 })).toEqual([]);
+    expect(searchTracks(db, "   ", { limit: 50, offset: 0 })).toEqual([]);
+  });
+
+  it("searchTracks respects the page limit", () => {
+    upsertTracks(db, [
+      track({ path: "/l/1.flac", title: "match one", album: "ZZ" }),
+      track({ path: "/l/2.flac", title: "match two", album: "ZZ" }),
+      track({ path: "/l/3.flac", title: "match three", album: "ZZ" }),
+    ]);
+    expect(searchTracks(db, "match", { limit: 2, offset: 0 })).toHaveLength(2);
   });
 
   it("migrates by user_version and is reopenable", () => {

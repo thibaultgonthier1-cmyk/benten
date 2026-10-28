@@ -11,6 +11,7 @@ const api: BentenApi = {
   library: {
     query: (args) => invoke(CHANNELS.LIBRARY_QUERY, args),
     scan: (paths) => invoke(CHANNELS.LIBRARY_SCAN, paths),
+    search: (args) => invoke(CHANNELS.LIBRARY_SEARCH, args),
   },
   audio: {
     defaultDevice: () => invoke(CHANNELS.AUDIO_DEFAULT_DEVICE),

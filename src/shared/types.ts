@@ -8,6 +8,12 @@ export interface LibraryQueryArgs {
   offset?: number;
 }
 
+/** Arguments de `library:search` : terme libre + limite optionnelle. */
+export interface SearchArgs {
+  q: string;
+  limit?: number;
+}
+
 /** Piste telle que lue dans la bibliothèque. */
 export interface TrackRow {
   id: number;
@@ -95,6 +101,8 @@ export interface BentenApi {
   library: {
     query(args: LibraryQueryArgs): Promise<LibraryQueryResult>;
     scan(paths: readonly string[]): Promise<ScanSummary>;
+    /** Recherche sur titre/artiste/album (`LIKE` insensible à la casse). */
+    search(args: SearchArgs): Promise<TrackRow[]>;
   };
   audio: {
     defaultDevice(): Promise<AudioDeviceInfo>;

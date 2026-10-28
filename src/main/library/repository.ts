@@ -71,6 +71,13 @@ function statements(db: Db) {
       SELECT ${TRACK_COLUMNS} FROM tracks t
       ORDER BY t.title COLLATE NOCASE, t.id
       LIMIT @limit OFFSET @offset`),
+    searchTracks: db.prepare(`
+      SELECT ${TRACK_COLUMNS} FROM tracks t
+      WHERE t.title  COLLATE NOCASE LIKE @pat ESCAPE '\\'
+         OR t.artist COLLATE NOCASE LIKE @pat ESCAPE '\\'
+         OR t.album  COLLATE NOCASE LIKE @pat ESCAPE '\\'
+      ORDER BY t.title COLLATE NOCASE, t.id
+      LIMIT @limit OFFSET @offset`),
     artists: db.prepare(`
       SELECT ar.id, ar.name, COUNT(t.id) AS trackCount,
              COUNT(DISTINCT t.album_id) AS albumCount
@@ -151,6 +158,29 @@ export function getTracksByAlbum(db: Db, albumId: number): TrackRow[] {
 
 export function getAllTracks(db: Db, page: Page): TrackRow[] {
   return (stmts(db).allTracks.all(page) as RawTrack[]).map(toTrackRow);
+}
+
+/**
+ * Échappe les métacaractères `LIKE` (`\`, `%`, `_`) pour qu'ils soient recherchés littéralement.
+ * Le `\` lui-même doit être échappé en premier : la regex le capture dans la même passe, donc
+ * aucun risque de double-échappement. À combiner avec `ESCAPE '\'` dans la requête.
+ */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Recherche plein-texte simple sur `title`/`artist`/`album` : `LIKE` insensible à la casse
+ * (`COLLATE NOCASE`), motif `%<q échappé>%`. Les métacaractères `LIKE` de `q` sont échappés
+ * (voir `escapeLike`) et interprétés littéralement via `ESCAPE '\'`. Une requête vide ou
+ * uniquement blanche renvoie `[]` SANS interroger la base.
+ */
+export function searchTracks(db: Db, q: string, page: Page): TrackRow[] {
+  if (typeof q !== "string" || q.trim() === "") return [];
+  const pat = `%${escapeLike(q.trim())}%`;
+  return (
+    stmts(db).searchTracks.all({ pat, limit: page.limit, offset: page.offset }) as RawTrack[]
+  ).map(toTrackRow);
 }
 
 export function getArtists(db: Db): ArtistRow[] {
