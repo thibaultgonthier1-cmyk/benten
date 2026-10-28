@@ -397,3 +397,167 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     expect(ctx.liveSources().length).toBe(0);
   });
 });
+
+/**
+ * `updateQueue` A CHAUD (Task 11) — mutation de file SANS couper le son.
+ *
+ * Invariant sacre : si l'id de la piste courante reste present, sa source (`AudioBufferSourceNode`)
+ * N'EST NI stoppee NI recreee NI re-decodee (meme instance, meme `startedAtCtxTime`). On ne retouche
+ * la source PROGRAMMEE (gapless) que si la piste SUIVANTE a reellement change ; sinon on la laisse
+ * telle quelle (aucun re-decodage, aucun trou). Retirer la piste courante bascule proprement sur la
+ * plus proche lisible (semantique `switchTo`, anti-clic). On ne laisse jamais > 1 source AUDIBLE.
+ */
+describe("AudioEngine — updateQueue a chaud (Task 11)", () => {
+  let ctx: FakeAudioContext;
+  beforeEach(() => {
+    ctx = new FakeAudioContext();
+  });
+
+  it("change seulement la SUIVANTE : source courante intacte, programmee obsolete annulee puis reprogrammee", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+      ["C:\\m\\2.flac", 12],
+    ]);
+    const decoded: string[] = [];
+    const engine = makeEngine(ctx, makeDecoder(durs, (p) => decoded.push(p)));
+    const A = track({ id: 10, path: "C:\\m\\0.flac" });
+    const B = track({ id: 11, path: "C:\\m\\1.flac" });
+    const C = track({ id: 12, path: "C:\\m\\2.flac" });
+    await engine.setQueue([A, B, C], 0);
+    engine.play();
+    ctx.currentTime = 11; // reste 9 < 10 -> programme la suivante B
+    engine.tick();
+    await flush();
+    expect(ctx.sources.length).toBe(2);
+    const curSource = ctx.sources[0]!;
+    const schedB = ctx.sources[1]!;
+    expect(schedB.buffer!.duration).toBe(15); // B programmee
+    decoded.length = 0;
+
+    // Reordonne : la SUIVANTE devient C (id 12) au lieu de B.
+    engine.updateQueue([A, C, B], { keepCurrent: true });
+    await flush();
+
+    // Source COURANTE intacte : meme instance, non stoppee, NON re-decodee.
+    expect(ctx.sources[0]).toBe(curSource);
+    expect(curSource.stopped).toBe(false);
+    expect(curSource.started).toBe(true);
+    expect(decoded).not.toContain("C:\\m\\0.flac");
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+    expect(engine.getQueueIndex()).toBe(0);
+
+    // Ancienne programmee B annulee ; nouvelle programmee C en vol.
+    expect(schedB.stopped).toBe(true);
+    expect(ctx.sources.length).toBe(3);
+    const schedC = ctx.sources[2]!;
+    expect(schedC.buffer!.duration).toBe(12);
+    expect(schedC.started).toBe(true);
+    expect(schedC.stopped).toBe(false);
+    // Une courante (audible) + une programmee (demarrage futur).
+    expect(ctx.liveSources().length).toBe(2);
+  });
+
+  it("REVIEW FOCUS : reordonner deux pistes FUTURES ne touche ni la courante ni la suivante programmee", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+      ["C:\\m\\2.flac", 12],
+      ["C:\\m\\3.flac", 11],
+    ]);
+    const decoded: string[] = [];
+    const engine = makeEngine(ctx, makeDecoder(durs, (p) => decoded.push(p)));
+    const A = track({ id: 10, path: "C:\\m\\0.flac" });
+    const B = track({ id: 11, path: "C:\\m\\1.flac" });
+    const C = track({ id: 12, path: "C:\\m\\2.flac" });
+    const D = track({ id: 13, path: "C:\\m\\3.flac" });
+    await engine.setQueue([A, B, C, D], 0);
+    engine.play();
+    ctx.currentTime = 11;
+    engine.tick();
+    await flush();
+    const curSource = ctx.sources[0]!;
+    const schedB = ctx.sources[1]!;
+    expect(schedB.buffer!.duration).toBe(15);
+    const createdBefore = ctx.createdSources;
+    decoded.length = 0;
+
+    // Echange C et D (toutes deux FUTURES, apres la suivante B). La suivante reste B.
+    engine.updateQueue([A, B, D, C], { keepCurrent: true });
+    await flush();
+
+    // Courante ET suivante programmee intactes : memes instances, rien de stoppe, rien re-decode.
+    expect(ctx.sources[0]).toBe(curSource);
+    expect(curSource.stopped).toBe(false);
+    expect(ctx.sources[1]).toBe(schedB);
+    expect(schedB.stopped).toBe(false);
+    expect(ctx.createdSources).toBe(createdBefore); // aucune nouvelle source
+    expect(decoded).toEqual([]); // aucun re-decodage
+    expect(ctx.liveSources().length).toBe(2);
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+    expect(engine.getQueueIndex()).toBe(0);
+  });
+
+  it("retirer la piste COURANTE bascule sur la plus proche lisible (exactement une source vivante)", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+      ["C:\\m\\2.flac", 12],
+    ]);
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    const A = track({ id: 10, path: "C:\\m\\0.flac" });
+    const B = track({ id: 11, path: "C:\\m\\1.flac" });
+    const C = track({ id: 12, path: "C:\\m\\2.flac" });
+    await engine.setQueue([A, B, C], 0);
+    engine.play();
+    const aSource = ctx.sources[0]!;
+
+    // Retire la piste courante A : la file devient [B, C].
+    engine.updateQueue([B, C], { keepCurrent: true });
+    await flush();
+    await flush();
+
+    expect(aSource.stopped).toBe(true); // ancienne courante coupee (anti-clic)
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 11 });
+    expect(engine.getQueueIndex()).toBe(0);
+    expect(ctx.liveSources().length).toBe(1);
+  });
+
+  it("file vide : coupe le son proprement (idle, aucune source vivante)", async () => {
+    const durs = new Map([["C:\\m\\0.flac", 20]]);
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    await engine.setQueue([track({ id: 10, path: "C:\\m\\0.flac" })], 0);
+    engine.play();
+    engine.updateQueue([], { keepCurrent: true });
+    await flush();
+    expect(ctx.liveSources().length).toBe(0);
+    expect(engine.getState()).toMatchObject({ status: "idle", trackId: null });
+  });
+
+  it("jumpTo saute a l'index via le chemin anti-clic manuel (une source vivante)", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 30],
+      ["C:\\m\\1.flac", 25],
+      ["C:\\m\\2.flac", 20],
+    ]);
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    await engine.setQueue(
+      [
+        track({ id: 10, path: "C:\\m\\0.flac" }),
+        track({ id: 11, path: "C:\\m\\1.flac" }),
+        track({ id: 12, path: "C:\\m\\2.flac" }),
+      ],
+      0,
+    );
+    engine.play();
+    const first = ctx.sources[0]!;
+    const gain = (first.connectedTo as FakeGain).gain;
+    await engine.jumpTo(2);
+    await flush();
+    expect(first.stopped).toBe(true);
+    expect(gain.linearRampToValueAtTime).toHaveBeenCalled(); // fondu anti-clic
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 12 });
+    expect(engine.getQueueIndex()).toBe(2);
+    expect(ctx.liveSources().length).toBe(1);
+  });
+});

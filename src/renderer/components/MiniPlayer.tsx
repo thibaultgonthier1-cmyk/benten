@@ -85,6 +85,17 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
       </div>
       <div className="mp-right">
         <button
+          className="ic"
+          type="button"
+          title="File d'attente"
+          aria-label="Ouvrir la file d'attente"
+          onClick={() => playerStore.getState().setQueueOpen(true)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h12v2H4zM4 11h12v2H4zM4 16h8v2H4zM16 14l6 3-6 3z" />
+          </svg>
+        </button>
+        <button
           className={"ic fav" + (isFav ? " on" : "")}
           type="button"
           title={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}

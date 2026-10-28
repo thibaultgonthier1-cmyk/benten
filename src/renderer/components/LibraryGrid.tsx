@@ -18,6 +18,10 @@ export interface LibraryGridProps {
   scrollRef: React.RefObject<HTMLElement>;
   playingAlbumId?: number | null;
   onPlay: (album: Album) => void;
+  /** Actions optionnelles du menu « ⋯ » de chaque carte (Task 11). */
+  onPlayNext?: (album: Album) => void;
+  onAddToQueue?: (album: Album) => void;
+  onAddToPlaylist?: (album: Album) => void;
 }
 
 const MIN_CARD = 172;
@@ -29,6 +33,9 @@ export function LibraryGrid({
   scrollRef,
   playingAlbumId,
   onPlay,
+  onPlayNext,
+  onAddToQueue,
+  onAddToPlaylist,
 }: LibraryGridProps): JSX.Element {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(1);
@@ -115,6 +122,9 @@ export function LibraryGrid({
                 album={album}
                 playing={album.id === playingAlbumId}
                 onPlay={onPlay}
+                onPlayNext={onPlayNext}
+                onAddToQueue={onAddToQueue}
+                onAddToPlaylist={onAddToPlaylist}
               />
             ))}
           </div>

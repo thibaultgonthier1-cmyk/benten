@@ -204,6 +204,18 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
 
       <div className="np-foot">
         <button
+          className="foot-btn"
+          type="button"
+          aria-label="Ouvrir la file d'attente"
+          onClick={() => playerStore.getState().setQueueOpen(true)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h11M4 12h11M4 17h7" fill="none" />
+            <path d="M16 15v6l5-3z" fill="currentColor" stroke="none" />
+          </svg>
+          <span>File d'attente</span>
+        </button>
+        <button
           className={"foot-btn" + (sheetOpen ? " active" : "")}
           type="button"
           aria-label="Afficher la qualite de lecture"

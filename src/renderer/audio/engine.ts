@@ -383,6 +383,121 @@ export class AudioEngine {
   }
 
   /**
+   * Mutation de file A CHAUD (Task 11) — remplace la file SANS couper la piste courante.
+   *
+   * Regles (voir brief) :
+   *  - Si l'id de la piste courante (`this.trackId`) reste present dans `tracks` : on NE touche PAS
+   *    a `this.source` (meme `AudioBufferSourceNode`, meme `startedAtCtxTime`, la position continue
+   *    d'avancer). On recale seulement `queueIndex` sur cet id.
+   *    - La source PROGRAMMEE (gapless) n'est annulee et reprogrammee QUE si la piste SUIVANTE a
+   *      change (comparee par IDENTITE, pas par index : une reindexation ne doit pas re-decoder).
+   *      Si la suivante est inchangee, on realigne juste les index internes et on laisse la source
+   *      programmee telle quelle — zero re-decodage, zero trou.
+   *  - Si la piste courante a DISPARU de la file : on bascule sur la plus proche encore lisible a
+   *    partir de son ancienne position (avant puis arriere), via la semantique `switchTo` (fondu
+   *    anti-clic) en lecture, ou un simple `load` (sans demarrer) hors lecture. File vide -> `idle`.
+   *
+   * `keepCurrent` (defaut `true`) : la preservation de la courante n'a lieu que si elle est vraie ;
+   * `false` force un rechargement a la position courante (coupure assumee, chemin non utilise par
+   * l'UI). Dans tous les cas : JAMAIS plus d'une source AUDIBLE, jamais de clic pour une edition
+   * purement future.
+   */
+  updateQueue(tracks: readonly TrackRow[], opts: { keepCurrent?: boolean } = {}): void {
+    const keepCurrent = opts.keepCurrent ?? true;
+
+    // Identite de ce qui est materiellement prepare comme SUIVANTE, capturee AVANT de perdre les
+    // anciens index (la source programmee et/ou le buffer pre-decode).
+    const oldQueue = this.queue;
+    const scheduledTrackId =
+      this.scheduledSource && this.scheduledForIndex !== null
+        ? (oldQueue[this.scheduledForIndex]?.id ?? null)
+        : null;
+    const preloadedTrackId =
+      this.preloadedForIndex !== null ? (oldQueue[this.preloadedForIndex]?.id ?? null) : null;
+
+    const nextQueue = tracks.slice();
+    this.queue = nextQueue;
+
+    // File vide : coupe proprement (fondu anti-clic) et revient a l'etat neutre.
+    if (nextQueue.length === 0) {
+      this.queueIndex = 0;
+      this.cancelAllSourcesAntiClick();
+      this.clearPreload();
+      this.buffer = null;
+      this.durationSec = 0;
+      this.pausedPositionSec = 0;
+      this.trackId = null;
+      this.restoreGain();
+      this.setStatus("idle");
+      return;
+    }
+
+    const curId = this.trackId;
+    const foundIndex =
+      keepCurrent && curId !== null ? nextQueue.findIndex((t) => t.id === curId) : -1;
+
+    if (foundIndex === -1) {
+      // Piste courante retiree (ou keepCurrent=false) : bascule sur la plus proche lisible depuis
+      // son ancienne position, en avant puis en arriere.
+      const wasPlaying = this.status === "playing";
+      const anchor = clamp(this.queueIndex, 0, nextQueue.length - 1);
+      let target = this.findPlayableFrom(anchor, +1);
+      if (target === null) target = this.findPlayableFrom(anchor, -1);
+      if (target === null) {
+        // Aucune piste lisible : silence propre.
+        this.cancelAllSourcesAntiClick();
+        this.clearPreload();
+        this.buffer = null;
+        this.durationSec = 0;
+        this.pausedPositionSec = 0;
+        this.trackId = null;
+        this.restoreGain();
+        this.setStatus("idle");
+        return;
+      }
+      if (wasPlaying) {
+        void this.switchTo(target); // fondu anti-clic + load + play
+      } else {
+        this.teardownScheduled();
+        this.clearPreload();
+        this.queueIndex = target;
+        void this.load(this.queue[target]!); // charge sans demarrer (l'UI jouera)
+      }
+      return;
+    }
+
+    // --- Piste courante toujours presente : on NE touche PAS this.source. --------------------
+    this.queueIndex = foundIndex;
+    const newNextIndex = foundIndex + 1;
+    const newNextId = newNextIndex < nextQueue.length ? nextQueue[newNextIndex]!.id : null;
+    const programmedNextId = scheduledTrackId ?? preloadedTrackId;
+
+    if (programmedNextId !== null && newNextId !== null && programmedNextId === newNextId) {
+      // Suivante INCHANGEE (meme identite) : on garde la source programmee / le pre-decode et on
+      // realigne seulement les index sur la nouvelle file. Aucun re-decodage, aucun trou.
+      if (this.scheduledForIndex !== null) this.scheduledForIndex = newNextIndex;
+      if (this.preloadedForIndex !== null) this.preloadedForIndex = newNextIndex;
+      if (this.preloadStartedForIndex !== null) this.preloadStartedForIndex = newNextIndex;
+      this.pump();
+    } else {
+      // Suivante CHANGEE : on jette la programmation obsolete et on reprogramme pour la nouvelle.
+      this.teardownScheduled();
+      this.clearPreload();
+      this.pump();
+    }
+  }
+
+  /**
+   * Saut manuel vers `index` (depuis le panneau de file). Reutilise le chemin anti-clic `switchTo`
+   * (fondu de gain, une seule source vivante) — ce n'est PAS le chemin gapless.
+   */
+  async jumpTo(index: number): Promise<void> {
+    if (this.queue.length === 0) return;
+    const i = clamp(Math.floor(index), 0, this.queue.length - 1);
+    await this.switchTo(i);
+  }
+
+  /**
    * Point de pompe du prechargement/gapless. L'UI l'appelle a la cadence de sa barre de
    * progression (p.ex. a chaque frame d'animation). Idempotent et sans effet hors lecture.
    */

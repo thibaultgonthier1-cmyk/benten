@@ -168,3 +168,102 @@ describe("player store — logique pure", () => {
     expect(before.has(7)).toBe(false);
   });
 });
+
+/**
+ * Mutations de file A CHAUD (Task 11). Le store met a jour sa file ET pilote le moteur : les
+ * editions FUTURES passent par `engine.updateQueue(nextQueue, {keepCurrent:true})` (le moteur ne
+ * coupe jamais la courante si son id reste present) ; `jumpTo` passe par `engine.jumpTo` (saut
+ * anti-clic manuel). On injecte un moteur-bouchon qui enregistre les appels (store teste en node).
+ */
+function queueEngineStub() {
+  const calls = {
+    update: [] as Array<{ tracks: readonly TrackRow[]; opts?: { keepCurrent?: boolean } }>,
+    jumps: [] as number[],
+  };
+  return {
+    calls,
+    updateQueue(tracks: readonly TrackRow[], opts?: { keepCurrent?: boolean }): void {
+      calls.update.push({ tracks, opts });
+    },
+    jumpTo(index: number): void {
+      calls.jumps.push(index);
+    },
+  };
+}
+
+describe("player store — mutations de file (Task 11)", () => {
+  const setup = () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    // File [10, 11, 12], courante = id 11 (index 1).
+    store.getState().setQueue([track({ id: 10 }), track({ id: 11 }), track({ id: 12 })], 1);
+    return { store, eng };
+  };
+
+  it("playNext insere juste apres currentIndex sans changer la piste courante", () => {
+    const { store, eng } = setup();
+    store.getState().playNext([track({ id: 99, title: "X" })]);
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([10, 11, 99, 12]);
+    expect(s.currentIndex).toBe(1);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+    const last = eng.calls.update.at(-1)!;
+    expect(last.opts).toEqual({ keepCurrent: true });
+    expect(last.tracks.map((t) => t.id)).toEqual([10, 11, 99, 12]);
+  });
+
+  it("addToQueue ajoute en fin de file sans changer la piste courante", () => {
+    const { store, eng } = setup();
+    store.getState().addToQueue([track({ id: 77 })]);
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([10, 11, 12, 77]);
+    expect(s.currentIndex).toBe(1);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+    expect(eng.calls.update.at(-1)!.tracks.map((t) => t.id)).toEqual([10, 11, 12, 77]);
+  });
+
+  it("removeFromQueue d'une piste FUTURE ajuste la liste et conserve la courante", () => {
+    const { store, eng } = setup();
+    store.getState().removeFromQueue(2); // retire id 12 (apres la courante)
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([10, 11]);
+    expect(s.currentIndex).toBe(1);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+    expect(eng.calls.update.at(-1)!.opts).toEqual({ keepCurrent: true });
+  });
+
+  it("removeFromQueue d'une piste PASSEE decale currentIndex mais conserve la courante", () => {
+    const { store } = setup();
+    store.getState().removeFromQueue(0); // retire id 10 (avant la courante)
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([11, 12]);
+    expect(s.currentIndex).toBe(0);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+  });
+
+  it("moveInQueue reordonne et conserve la piste courante (index recale sur son id)", () => {
+    const { store } = setup();
+    store.getState().moveInQueue(0, 2); // deplace id 10 en fin : [11, 12, 10]
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([11, 12, 10]);
+    expect(s.currentIndex).toBe(0); // id 11 est maintenant en tete
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+  });
+
+  it("jumpTo change la piste courante et pilote le moteur (saut anti-clic)", () => {
+    const { store, eng } = setup();
+    store.getState().jumpTo(2);
+    const s = store.getState();
+    expect(s.currentIndex).toBe(2);
+    expect(s.currentTrack).toMatchObject({ id: 12 });
+    expect(eng.calls.jumps.at(-1)).toBe(2);
+  });
+
+  it("setQueueOpen bascule l'ouverture du panneau de file", () => {
+    const store = createPlayerStore();
+    expect(store.getState().queueOpen).toBe(false);
+    store.getState().setQueueOpen(true);
+    expect(store.getState().queueOpen).toBe(true);
+  });
+});

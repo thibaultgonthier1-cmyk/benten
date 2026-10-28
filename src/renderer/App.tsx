@@ -19,6 +19,8 @@ import { SearchResults } from "./components/SearchResults";
 import { Playlists } from "./components/Playlists";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
+import { QueuePanel } from "./components/QueuePanel";
+import { AddToPlaylistSheet } from "./components/AddToPlaylistSheet";
 
 const PAGE = 1000;
 /** Nombre max de pistes renvoyees par une recherche (regroupees ensuite en albums). */
@@ -61,6 +63,11 @@ export function App(): JSX.Element {
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   const mainRef = useRef<HTMLElement>(null);
+  // Feuille « Ajouter à une playlist » : pistes a ajouter + libelle (titre d'album).
+  const [plSheet, setPlSheet] = useState<{ open: boolean; trackIds: number[]; label?: string }>({
+    open: false,
+    trackIds: [],
+  });
 
   const currentAlbumId = usePlayer((s) => s.currentTrack?.albumId ?? null);
   const favoriteIds = usePlayer((s) => s.favoriteIds);
@@ -68,6 +75,8 @@ export function App(): JSX.Element {
   // Branche le store sur le moteur + boucle rAF (pompe tick() et anime la position).
   useEffect(() => {
     const unbind = bindEngine(playerStore, engine);
+    // Rattache le moteur au store pour les mutations de file A CHAUD (updateQueue / jumpTo).
+    playerStore.getState().attachEngine(engine);
     let raf = 0;
     // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
     // ~15 Hz (66 ms) via une porte pure pilotee par le timestamp rAF : PRELOAD_LEAD_SEC = 10 s dans
@@ -86,6 +95,7 @@ export function App(): JSX.Element {
     return () => {
       cancelAnimationFrame(raf);
       unbind();
+      playerStore.getState().attachEngine(null);
     };
   }, [engine]);
 
@@ -154,6 +164,21 @@ export function App(): JSX.Element {
     },
     [controls],
   );
+
+  // Actions du menu « ⋯ » des cartes d'album (Task 11 / Task 10 replie). Memoisees : AlbumCard est
+  // `memo`, donc des callbacks stables evitent de re-rendre toute la grille virtualisee.
+  const albumPlayNext = useCallback((album: Album): void => {
+    playerStore.getState().playNext(album.tracks);
+  }, []);
+  const albumAddToQueue = useCallback((album: Album): void => {
+    playerStore.getState().addToQueue(album.tracks);
+  }, []);
+  const albumAddToPlaylist = useCallback((album: Album): void => {
+    setPlSheet({ open: true, trackIds: album.tracks.map((t) => t.id), label: album.title });
+  }, []);
+  const closePlSheet = useCallback((): void => {
+    setPlSheet((s) => ({ ...s, open: false }));
+  }, []);
 
   const runScan = useCallback(
     async (pathArg?: string): Promise<void> => {
@@ -377,6 +402,9 @@ export function App(): JSX.Element {
                 scrollRef={mainRef}
                 playingAlbumId={currentAlbumId}
                 onPlay={playAlbum}
+                onPlayNext={albumPlayNext}
+                onAddToQueue={albumAddToQueue}
+                onAddToPlaylist={albumAddToPlaylist}
               />
             </section>
           )}
@@ -386,6 +414,13 @@ export function App(): JSX.Element {
       </div>
 
       <NowPlaying controls={controls} />
+      <QueuePanel />
+      <AddToPlaylistSheet
+        open={plSheet.open}
+        onClose={closePlSheet}
+        trackIds={plSheet.trackIds}
+        label={plSheet.label}
+      />
     </>
   );
 }
