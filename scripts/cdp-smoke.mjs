@@ -86,7 +86,9 @@ function evaluate(wsUrl, expression, timeout) {
         resolve(msg.result?.result?.value);
       }
     });
-    ws.addEventListener("error", (ev) => reject(new Error(ev?.message ?? "websocket error")));
+    ws.addEventListener("error", (ev) =>
+      reject(new Error(ev?.error?.message ?? ev?.message ?? "websocket error")),
+    );
     ws.addEventListener("close", () => reject(new Error("websocket closed before result")));
   });
   return withTimeout(result, timeout).finally(() => {

@@ -162,6 +162,42 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     await engine.setQueue([t0, t1], 0);
     expect(engine.getState()).toMatchObject({ status: "ready", trackId: 10, durationSec: 30 });
     expect(engine.getQueueIndex()).toBe(0);
+    expect(engine.getState().queueIndex).toBe(0);
+  });
+
+  it("getState().queueIndex refflete l'index courant (ready, promotion gapless, switchTo)", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+      ["C:\\m\\2.flac", 12],
+    ]);
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    await engine.setQueue(
+      [
+        track({ id: 10, path: "C:\\m\\0.flac" }),
+        track({ id: 11, path: "C:\\m\\1.flac" }),
+        track({ id: 12, path: "C:\\m\\2.flac" }),
+      ],
+      1,
+    );
+    // Au chargement, l'index courant (1) est expose directement par getState().
+    expect(engine.getState().queueIndex).toBe(1);
+
+    engine.play();
+    ctx.currentTime = 7; // sur t11 (dur 15), reste 8 < lead 10 -> programme la suivante (t12)
+    engine.tick();
+    await flush();
+
+    // Promotion gapless : l'index courant devient 2, reflete DIRECTEMENT dans getState().queueIndex.
+    ctx.currentTime = 15;
+    ctx.sources[0]!.onended?.();
+    expect(engine.getState().queueIndex).toBe(2);
+    expect(engine.getState().trackId).toBe(12);
+
+    // Saut manuel (switchTo) : l'index suit aussi.
+    await engine.jumpTo(0);
+    await flush();
+    expect(engine.getState().queueIndex).toBe(0);
   });
 
   it("precharge la suivante seulement quand shouldPreload passe true", async () => {
@@ -664,6 +700,72 @@ describe("AudioEngine — shuffle & repeat (Task 12)", () => {
     expect(scheduled.stopped).toBe(false);
     expect(ctx.liveSources().length).toBe(1);
     expect(engine.getState().positionSec).toBeCloseTo(0, 5);
+  });
+
+  it("repeat:one — reutilise le buffer courant (aucun readBytes/decode au bouclage), gapless preserve", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+    ]);
+    const decoded: string[] = [];
+    let reads = 0;
+    // readBytes instrumente : on compte les relectures disque pour prouver la reutilisation.
+    const countingRead = async (path: string): Promise<ArrayBuffer> => {
+      reads++;
+      return readBytes(path);
+    };
+    const engine = new AudioEngine(
+      ctx as unknown as AudioContext,
+      makeDecoder(durs, (p) => decoded.push(p)),
+      countingRead,
+    );
+    await engine.setQueue(
+      [track({ id: 10, path: "C:\\m\\0.flac" }), track({ id: 11, path: "C:\\m\\1.flac" })],
+      0,
+    );
+    engine.setRepeatMode("one");
+    engine.play();
+    // La charge initiale a lu+decode UNE fois ; on remet les compteurs a zero pour isoler le bouclage.
+    expect(reads).toBe(1);
+    expect(decoded).toEqual(["C:\\m\\0.flac"]);
+    reads = 0;
+    decoded.length = 0;
+
+    // 1er bouclage : la MEME piste est programmee comme suivante SANS relire ni redecoder.
+    ctx.currentTime = 11; // sur t10 (dur 20), reste 9 < 10
+    engine.tick();
+    await flush();
+    expect(reads).toBe(0);
+    expect(decoded).toEqual([]);
+    expect(ctx.sources.length).toBe(2);
+    const scheduled1 = ctx.sources[1]!;
+    expect(scheduled1.buffer!.duration).toBe(20); // meme piste : buffer courant reutilise
+    expect(ctx.liveSources().length).toBe(2);
+
+    // Fin naturelle -> promotion gapless de la meme piste (pas d'evenement ended).
+    ctx.currentTime = 20;
+    ctx.sources[0]!.onended?.();
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+    expect(engine.getQueueIndex()).toBe(0);
+    expect(scheduled1.stopped).toBe(false); // source promue vivante
+    expect(ctx.liveSources().length).toBe(1);
+    expect(engine.getState().positionSec).toBeCloseTo(0, 5);
+
+    // 2e bouclage : toujours aucune relecture/redecodage, la source promue sert de buffer reutilise.
+    ctx.currentTime = 31; // demarree a 20, offset 0 -> position 11, reste 9 < 10
+    engine.tick();
+    await flush();
+    expect(reads).toBe(0);
+    expect(decoded).toEqual([]);
+    expect(ctx.sources.length).toBe(3);
+    const scheduled2 = ctx.sources[2]!;
+    expect(scheduled2.buffer!.duration).toBe(20);
+
+    ctx.currentTime = 40;
+    ctx.sources[1]!.onended?.();
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+    expect(engine.getQueueIndex()).toBe(0);
+    expect(ctx.liveSources().length).toBe(1);
   });
 
   it("shuffle — l'enchainement suit `order` ; la courante est preservee au toggle (aucune coupure)", async () => {

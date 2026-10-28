@@ -49,6 +49,11 @@ describe("createWatcher — veille de dossiers (debounce + agregation + robustes
     const [paths, opts] = raw.mock.calls[0]!;
     expect(paths).toEqual(["/music"]);
     expect(opts).toMatchObject({ ignoreInitial: true });
+    // Un fichier en cours d'ECRITURE ne doit pas declencher de change premature : chokidar attend
+    // que la taille se stabilise (awaitWriteFinish) avant d'emettre, pour des metadonnees completes.
+    expect(opts).toMatchObject({
+      awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
+    });
     // Les trois evenements pertinents sont abonnes.
     const events = watcher.on.mock.calls.map((c) => c[0]);
     expect(events).toEqual(expect.arrayContaining(["add", "change", "unlink"]));

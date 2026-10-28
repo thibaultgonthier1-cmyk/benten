@@ -34,6 +34,7 @@ export function AddToPlaylistSheet({
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useFocusTrap(ref, { active: open, onEscape: onClose });
@@ -42,6 +43,7 @@ export function AddToPlaylistSheet({
   useEffect(() => {
     if (!open) return;
     setDone(null);
+    setError(null);
     setName("");
     let alive = true;
     const api = playlistsApi();
@@ -66,9 +68,14 @@ export function AddToPlaylistSheet({
     const api = playlistsApi();
     if (!api || busy || trackIds.length === 0) return;
     setBusy(true);
+    setError(null);
     try {
       await api.add(id, trackIds);
       setDone(`Ajouté à « ${plName} »`);
+    } catch {
+      // Un rejet IPC ne doit pas devenir une promesse non geree silencieuse : on le rend visible.
+      setDone(null);
+      setError(`Impossible d'ajouter à « ${plName} ». Réessaie.`);
     } finally {
       setBusy(false);
     }
@@ -79,11 +86,23 @@ export function AddToPlaylistSheet({
     const n = name.trim();
     if (!api || !n || busy || trackIds.length === 0) return;
     setBusy(true);
+    setError(null);
     try {
       const id = await api.create(n);
       await api.add(id, trackIds);
       setName("");
       setDone(`Créée et remplie : « ${n} »`);
+      // Rafraichit la liste pour que la nouvelle playlist (et les trackCounts a jour) apparaissent
+      // sans rouvrir la feuille. Un echec de ce refresh ne doit pas marquer l'operation en erreur :
+      // l'ajout, lui, a reussi.
+      try {
+        setLists(await api.list());
+      } catch {
+        /* best-effort : on garde la liste courante si le rafraichissement echoue */
+      }
+    } catch {
+      setDone(null);
+      setError(`Impossible de créer « ${n} ». Réessaie.`);
     } finally {
       setBusy(false);
     }
@@ -176,6 +195,12 @@ export function AddToPlaylistSheet({
         {done && (
           <p className="scan-note atp-done" role="status">
             {done}
+          </p>
+        )}
+
+        {error && (
+          <p className="scan-note atp-error" role="alert" style={{ color: "var(--magenta)" }}>
+            {error}
           </p>
         )}
       </div>

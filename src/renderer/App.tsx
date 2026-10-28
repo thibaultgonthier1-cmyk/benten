@@ -64,6 +64,9 @@ export function App(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TrackRow[]>([]);
+  // `true` seulement quand une recherche a abouti pour le terme courant : empeche le clignotement de
+  // « aucun resultat » pendant l'anti-rebond, avant que la premiere reponse ne soit arrivee.
+  const [searched, setSearched] = useState(false);
   const [scanPath, setScanPath] = useState("");
   const [scanning, setScanning] = useState(false);
   const [scanMsg, setScanMsg] = useState<string | null>(null);
@@ -297,17 +300,27 @@ export function App(): JSX.Element {
     const q = query.trim();
     if (!q) {
       setResults([]);
+      setSearched(false);
       return;
     }
+    // Nouveau terme : la recherche n'a pas encore abouti -> on masque la note « aucun resultat »
+    // jusqu'a la reponse (pas de clignotement du vide pendant l'anti-rebond).
+    setSearched(false);
     let cancelled = false;
     const id = setTimeout(() => {
       window.benten.library
         .search({ q, limit: SEARCH_LIMIT })
         .then((rows) => {
-          if (!cancelled) setResults(rows);
+          if (!cancelled) {
+            setResults(rows);
+            setSearched(true);
+          }
         })
         .catch(() => {
-          if (!cancelled) setResults([]);
+          if (!cancelled) {
+            setResults([]);
+            setSearched(true);
+          }
         });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
@@ -510,6 +523,7 @@ export function App(): JSX.Element {
             <SearchResults
               tracks={results}
               query={query}
+              searched={searched}
               scrollRef={mainRef}
               playingAlbumId={currentAlbumId}
               onPlay={playAlbum}
