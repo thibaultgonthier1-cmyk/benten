@@ -1,7 +1,11 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
-import type { AudioEngine, PlaybackState, PlaybackStatus } from "../audio/engine";
-import type { TrackRow } from "../../shared/types";
+import type { AudioEngine, PlaybackState, PlaybackStatus, RepeatMode } from "../audio/engine";
+import type { QualityMode, TrackRow } from "../../shared/types";
+
+export type { QualityMode } from "../../shared/types";
+
+export type { RepeatMode } from "../audio/engine";
 
 /**
  * Etat de lecture pour l'UI (store Zustand), DERIVE des evenements du moteur.
@@ -16,6 +20,24 @@ import type { TrackRow } from "../../shared/types";
  * La logique est volontairement pure et sans React : `createPlayerStore()` cree un store vanilla
  * testable hors composant ; `usePlayer` l'adapte en hook pour les composants.
  */
+/**
+ * Sous-ensemble du moteur dont le store a besoin pour piloter la file A CHAUD (Task 11). Branche
+ * via `attachEngine` (App) ; absent en tests node, ou les mutations restent de pures operations de
+ * liste (le moteur est alors stube ou simplement non rattache).
+ */
+export interface QueueEngineApi {
+  /** Mutation de file sans couper la courante (editions futures). */
+  updateQueue(tracks: readonly TrackRow[], opts?: { keepCurrent?: boolean }): void;
+  /** Saut manuel vers un index (chemin anti-clic). */
+  jumpTo(index: number): void | Promise<void>;
+  /** Mode de repetition (off / all / one). */
+  setRepeatMode(mode: RepeatMode): void;
+  /** Lecture aleatoire. */
+  setShuffle(on: boolean): void;
+  /** Volume utilisateur [0,1] sur le noeud de volume dedie (Task 13). */
+  setVolume(v01: number): void;
+}
+
 export interface PlayerState {
   /** File d'attente courante (pistes d'un album, en general). */
   queue: readonly TrackRow[];
@@ -31,6 +53,18 @@ export interface PlayerState {
   durationSec: number;
   /** Vue « lecture plein ecran » ouverte. */
   nowPlayingOpen: boolean;
+  /** Panneau « file d'attente » ouvert. */
+  queueOpen: boolean;
+  /** Ensemble des ids de pistes favorites — source de verite UI pour le rendu instantane du cœur. */
+  favoriteIds: ReadonlySet<number>;
+  /** Mode de repetition (reflete l'etat du moteur). */
+  repeat: RepeatMode;
+  /** Lecture aleatoire active (reflete l'etat du moteur). */
+  shuffle: boolean;
+  /** Mode de qualite courant (Task 13) ; son changement recree proprement le contexte audio. */
+  qualityMode: QualityMode;
+  /** Volume utilisateur [0,1] (Task 13). */
+  volume: number;
 
   // --- Actions (pures) ------------------------------------------------------------------------
   /** Fixe la file et la piste courante (etat optimiste ; le moteur confirmera via statechange). */
@@ -47,6 +81,52 @@ export interface PlayerState {
   applyEngineState(state: PlaybackState): void;
   /** Ouvre/ferme la vue lecture. */
   setNowPlayingOpen(open: boolean): void;
+  /** Ouvre/ferme le panneau de file d'attente. */
+  setQueueOpen(open: boolean): void;
+
+  // --- Mutations de file A CHAUD (Task 11) ----------------------------------------------------
+  /** Rattache le moteur (pilotage de file). `null` detache (nettoyage). */
+  attachEngine(engine: QueueEngineApi | null): void;
+  /** Insere des pistes juste apres la courante (la courante ne bouge pas). */
+  playNext(tracks: readonly TrackRow[]): void;
+  /** Ajoute des pistes en fin de file. */
+  addToQueue(tracks: readonly TrackRow[]): void;
+  /** Retire la piste a `index` (recale la courante si besoin, la preserve si possible). */
+  removeFromQueue(index: number): void;
+  /** Deplace la piste de `from` vers `to` (la courante est preservee par identite). */
+  moveInQueue(from: number, to: number): void;
+  /** Saute a la piste `index` (saut anti-clic via le moteur). */
+  jumpTo(index: number): void;
+  /** Fixe le mode de repetition (etat + moteur). */
+  setRepeat(mode: RepeatMode): void;
+  /** Active/desactive la lecture aleatoire (etat + moteur). */
+  setShuffle(on: boolean): void;
+  /** Regle le volume utilisateur [0,1] (etat + moteur, noeud dedie). */
+  setVolume(v01: number): void;
+  /**
+   * Change le mode de qualite (etat) PUIS declenche la recreation PROPRE du contexte audio via le
+   * gestionnaire rattache par l'App (`attachQualityRebuild`). Hors App (tests node), seul l'etat
+   * change : la recreation de contexte appartient a l'App (elle seule cree l'`AudioContext`).
+   */
+  setQualityMode(mode: QualityMode): void;
+  /**
+   * Rattache le gestionnaire de recreation de contexte (fourni par l'App). `null` detache (nettoyage
+   * au demontage). Appele par `setQualityMode` avec le nouveau mode.
+   */
+  attachQualityRebuild(fn: ((mode: QualityMode) => void) | null): void;
+  /**
+   * Bascule l'appartenance de `trackId` a `favoriteIds` (etat optimiste, nouvelle reference de Set),
+   * puis persiste via IPC si `window.benten` est present ; en cas d'echec de persistance, l'etat
+   * local est reconcilie (la bascule est annulee). Hors fenetre (tests node), seul l'etat local change.
+   */
+  toggleFavorite(trackId: number): void;
+  /** Amorce `favoriteIds` depuis `favorites:list` (no-op hors `window.benten`). */
+  loadFavorites(): Promise<void>;
+}
+
+/** Acces defensif a l'API favoris : `undefined` hors fenetre (tests node) ou si non exposee. */
+function favoritesApi(): { toggle(id: number, on: boolean): Promise<void>; list(): Promise<number[]> } | undefined {
+  return typeof window !== "undefined" ? window.benten?.favorites : undefined;
 }
 
 const clampIndex = (i: number, len: number): number =>
@@ -56,6 +136,12 @@ export type PlayerStore = StoreApi<PlayerState>;
 
 /** Cree un store de lecture independant (isole, pour tests ou multi-instances). */
 export function createPlayerStore(): PlayerStore {
+  // Moteur rattache hors de l'etat rendu (objet mutable, jamais serialise/affiche). Absent en node.
+  let queueEngine: QueueEngineApi | null = null;
+  // Gestionnaire de recreation de contexte (fourni par l'App : elle seule cree l'`AudioContext`).
+  // Hors App (tests node), reste `null` : `setQualityMode` ne fait alors que changer l'etat.
+  let qualityRebuild: ((mode: QualityMode) => void) | null = null;
+
   return createStore<PlayerState>((set, get) => ({
     queue: [],
     currentIndex: -1,
@@ -64,6 +150,12 @@ export function createPlayerStore(): PlayerStore {
     positionSec: 0,
     durationSec: 0,
     nowPlayingOpen: false,
+    queueOpen: false,
+    favoriteIds: new Set<number>(),
+    repeat: "off",
+    shuffle: false,
+    qualityMode: "balanced",
+    volume: 1,
 
     setQueue(tracks, index = 0) {
       const queue = tracks.slice();
@@ -129,6 +221,145 @@ export function createPlayerStore(): PlayerStore {
 
     setNowPlayingOpen(open) {
       set({ nowPlayingOpen: open });
+    },
+
+    setQueueOpen(open) {
+      set({ queueOpen: open });
+    },
+
+    // --- Mutations de file A CHAUD (Task 11) --------------------------------------------------
+    // Chaque mutation FUTURE met a jour la file du store PUIS pilote le moteur via
+    // `updateQueue(nextQueue, {keepCurrent:true})` : le moteur garde la source courante intacte si
+    // son id persiste (zero coupure), et ne reprogramme le gapless que si la suivante a change. La
+    // reconciliation `applyEngineState` (statechange) reste la verite finale sur index/piste.
+
+    attachEngine(engine) {
+      queueEngine = engine;
+    },
+
+    playNext(tracks) {
+      if (tracks.length === 0) return;
+      const { queue, currentIndex } = get();
+      const at = currentIndex < 0 ? queue.length : currentIndex + 1;
+      const nextQueue = queue.slice();
+      nextQueue.splice(at, 0, ...tracks);
+      // L'insertion est APRES la courante : currentIndex / currentTrack ne bougent pas.
+      set({ queue: nextQueue });
+      queueEngine?.updateQueue(nextQueue, { keepCurrent: true });
+    },
+
+    addToQueue(tracks) {
+      if (tracks.length === 0) return;
+      const nextQueue = [...get().queue, ...tracks];
+      set({ queue: nextQueue });
+      queueEngine?.updateQueue(nextQueue, { keepCurrent: true });
+    },
+
+    removeFromQueue(index) {
+      const { queue, currentIndex, currentTrack } = get();
+      if (index < 0 || index >= queue.length) return;
+      const nextQueue = queue.slice();
+      nextQueue.splice(index, 1);
+
+      let nextIndex = currentIndex;
+      let nextTrack = currentTrack;
+      let resetPos = false;
+      if (index < currentIndex) {
+        nextIndex = currentIndex - 1; // la courante a glisse d'un cran
+      } else if (index === currentIndex) {
+        // On retire la courante : estimation optimiste (le moteur confirmera via statechange).
+        nextIndex = clampIndex(currentIndex, nextQueue.length);
+        nextTrack = nextIndex >= 0 ? (nextQueue[nextIndex] ?? null) : null;
+        resetPos = true;
+      }
+      set({
+        queue: nextQueue,
+        currentIndex: nextIndex,
+        currentTrack: nextTrack,
+        ...(resetPos ? { positionSec: 0, durationSec: nextTrack?.durationSec ?? 0 } : {}),
+      });
+      queueEngine?.updateQueue(nextQueue, { keepCurrent: true });
+    },
+
+    moveInQueue(from, to) {
+      const { queue, currentIndex, currentTrack } = get();
+      const len = queue.length;
+      if (from < 0 || from >= len || to < 0 || to >= len || from === to) return;
+      const nextQueue = queue.slice();
+      const [moved] = nextQueue.splice(from, 1);
+      nextQueue.splice(to, 0, moved!);
+      // La courante est preservee par IDENTITE : on retrouve son nouvel index.
+      const nextIndex = currentTrack ? nextQueue.indexOf(currentTrack) : currentIndex;
+      set({ queue: nextQueue, currentIndex: nextIndex, currentTrack });
+      queueEngine?.updateQueue(nextQueue, { keepCurrent: true });
+    },
+
+    jumpTo(index) {
+      const { queue } = get();
+      const i = clampIndex(index, queue.length);
+      if (i < 0) return;
+      set({
+        currentIndex: i,
+        currentTrack: queue[i] ?? null,
+        positionSec: 0,
+        durationSec: queue[i]?.durationSec ?? 0,
+      });
+      void queueEngine?.jumpTo(i);
+    },
+
+    setRepeat(mode) {
+      set({ repeat: mode });
+      queueEngine?.setRepeatMode(mode);
+    },
+
+    setShuffle(on) {
+      set({ shuffle: on });
+      queueEngine?.setShuffle(on);
+    },
+
+    setVolume(v01) {
+      const v = Math.max(0, Math.min(1, Number.isFinite(v01) ? v01 : 1));
+      set({ volume: v });
+      queueEngine?.setVolume?.(v);
+    },
+
+    setQualityMode(mode) {
+      set({ qualityMode: mode });
+      // La recreation PROPRE du contexte appartient a l'App (seule a creer l'`AudioContext`).
+      qualityRebuild?.(mode);
+    },
+
+    attachQualityRebuild(fn) {
+      qualityRebuild = fn;
+    },
+
+    toggleFavorite(trackId) {
+      const next = new Set(get().favoriteIds);
+      const nowOn = !next.has(trackId);
+      if (nowOn) next.add(trackId);
+      else next.delete(trackId);
+      set({ favoriteIds: next });
+
+      const api = favoritesApi();
+      if (!api) return; // hors fenetre (tests) : etat local uniquement.
+      void api.toggle(trackId, nowOn).catch(() => {
+        // Reconciliation : la persistance a echoue, on annule notre bascule sur cet id precis.
+        const revert = new Set(get().favoriteIds);
+        if (nowOn) revert.delete(trackId);
+        else revert.add(trackId);
+        set({ favoriteIds: revert });
+      });
+    },
+
+    async loadFavorites() {
+      const api = favoritesApi();
+      if (!api) return;
+      try {
+        const ids = await api.list();
+        set({ favoriteIds: new Set(ids) });
+      } catch {
+        /* amorcage best-effort : on garde l'etat courant en cas d'echec. */
+      }
     },
   }));
 }

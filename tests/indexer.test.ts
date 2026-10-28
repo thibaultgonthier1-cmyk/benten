@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { openDb } from "../src/main/library/db";
 import { indexLibrary } from "../src/main/library/indexer";
-import { getAllTracks } from "../src/main/library/repository";
+import { getAllTracks, getTrackStat } from "../src/main/library/repository";
 import type { ScanSummary, TrackInput } from "../src/shared/types";
 
 const FIX = join(__dirname, "fixtures");
@@ -26,9 +26,10 @@ describe("indexLibrary", () => {
 
   it("indexe les fichiers lisibles et compte .m4p + fichier corrompu en skipped", async () => {
     const res = await indexLibrary(db, [FIX]);
-    // 6 (library) + 1 (untagged) lisibles ; 1 .m4p + 1 flac tronque ignores.
-    expect(res).toEqual({ added: 7, skipped: 2 });
-    expect(count()).toBe(7);
+    // 6 (library) + 1 (untagged) + 1 (compilation) + 1 (multidisc) lisibles ;
+    // 1 .m4p + 1 flac tronque ignores.
+    expect(res).toEqual({ added: 9, skipped: 2 });
+    expect(count()).toBe(9);
     // Aucune piste illisible n'est inseree.
     expect(getAllTracks(db, { limit: 100, offset: 0 }).every((t) => t.playable)).toBe(true);
   });
@@ -38,7 +39,7 @@ describe("indexLibrary", () => {
     const again = await indexLibrary(db, [FIX]);
     expect(again.added).toBe(0);
     expect(again.skipped).toBe(2);
-    expect(count()).toBe(7);
+    expect(count()).toBe(9);
   });
 
   it("emet la progression au moins une fois, avec un dernier etat coherent", async () => {
@@ -46,7 +47,7 @@ describe("indexLibrary", () => {
     const res = await indexLibrary(db, [FIX], (p) => events.push({ ...p }));
     expect(events.length).toBeGreaterThanOrEqual(1);
     const last = events[events.length - 1]!;
-    expect(last.scanned).toBe(9);
+    expect(last.scanned).toBe(11);
     expect(last.added).toBe(res.added);
     expect(last.skipped).toBe(res.skipped);
     // Monotone.
@@ -77,8 +78,8 @@ describe("indexLibrary", () => {
       calls++;
       if (calls === 2) throw new Error("boom");
       return {
-        path, title: "t", artist: "a", album: "b", trackNo: null, durationSec: 1,
-        format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true, artKey: null,
+        path, title: "t", artist: "a", album: "b", albumArtist: null, trackNo: null, discNo: null, durationSec: 1,
+        format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true, artKey: null, mtimeMs: null, sizeBytes: null,
       };
     };
     let last: ScanSummary | undefined;
@@ -98,8 +99,8 @@ describe("indexLibrary", () => {
       await new Promise((r) => setTimeout(r, 15));
       inFlight--;
       return {
-        path, title: path, artist: "a", album: "b", trackNo: null, durationSec: 1,
-        format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true, artKey: null,
+        path, title: path, artist: "a", album: "b", albumArtist: null, trackNo: null, discNo: null, durationSec: 1,
+        format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true, artKey: null, mtimeMs: null, sizeBytes: null,
       };
     };
     // 6 fichiers, concurrence 3 : le pic doit etre exactement 3 (ni 1, ni 6).
@@ -123,6 +124,39 @@ describe("indexLibrary", () => {
     expect(count()).toBe(0);
     // Aucun etat de progression ne rapporte de titres ajoutes qui n'ont pas ete ecrits.
     expect(events.every((e) => e.added === 0)).toBe(true);
+  });
+
+  // Indexation incrementale : persistance mtime/size + saut de pochette.
+  it("persiste mtime/size et saute la re-extraction de pochette quand ils sont inchanges", async () => {
+    const lib = join(FIX, "library");
+    const meta = async (path: string): Promise<TrackInput> => ({
+      path, title: "t", artist: "a", album: "b", albumArtist: null, trackNo: null, discNo: null,
+      durationSec: 1, format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true,
+      artKey: null, mtimeMs: null, sizeBytes: null,
+    });
+    const getArt = vi.fn(async (path: string) => `art:${path}`);
+    let mtime = 1000;
+    const stat = async () => ({ mtimeMs: mtime, size: 4242 });
+
+    // Passe 1 : base vide → getArt appele pour chaque piste ; mtime/size persistes.
+    await indexLibrary(db, [lib], undefined, { readMetadata: meta, getArt, stat });
+    expect(getArt.mock.calls.length).toBe(6);
+    const rows = getAllTracks(db, { limit: 100, offset: 0 });
+    expect(rows).toHaveLength(6);
+    expect(rows.every((r) => r.mtimeMs === 1000 && r.sizeBytes === 4242)).toBe(true);
+    expect(rows.every((r) => r.artKey !== null)).toBe(true);
+
+    // Passe 2 : mtime/size identiques et art_key non nul → getArt N'EST PAS rappele.
+    getArt.mockClear();
+    await indexLibrary(db, [lib], undefined, { readMetadata: meta, getArt, stat });
+    expect(getArt).not.toHaveBeenCalled();
+
+    // Passe 3 : mtime change → getArt EST rappele pour chaque piste.
+    getArt.mockClear();
+    mtime = 2000;
+    await indexLibrary(db, [lib], undefined, { readMetadata: meta, getArt, stat });
+    expect(getArt.mock.calls.length).toBe(6);
+    expect(getTrackStat(db, rows[0]!.path)?.mtimeMs).toBe(2000);
   });
 
   it("une erreur d'ecriture DB en milieu de passe : added reflete uniquement les lots ecrits", async () => {

@@ -19,16 +19,23 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
   const status = usePlayer((s) => s.status);
   const positionSec = usePlayer((s) => s.positionSec);
   const durationSec = usePlayer((s) => s.durationSec);
+  const isFav = usePlayer((s) => (track ? s.favoriteIds.has(track.id) : false));
+  const repeat = usePlayer((s) => s.repeat);
+  const shuffle = usePlayer((s) => s.shuffle);
 
   if (!track) return null;
+  const trackId = track.id;
   const playing = status === "playing";
   const dur = durationSec || track.durationSec || 0;
   const frac = dur > 0 ? Math.min(1, positionSec / dur) : 0;
   const pct = frac * 100;
   const seed = `${track.albumId}:${track.album}`;
 
-  const stop = (e: React.MouseEvent): void => e.stopPropagation();
   const open = (): void => playerStore.getState().setNowPlayingOpen(true);
+  const cycleRepeat = (): void =>
+    playerStore.getState().setRepeat(repeat === "off" ? "all" : repeat === "all" ? "one" : "off");
+  const repeatLabel =
+    repeat === "one" ? "Repeter : une piste" : repeat === "all" ? "Repeter : tout" : "Repetition desactivee";
 
   const onBarKey = (e: React.KeyboardEvent): void => {
     if (dur <= 0) return;
@@ -45,27 +52,37 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
   };
 
   return (
-    <div
-      className="player"
-      role="button"
-      tabIndex={0}
-      aria-label="Ouvrir la vue lecture"
-      onClick={open}
-      onKeyDown={(e) => {
-        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
-          e.preventDefault();
-          open();
-        }
-      }}
-    >
-      <div className="mp-art">
-        <Cover artKey={track.artKey} seed={seed} size={128} alt={track.album} />
-      </div>
-      <div className="mp-meta">
-        <div className="t">{track.title}</div>
-        <div className="a">{track.artist}</div>
-      </div>
-      <div className="mp-controls" onClick={stop}>
+    // Conteneur PRESENTATIONNEL (aucun role/handler) : les anciens `role="button"` + boutons
+    // imbriques formaient un interactif-dans-interactif (signale a la revue Phase 1). L'ouverture de
+    // la vue lecture passe maintenant par un bouton dedie `.mp-open` (pochette + titre), distinct et
+    // frere des autres controles, chacun focusable separement.
+    <div className="player">
+      <button className="mp-open" type="button" aria-label="Ouvrir la vue lecture" onClick={open}>
+        <div className="mp-art">
+          <Cover artKey={track.artKey} seed={seed} size={128} alt={track.album} />
+        </div>
+        <div className="mp-meta">
+          <div className="t">{track.title}</div>
+          <div className="a">{track.artist}</div>
+        </div>
+      </button>
+      <div className="mp-controls">
+        <button
+          className={"ic" + (shuffle ? " on" : "")}
+          type="button"
+          title={shuffle ? "Lecture aleatoire activee" : "Lecture aleatoire"}
+          aria-label="Lecture aleatoire"
+          aria-pressed={shuffle}
+          onClick={() => playerStore.getState().setShuffle(!shuffle)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M4 5h3.5c1.3 0 2.5.6 3.2 1.7l5.6 8.6c.7 1.1 1.9 1.7 3.2 1.7H21" />
+            <path d="M4 19h3.5c1.3 0 2.5-.6 3.2-1.7" />
+            <path d="M14.5 6.7C15.2 5.6 16.4 5 17.7 5H21" />
+            <path d="M18 2.5L21 5l-3 2.5" />
+            <path d="M18 16.5L21 19l-3 2.5" />
+          </svg>
+        </button>
         <button className="ic" type="button" title="Precedent" aria-label="Morceau precedent" onClick={controls.prev}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 6v12M20 6L9 12l11 6z" />
@@ -87,8 +104,47 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
             <path d="M17 6v12M4 6l11 6L4 18z" />
           </svg>
         </button>
+        <button
+          className={"ic rep" + (repeat !== "off" ? " on" : "")}
+          type="button"
+          title={repeatLabel}
+          aria-label={repeatLabel}
+          aria-pressed={repeat !== "off"}
+          onClick={cycleRepeat}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M17 2l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+            <path d="M7 22l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+          </svg>
+          {repeat === "one" && <span className="rep-one" aria-hidden="true">1</span>}
+        </button>
       </div>
-      <div className="mp-right" onClick={stop}>
+      <div className="mp-right">
+        <button
+          className="ic"
+          type="button"
+          title="File d'attente"
+          aria-label="Ouvrir la file d'attente"
+          onClick={() => playerStore.getState().setQueueOpen(true)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 6h12v2H4zM4 11h12v2H4zM4 16h8v2H4zM16 14l6 3-6 3z" />
+          </svg>
+        </button>
+        <button
+          className={"ic fav" + (isFav ? " on" : "")}
+          type="button"
+          title={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
+          aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
+          aria-pressed={isFav}
+          onClick={() => playerStore.getState().toggleFavorite(trackId)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20.5l-1.3-1.2C5.4 14.5 2.5 11.9 2.5 8.6 2.5 6.2 4.4 4.3 6.8 4.3c1.4 0 2.7.65 3.6 1.7l1.6 1.9 1.6-1.9c.9-1.05 2.2-1.7 3.6-1.7 2.4 0 4.3 1.9 4.3 4.3 0 3.3-2.9 5.9-8.2 10.7L12 20.5z" />
+          </svg>
+        </button>
         <span className="mp-time">{formatTime(positionSec)}</span>
         <div
           className="mp-bar"

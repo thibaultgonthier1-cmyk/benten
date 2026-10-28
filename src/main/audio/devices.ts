@@ -64,3 +64,55 @@ export async function defaultOutputDevice(): Promise<OutputDevice> {
     return FALLBACK;
   }
 }
+
+/**
+ * Meilleur effort : NOMS de tous les peripheriques de rendu audio actifs (Status OK) sous Windows,
+ * via une breve requete CIM PowerShell. Memes garde-fous que `queryWindowsDeviceName` (asynchrone,
+ * bornee, sortie masquee, tout avale) : renvoie un tableau (possiblement vide), jamais d'exception.
+ */
+async function queryWindowsDeviceNames(): Promise<string[]> {
+  try {
+    const script =
+      "$ErrorActionPreference='SilentlyContinue';" +
+      "(Get-CimInstance Win32_SoundDevice |" +
+      " Where-Object { $_.Status -eq 'OK' } |" +
+      " Select-Object -ExpandProperty Name)";
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 2500, windowsHide: true, encoding: "utf8" },
+    );
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const line of stdout.split(/\r?\n/)) {
+      const name = line.trim();
+      if (name.length > 0 && !seen.has(name)) {
+        seen.add(name);
+        names.push(name);
+      }
+    }
+    return names;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Enumeration FINE des peripheriques de sortie (Task 13). Comme `defaultOutputDevice`, elle est
+ * INFORMATIVE (on ne pilote pas la sortie) et ne rejette JAMAIS. Garantie : le tableau renvoye
+ * n'est JAMAIS vide — si l'OS ne nous donne rien (plateforme non geree, enumeration en echec), on
+ * retombe sur le peripherique par defaut (lui-meme replie sur un nom generique). `sampleRate` reste
+ * absent tant qu'on ne peut pas l'obtenir de facon fiable sans dependance supplementaire.
+ */
+export async function listOutputDevices(): Promise<OutputDevice[]> {
+  try {
+    if (process.platform === "win32") {
+      const names = await queryWindowsDeviceNames();
+      if (names.length > 0) return names.map((name) => ({ name }));
+    }
+  } catch {
+    /* on retombe sur le defaut ci-dessous */
+  }
+  // Repli : au moins le peripherique par defaut (jamais un tableau vide).
+  return [await defaultOutputDevice()];
+}

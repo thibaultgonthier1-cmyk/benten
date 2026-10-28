@@ -67,13 +67,17 @@ export async function readMetadata(path: string): Promise<TrackInput> {
     title: guess.title,
     artist: guess.artist,
     album: guess.album,
+    albumArtist: null,
     trackNo: guess.trackNo,
+    discNo: null,
     durationSec: 0,
     format: ext.replace(/^\./, "").toUpperCase(),
     sampleRate: null,
     bitDepth: null,
     playable: false,
     artKey: null,
+    mtimeMs: null,
+    sizeBytes: null,
   };
 
   if (DRM_EXTENSIONS.has(ext)) return unplayable;
@@ -89,13 +93,17 @@ export async function readMetadata(path: string): Promise<TrackInput> {
       title: clean(common.title) || guess.title,
       artist: clean(common.artist) || clean(common.albumartist) || guess.artist,
       album: clean(common.album) || guess.album,
+      albumArtist: clean(common.albumartist) || null,
       trackNo: common.track.no ?? guess.trackNo,
+      discNo: common.disk?.no ?? null,
       durationSec: format.duration ?? 0,
       format: formatLabel(ext, format.container, format.codec),
       sampleRate: format.sampleRate,
       bitDepth: format.bitsPerSample ?? null,
       playable: true,
       artKey: null,
+      mtimeMs: null,
+      sizeBytes: null,
     };
   } catch {
     return unplayable;

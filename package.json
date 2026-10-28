@@ -13,12 +13,14 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "check:cdp": "node scripts/cdp-smoke.mjs",
     "postinstall": "install-electron",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
     "@tanstack/react-virtual": "3.14.23",
     "better-sqlite3": "13.0.3",
+    "chokidar": "3.6.0",
     "music-metadata": "12.3.2",
     "react": "18.3.1",
     "react-dom": "18.3.1",

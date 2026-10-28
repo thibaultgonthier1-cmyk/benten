@@ -2,9 +2,28 @@ export const CHANNELS = {
   PING: "app:ping",
   LIBRARY_QUERY: "library:query",
   LIBRARY_SCAN: "library:scan",
+  LIBRARY_SEARCH: "library:search",
+  LIBRARY_TRACKS_BY_IDS: "library:tracks-by-ids",
   AUDIO_DEFAULT_DEVICE: "audio:default-device",
+  AUDIO_LIST_DEVICES: "audio:list-devices",
   AUDIO_READ_FILE: "audio:read-file",
   DIALOG_PICK_FOLDER: "dialog:pick-folder",
+  SOURCES_LIST: "sources:list",
+  SOURCES_REMOVE: "sources:remove",
+  FAVORITES_TOGGLE: "favorites:toggle",
+  FAVORITES_LIST: "favorites:list",
+  PLAYLISTS_LIST: "playlists:list",
+  PLAYLISTS_CREATE: "playlists:create",
+  PLAYLISTS_RENAME: "playlists:rename",
+  PLAYLISTS_DELETE: "playlists:delete",
+  PLAYLISTS_TRACKS: "playlists:tracks",
+  PLAYLISTS_ADD: "playlists:add",
+  PLAYLISTS_REMOVE: "playlists:remove",
+  PLAYLISTS_REORDER: "playlists:reorder",
+  STATE_GET: "state:get",
+  STATE_SET: "state:set",
+  /** Push Main -> Renderer (une voie) : la bibliotheque a change (veille de dossiers, Task 14B). */
+  LIBRARY_CHANGED: "library:changed",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

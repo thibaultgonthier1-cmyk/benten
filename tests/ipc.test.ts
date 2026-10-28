@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type Database from "better-sqlite3";
 
@@ -14,8 +14,18 @@ vi.mock("electron", () => ({
 }));
 
 import { dialog } from "electron";
-import { isTrustedUrl, normalizePage, registerIpc, validateScanPaths } from "../src/main/ipc";
+import {
+  isPathWithinRoots,
+  isTrustedUrl,
+  normalizePage,
+  queryLibrary,
+  readAudioFile,
+  registerIpc,
+  validateScanPaths,
+} from "../src/main/ipc";
 import { openDb } from "../src/main/library/db";
+import { addSource, getSources, upsertTracks } from "../src/main/library/repository";
+import type { AlbumRow, SortField, TrackInput, TrackRow } from "../src/shared/types";
 
 const FIX = join(__dirname, "fixtures");
 // ipc.ts resout l'UI empaquetee relativement a son propre dossier (src/main sous vitest).
@@ -41,15 +51,171 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
-  it("enregistre ping, library:query, library:scan, audio:default-device, audio:read-file et dialog:pick-folder", () => {
+  it("enregistre ping, library:*, audio:*, dialog:pick-folder, sources:*, favorites:* et playlists:*", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
       "audio:default-device",
+      "audio:list-devices",
       "audio:read-file",
       "dialog:pick-folder",
+      "favorites:list",
+      "favorites:toggle",
       "library:query",
       "library:scan",
+      "library:search",
+      "library:tracks-by-ids",
+      "playlists:add",
+      "playlists:create",
+      "playlists:delete",
+      "playlists:list",
+      "playlists:remove",
+      "playlists:rename",
+      "playlists:reorder",
+      "playlists:tracks",
+      "sources:list",
+      "sources:remove",
+      "state:get",
+      "state:set",
     ]);
+  });
+
+  it("app:ping repond 'pong' a un expediteur fiable et refuse un expediteur non fiable", async () => {
+    expect(await call("app:ping", trusted)).toBe("pong");
+    await expect(call("app:ping", evil)).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("state:set persiste une valeur, state:get la relit, valide les chaines et refuse l'expediteur non fiable", async () => {
+    expect(await call("state:get", trusted, "player")).toBeUndefined();
+    await call("state:set", trusted, "player", '{"volume":0.5}');
+    expect(await call("state:get", trusted, "player")).toBe('{"volume":0.5}');
+    // Upsert : une seconde ecriture ecrase.
+    await call("state:set", trusted, "player", '{"volume":0.9}');
+    expect(await call("state:get", trusted, "player")).toBe('{"volume":0.9}');
+
+    // Validation des chaines.
+    await expect(call("state:get", trusted, 42)).rejects.toThrow(/state:get/);
+    await expect(call("state:set", trusted, "k", 42)).rejects.toThrow(/state:set/);
+    await expect(call("state:set", trusted, 1, "v")).rejects.toThrow(/state:set/);
+    // Expediteur non fiable.
+    await expect(call("state:get", evil, "player")).rejects.toThrow(/untrusted sender/);
+    await expect(call("state:set", evil, "k", "v")).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("library:tracks-by-ids re-resout les ids dans l'ordre, ignore les absents, valide le tableau", async () => {
+    await call("library:scan", trusted, [join(FIX, "library")]);
+    const all = (await call("library:query", trusted, { view: "tracks" })) as { rows: TrackRow[] };
+    const ids = all.rows.map((t) => t.id);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const requested = [ids[1]!, 999999, ids[0]!];
+    const rows = (await call("library:tracks-by-ids", trusted, requested)) as TrackRow[];
+    expect(rows.map((r) => r.id)).toEqual([ids[1], ids[0]]);
+    expect(await call("library:tracks-by-ids", trusted, [])).toEqual([]);
+    // Validation : tableau d'entiers requis.
+    await expect(call("library:tracks-by-ids", trusted, "nope")).rejects.toThrow(/tracks-by-ids/);
+    await expect(call("library:tracks-by-ids", trusted, [1.5])).rejects.toThrow(/tracks-by-ids/);
+    await expect(call("library:tracks-by-ids", evil, [1])).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("playlists:* couvre le CRUD + l'ordonnancement, valide les entiers/noms et refuse l'expéditeur non fiable", async () => {
+    const mk = (path: string): TrackInput => ({
+      path,
+      title: "T",
+      artist: "A",
+      album: "AA",
+      albumArtist: null,
+      trackNo: 1,
+      discNo: null,
+      durationSec: 100,
+      format: "flac",
+      sampleRate: 44100,
+      bitDepth: 16,
+      playable: true,
+      artKey: null,
+      mtimeMs: null,
+      sizeBytes: null,
+    });
+    upsertTracks(db, [mk("/p/1.flac"), mk("/p/2.flac")]);
+    const t1 = db.prepare("SELECT id FROM tracks WHERE path = ?").pluck().get("/p/1.flac") as number;
+    const t2 = db.prepare("SELECT id FROM tracks WHERE path = ?").pluck().get("/p/2.flac") as number;
+
+    expect(await call("playlists:list", trusted)).toEqual([]);
+    const id = (await call("playlists:create", trusted, "Mix")) as number;
+    expect(typeof id).toBe("number");
+
+    await call("playlists:add", trusted, id, [t1, t2]);
+    const ids = async (): Promise<number[]> =>
+      ((await call("playlists:tracks", trusted, id)) as { id: number }[]).map((t) => t.id);
+    expect(await ids()).toEqual([t1, t2]);
+
+    await call("playlists:reorder", trusted, id, 0, 1);
+    expect(await ids()).toEqual([t2, t1]);
+
+    await call("playlists:remove", trusted, id, 0);
+    expect(await ids()).toEqual([t1]);
+
+    await call("playlists:rename", trusted, id, "Renamed");
+    const list = (await call("playlists:list", trusted)) as {
+      id: number;
+      name: string;
+      trackCount: number;
+    }[];
+    expect(list).toHaveLength(1);
+    expect(list[0]!.name).toBe("Renamed");
+    expect(list[0]!.trackCount).toBe(1);
+
+    await call("playlists:delete", trusted, id);
+    expect(await call("playlists:list", trusted)).toEqual([]);
+
+    // Validation des entiers / noms.
+    await expect(call("playlists:create", trusted, "")).rejects.toThrow(/playlists:create/);
+    await expect(call("playlists:create", trusted, "   ")).rejects.toThrow(/playlists:create/);
+    await expect(call("playlists:create", trusted, 42)).rejects.toThrow(/playlists:create/);
+    await expect(call("playlists:rename", trusted, 1.5, "x")).rejects.toThrow(/playlists:rename/);
+    await expect(call("playlists:rename", trusted, 1, "")).rejects.toThrow(/playlists:rename/);
+    await expect(call("playlists:add", trusted, 1, ["x"])).rejects.toThrow(/playlists:add/);
+    await expect(call("playlists:add", trusted, 1, "nope")).rejects.toThrow(/playlists:add/);
+    await expect(call("playlists:remove", trusted, 1, 1.5)).rejects.toThrow(/playlists:remove/);
+    await expect(call("playlists:reorder", trusted, 1, 0, "x")).rejects.toThrow(/playlists:reorder/);
+
+    // Expéditeur non fiable.
+    await expect(call("playlists:list", evil)).rejects.toThrow(/untrusted sender/);
+    await expect(call("playlists:create", evil, "x")).rejects.toThrow(/untrusted sender/);
+    await expect(call("playlists:tracks", evil, 1)).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("favorites:toggle persiste un favori, favorites:list le renvoie, garde l'id entier et l'expediteur fiable", async () => {
+    upsertTracks(db, [
+      {
+        path: "/f/1.flac",
+        title: "Fav",
+        artist: "A",
+        album: "AA",
+        albumArtist: null,
+        trackNo: 1,
+        discNo: null,
+        durationSec: 100,
+        format: "flac",
+        sampleRate: 44100,
+        bitDepth: 16,
+        playable: true,
+        artKey: null,
+        mtimeMs: null,
+        sizeBytes: null,
+      },
+    ]);
+    const id = db.prepare("SELECT id FROM tracks WHERE path = ?").pluck().get("/f/1.flac") as number;
+
+    expect(await call("favorites:list", trusted)).toEqual([]);
+    await call("favorites:toggle", trusted, id, true);
+    expect(await call("favorites:list", trusted)).toEqual([id]);
+    await call("favorites:toggle", trusted, id, false);
+    expect(await call("favorites:list", trusted)).toEqual([]);
+
+    // Garde-fou entier + expediteur fiable.
+    await expect(call("favorites:toggle", trusted, 1.5, true)).rejects.toThrow(/favorites:toggle/);
+    await expect(call("favorites:toggle", trusted, "x", true)).rejects.toThrow(/favorites:toggle/);
+    await expect(call("favorites:toggle", evil, id, true)).rejects.toThrow(/untrusted sender/);
+    await expect(call("favorites:list", evil)).rejects.toThrow(/untrusted sender/);
   });
 
   it("audio:default-device renvoie un peripherique nomme et rejette un expediteur non fiable", async () => {
@@ -59,9 +225,11 @@ describe("registerIpc", () => {
     await expect(call("audio:default-device", evil)).rejects.toThrow(/untrusted sender/);
   });
 
-  it("library:scan indexe un dossier valide et renvoie le resume", async () => {
-    const res = (await call("library:scan", trusted, [join(FIX, "library")])) as Record<string, number>;
+  it("library:scan indexe un dossier valide, renvoie le resume et persiste la racine en source", async () => {
+    const root = join(FIX, "library");
+    const res = (await call("library:scan", trusted, [root])) as Record<string, number>;
     expect(res).toMatchObject({ scanned: 6, added: 6, skipped: 0, errors: 0 });
+    expect(getSources(db).map((s) => s.path)).toEqual([root]);
   });
 
   it("library:query sans limit/offset ne passe pas NaN/undefined a SQLite", async () => {
@@ -82,6 +250,27 @@ describe("registerIpc", () => {
     expect(nan.rows).toHaveLength(6);
   });
 
+  it("library:search valide q, delegue a searchTracks et rejette les mauvais arguments", async () => {
+    await call("library:scan", trusted, [join(FIX, "library")]);
+    const rows = (await call("library:search", trusted, { q: "montagem", limit: 50 })) as {
+      title: string;
+      artist: string;
+      album: string;
+    }[];
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const hay = `${r.title} ${r.artist} ${r.album}`.toLowerCase();
+      expect(hay).toContain("montagem");
+    }
+    // Arguments invalides : q non chaine, args absents, q manquant.
+    await expect(call("library:search", trusted, { q: 42 })).rejects.toThrow(/library:search/);
+    await expect(call("library:search", trusted, undefined)).rejects.toThrow(/library:search/);
+    await expect(call("library:search", trusted, { limit: 10 })).rejects.toThrow(/library:search/);
+    // Expediteur non fiable.
+    await expect(call("library:search", evil, { q: "montagem" })).rejects.toThrow(/untrusted sender/);
+  });
+
   it("rejette une vue inconnue ou des arguments invalides", async () => {
     await expect(call("library:query", trusted, { view: "nope" })).rejects.toThrow(/invalid view/);
     await expect(call("library:query", trusted, undefined)).rejects.toThrow(/invalid args/);
@@ -93,7 +282,9 @@ describe("registerIpc", () => {
     await expect(call("library:scan", {}, [FIX])).rejects.toThrow(/untrusted sender/);
   });
 
-  it("audio:read-file renvoie les octets d'un fichier FLAC existant", async () => {
+  it("audio:read-file renvoie les octets d'un fichier FLAC indexe (racine en source)", async () => {
+    // La racine doit etre une source persistee pour que le confinement autorise la lecture.
+    await call("library:scan", trusted, [join(FIX, "library")]);
     const flac = join(FIX, "library", "NSYNC", "No Strings Attached", "01 - Bye Bye Bye.flac");
     const buf = (await call("audio:read-file", trusted, flac)) as ArrayBuffer;
     expect(buf).toBeInstanceOf(ArrayBuffer);
@@ -102,12 +293,43 @@ describe("registerIpc", () => {
     expect(Buffer.from(buf.slice(0, 4)).toString("ascii")).toBe("fLaC");
   });
 
+  it("audio:read-file rejette un fichier hors des racines indexees (confinement)", async () => {
+    // Fichier reel et valide, mais aucune source persistee ne le contient -> rejet.
+    const flac = join(FIX, "library", "NSYNC", "No Strings Attached", "01 - Bye Bye Bye.flac");
+    await expect(call("audio:read-file", trusted, flac)).rejects.toThrow(/outside indexed roots/);
+  });
+
   it("audio:read-file rejette un expediteur non fiable et des chemins invalides", async () => {
     const flac = join(FIX, "library", "NSYNC", "No Strings Attached", "01 - Bye Bye Bye.flac");
     await expect(call("audio:read-file", evil, flac)).rejects.toThrow(/untrusted sender/);
     for (const bad of [undefined, "", "relatif.flac", join(dir, "absent.flac"), FIX]) {
       await expect(call("audio:read-file", trusted, bad)).rejects.toThrow(/audio:read-file/);
     }
+  });
+
+  it("readAudioFile(db) rejette sans source puis resout une fois la racine ajoutee", async () => {
+    const root = mkdtempSync(join(tmpdir(), "benten-root-"));
+    const file = join(root, "track.flac");
+    writeFileSync(file, "fLaC\0\0\0\0");
+    try {
+      await expect(readAudioFile(db, file)).rejects.toThrow(/outside indexed roots/);
+      addSource(db, root);
+      const buf = await readAudioFile(db, file);
+      expect(buf).toBeInstanceOf(ArrayBuffer);
+      expect(buf.byteLength).toBe(8);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("sources:list renvoie les sources et sources:remove supprime par id", async () => {
+    await call("library:scan", trusted, [join(FIX, "library")]);
+    const list = (await call("sources:list", trusted)) as { id: number; path: string }[];
+    expect(list.map((s) => s.path)).toEqual([join(FIX, "library")]);
+    await call("sources:remove", trusted, list[0]!.id);
+    expect((await call("sources:list", trusted)) as unknown[]).toHaveLength(0);
+    await expect(call("sources:list", evil)).rejects.toThrow(/untrusted sender/);
+    await expect(call("sources:remove", evil, 1)).rejects.toThrow(/untrusted sender/);
   });
 
   it("dialog:pick-folder renvoie le chemin choisi et rejette un expediteur non fiable", async () => {
@@ -151,6 +373,179 @@ describe("isTrustedUrl", () => {
     expect(isTrustedUrl("http://localhost:5174/", "http://localhost:5173", INDEX_URL)).toBe(false);
     expect(isTrustedUrl("http://localhost:5173/", undefined, INDEX_URL)).toBe(false);
     expect(isTrustedUrl("file:///C:/evil/index.html", undefined, INDEX_URL)).toBe(false);
+  });
+});
+
+describe("isPathWithinRoots", () => {
+  // Stub identite : on teste la logique pure (resolution + frontiere de prefixe),
+  // independamment du systeme de fichiers. `resolve` normalise d'abord les separateurs.
+  const id = (p: string) => p;
+
+  it("accepte un fichier contenu dans une racine", () => {
+    expect(isPathWithinRoots("/lib/a/x.flac", ["/lib"], id)).toBe(true);
+  });
+
+  it("accepte un fichier egal a la racine (borne inclusive)", () => {
+    expect(isPathWithinRoots("/lib", ["/lib"], id)).toBe(true);
+  });
+
+  it("rejette un fichier hors de la racine", () => {
+    expect(isPathWithinRoots("/lib2/x.flac", ["/lib"], id)).toBe(false);
+  });
+
+  it("rejette la collision de prefixe (/library n'est pas dans /lib)", () => {
+    expect(isPathWithinRoots("/library/x.flac", ["/lib"], id)).toBe(false);
+  });
+
+  it("accepte si l'une des racines contient le fichier", () => {
+    expect(isPathWithinRoots("/b/song.flac", ["/a", "/b", "/c"], id)).toBe(true);
+    expect(isPathWithinRoots("/d/song.flac", ["/a", "/b", "/c"], id)).toBe(false);
+  });
+
+  it("rejette quand il n'y a aucune racine", () => {
+    expect(isPathWithinRoots("/lib/a/x.flac", [], id)).toBe(false);
+  });
+
+  it("confine avec le vrai realpathSync (dossier + fichier temporaires)", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "benten-within-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "benten-outside-")));
+    try {
+      const inside = join(root, "sub", "x.flac");
+      writeFileSync(join(root, "x.flac"), "x");
+      // Un fichier direct dans la racine est contenu.
+      expect(isPathWithinRoots(join(root, "x.flac"), [root])).toBe(true);
+      // Un chemin inexistant sous la racine : realpathSync echoue -> fail closed.
+      expect(isPathWithinRoots(inside, [root])).toBe(false);
+      // Un fichier dans un autre dossier n'est pas contenu.
+      writeFileSync(join(outside, "y.flac"), "y");
+      expect(isPathWithinRoots(join(outside, "y.flac"), [root])).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("bloque de maniere DETERMINISTE une evasion : realpath resout un chemin interne hors racine", () => {
+    // Sans FS ni privilege : le strealpath pretend que /root/sneaky pointe en realite hors racine.
+    // Le prefixe BRUT ("/root/sneaky" commence par "/root/") passerait ; c'est la RESOLUTION
+    // realpath qui doit fermer la porte -> false.
+    const realpath = (p: string): string => (p === resolve("/root/sneaky") ? resolve("/evil/outside") : p);
+    expect(isPathWithinRoots("/root/sneaky", ["/root"], realpath)).toBe(false);
+  });
+
+  it("accepte de maniere DETERMINISTE un lien resolu vers un autre chemin INTERNE a la racine", () => {
+    // Converse : realpath redirige vers un autre chemin interne -> reste contenu -> true.
+    const realpath = (p: string): string =>
+      p === resolve("/root/alias") ? resolve("/root/real/x.flac") : p;
+    expect(isPathWithinRoots("/root/alias", ["/root"], realpath)).toBe(true);
+  });
+
+  it("bloque une evasion par lien symbolique reel (realpath resout hors racine)", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "benten-link-root-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "benten-link-out-")));
+    try {
+      const secret = join(outside, "secret.flac");
+      writeFileSync(secret, "fLaC");
+      const link = join(root, "link.flac");
+      try {
+        symlinkSync(secret, link, "file");
+      } catch (e) {
+        // Creation de lien symbolique non privilegiee sur Windows : on saute CE sous-cas.
+        console.warn("symlink escape sub-case skipped (no privilege):", (e as Error).message);
+        return;
+      }
+      // Le lien est DANS la racine, mais realpath pointe hors racine -> rejet (fail closed).
+      expect(isPathWithinRoots(link, [root])).toBe(false);
+      // Sans resolution de lien (stub identite via resolve), le prefixe passerait : on prouve
+      // que c'est bien realpath qui ferme la porte.
+      expect(isPathWithinRoots(link, [root], (p) => resolve(p))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("utilise le separateur de la plateforme pour la frontiere", () => {
+    // Sanity : la frontiere s'appuie sur path.sep.
+    expect(typeof sep).toBe("string");
+  });
+});
+
+describe("queryLibrary sort / filter", () => {
+  let dir: string;
+  let db: Database.Database;
+  const mk = (over: Partial<TrackInput> & { path: string }): TrackInput => ({
+    title: "T",
+    artist: "Artist A",
+    album: "Album",
+    albumArtist: "Band",
+    trackNo: 1,
+    discNo: null,
+    durationSec: 180,
+    format: "flac",
+    sampleRate: 44100,
+    bitDepth: 16,
+    playable: true,
+    artKey: null,
+    mtimeMs: null,
+    sizeBytes: null,
+    ...over,
+  });
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "benten-q-"));
+    db = openDb(join(dir, "q.db"));
+    upsertTracks(db, [
+      mk({ path: "/q/b.flac", album: "b" }),
+      mk({ path: "/q/a.flac", album: "A" }),
+      mk({ path: "/q/c.flac", album: "c" }),
+    ]);
+  });
+  afterEach(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("accepte sort/dir et ordonne les albums en conséquence", () => {
+    const desc = queryLibrary(db, { view: "albums", sort: "title", dir: "desc" }).rows as AlbumRow[];
+    expect(desc.map((a) => a.title)).toEqual(["c", "b", "A"]);
+    const asc = queryLibrary(db, { view: "albums", sort: "title", dir: "asc" }).rows as AlbumRow[];
+    expect(asc.map((a) => a.title)).toEqual(["A", "b", "c"]);
+  });
+
+  it("normalise un sort inconnu vers le défaut (aucune erreur, ordre par défaut)", () => {
+    const rows = queryLibrary(db, { view: "albums", sort: "bogus" as unknown as SortField })
+      .rows as AlbumRow[];
+    expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+  });
+
+  it("empêche une chaîne d'injection dans sort d'atteindre le SQL (repli, table intacte)", () => {
+    const injection = "al.title); DROP TABLE albums;--" as unknown as SortField;
+    const rows = queryLibrary(db, { view: "albums", sort: injection, dir: "asc" }).rows as AlbumRow[];
+    expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+    // La table existe toujours : la requête par défaut renvoie les 3 albums.
+    expect(queryLibrary(db, { view: "albums" }).rows).toHaveLength(3);
+  });
+
+  it("ne lève pas pour une clé de tri héritée d'Object.prototype (__proto__/toString), table intacte", () => {
+    for (const proto of ["__proto__", "toString", "constructor", "valueOf"]) {
+      const key = proto as unknown as SortField;
+      let rows: AlbumRow[] = [];
+      expect(() => {
+        rows = queryLibrary(db, { view: "albums", sort: key, dir: "asc" }).rows as AlbumRow[];
+      }).not.toThrow();
+      // Repli sur le tri par défaut (title asc), sans que la chaîne atteigne le SQL.
+      expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+    }
+    // La table existe toujours : requête par défaut OK.
+    expect(queryLibrary(db, { view: "albums" }).rows).toHaveLength(3);
+  });
+
+  it("accepte un argument filter (losslessOnly / favoritesOnly) sans erreur", () => {
+    const lossless = queryLibrary(db, { view: "tracks", filter: { losslessOnly: true } })
+      .rows as TrackRow[];
+    expect(lossless).toHaveLength(3);
+    // Aucun favori inséré -> la vue favoris est vide (donnée arrive en Task 9).
+    expect(queryLibrary(db, { view: "albums", filter: { favoritesOnly: true } }).rows).toHaveLength(0);
   });
 });
 

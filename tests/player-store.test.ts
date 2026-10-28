@@ -18,14 +18,18 @@ const track = (over: Partial<TrackRow> = {}): TrackRow => ({
   title: "A",
   artist: "X",
   album: "Y",
+  albumArtist: null,
   albumId: 1,
   trackNo: 1,
+  discNo: null,
   durationSec: 200,
   format: "flac",
   sampleRate: 44100,
   bitDepth: 24,
   playable: true,
   artKey: null,
+  mtimeMs: null,
+  sizeBytes: null,
   ...over,
 });
 
@@ -139,5 +143,217 @@ describe("player store — logique pure", () => {
     store.getState().setPosition(12.75, 240);
     expect(store.getState().positionSec).toBeCloseTo(12.75, 5);
     expect(store.getState().durationSec).toBe(240);
+  });
+
+  it("favoriteIds est un Set vide au depart", () => {
+    const store = createPlayerStore();
+    expect(store.getState().favoriteIds).toBeInstanceOf(Set);
+    expect(store.getState().favoriteIds.size).toBe(0);
+  });
+
+  it("toggleFavorite bascule l'appartenance a favoriteIds (sans window.benten en env node)", () => {
+    const store = createPlayerStore();
+    // Ajout optimiste.
+    store.getState().toggleFavorite(42);
+    expect(store.getState().favoriteIds.has(42)).toBe(true);
+    // Un second toggle retire l'id.
+    store.getState().toggleFavorite(42);
+    expect(store.getState().favoriteIds.has(42)).toBe(false);
+    // Plusieurs ids coexistent et le Set precedent n'est pas mute (nouvelle reference).
+    const before = store.getState().favoriteIds;
+    store.getState().toggleFavorite(7);
+    store.getState().toggleFavorite(9);
+    expect(store.getState().favoriteIds.has(7)).toBe(true);
+    expect(store.getState().favoriteIds.has(9)).toBe(true);
+    expect(before.has(7)).toBe(false);
+  });
+});
+
+/**
+ * Mutations de file A CHAUD (Task 11). Le store met a jour sa file ET pilote le moteur : les
+ * editions FUTURES passent par `engine.updateQueue(nextQueue, {keepCurrent:true})` (le moteur ne
+ * coupe jamais la courante si son id reste present) ; `jumpTo` passe par `engine.jumpTo` (saut
+ * anti-clic manuel). On injecte un moteur-bouchon qui enregistre les appels (store teste en node).
+ */
+function queueEngineStub() {
+  const calls = {
+    update: [] as Array<{ tracks: readonly TrackRow[]; opts?: { keepCurrent?: boolean } }>,
+    jumps: [] as number[],
+    repeat: [] as string[],
+    shuffle: [] as boolean[],
+    volume: [] as number[],
+  };
+  return {
+    calls,
+    updateQueue(tracks: readonly TrackRow[], opts?: { keepCurrent?: boolean }): void {
+      calls.update.push({ tracks, opts });
+    },
+    jumpTo(index: number): void {
+      calls.jumps.push(index);
+    },
+    setRepeatMode(m: string): void {
+      calls.repeat.push(m);
+    },
+    setShuffle(on: boolean): void {
+      calls.shuffle.push(on);
+    },
+    setVolume(v: number): void {
+      calls.volume.push(v);
+    },
+  };
+}
+
+describe("player store — mutations de file (Task 11)", () => {
+  const setup = () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    // File [10, 11, 12], courante = id 11 (index 1).
+    store.getState().setQueue([track({ id: 10 }), track({ id: 11 }), track({ id: 12 })], 1);
+    return { store, eng };
+  };
+
+  it("playNext insere juste apres currentIndex sans changer la piste courante", () => {
+    const { store, eng } = setup();
+    store.getState().playNext([track({ id: 99, title: "X" })]);
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([10, 11, 99, 12]);
+    expect(s.currentIndex).toBe(1);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+    const last = eng.calls.update.at(-1)!;
+    expect(last.opts).toEqual({ keepCurrent: true });
+    expect(last.tracks.map((t) => t.id)).toEqual([10, 11, 99, 12]);
+  });
+
+  it("addToQueue ajoute en fin de file sans changer la piste courante", () => {
+    const { store, eng } = setup();
+    store.getState().addToQueue([track({ id: 77 })]);
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([10, 11, 12, 77]);
+    expect(s.currentIndex).toBe(1);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+    expect(eng.calls.update.at(-1)!.tracks.map((t) => t.id)).toEqual([10, 11, 12, 77]);
+  });
+
+  it("removeFromQueue d'une piste FUTURE ajuste la liste et conserve la courante", () => {
+    const { store, eng } = setup();
+    store.getState().removeFromQueue(2); // retire id 12 (apres la courante)
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([10, 11]);
+    expect(s.currentIndex).toBe(1);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+    expect(eng.calls.update.at(-1)!.opts).toEqual({ keepCurrent: true });
+  });
+
+  it("removeFromQueue d'une piste PASSEE decale currentIndex mais conserve la courante", () => {
+    const { store } = setup();
+    store.getState().removeFromQueue(0); // retire id 10 (avant la courante)
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([11, 12]);
+    expect(s.currentIndex).toBe(0);
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+  });
+
+  it("moveInQueue reordonne et conserve la piste courante (index recale sur son id)", () => {
+    const { store } = setup();
+    store.getState().moveInQueue(0, 2); // deplace id 10 en fin : [11, 12, 10]
+    const s = store.getState();
+    expect(s.queue.map((t) => t.id)).toEqual([11, 12, 10]);
+    expect(s.currentIndex).toBe(0); // id 11 est maintenant en tete
+    expect(s.currentTrack).toMatchObject({ id: 11 });
+  });
+
+  it("jumpTo change la piste courante et pilote le moteur (saut anti-clic)", () => {
+    const { store, eng } = setup();
+    store.getState().jumpTo(2);
+    const s = store.getState();
+    expect(s.currentIndex).toBe(2);
+    expect(s.currentTrack).toMatchObject({ id: 12 });
+    expect(eng.calls.jumps.at(-1)).toBe(2);
+  });
+
+  it("setQueueOpen bascule l'ouverture du panneau de file", () => {
+    const store = createPlayerStore();
+    expect(store.getState().queueOpen).toBe(false);
+    store.getState().setQueueOpen(true);
+    expect(store.getState().queueOpen).toBe(true);
+  });
+});
+
+describe("player store — shuffle & repeat (Task 12)", () => {
+  it("valeurs par defaut : repeat off, shuffle false", () => {
+    const store = createPlayerStore();
+    expect(store.getState().repeat).toBe("off");
+    expect(store.getState().shuffle).toBe(false);
+  });
+
+  it("setRepeat reflete l'etat ET pilote le moteur", () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    store.getState().setRepeat("all");
+    expect(store.getState().repeat).toBe("all");
+    store.getState().setRepeat("one");
+    expect(store.getState().repeat).toBe("one");
+    expect(eng.calls.repeat).toEqual(["all", "one"]);
+  });
+
+  it("setShuffle reflete l'etat ET pilote le moteur", () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    store.getState().setShuffle(true);
+    expect(store.getState().shuffle).toBe(true);
+    store.getState().setShuffle(false);
+    expect(store.getState().shuffle).toBe(false);
+    expect(eng.calls.shuffle).toEqual([true, false]);
+  });
+
+  it("setRepeat/setShuffle sans moteur rattache ne jettent pas (tests node)", () => {
+    const store = createPlayerStore();
+    expect(() => store.getState().setRepeat("all")).not.toThrow();
+    expect(() => store.getState().setShuffle(true)).not.toThrow();
+    expect(store.getState().repeat).toBe("all");
+    expect(store.getState().shuffle).toBe(true);
+  });
+});
+
+describe("player store — volume & qualite (Task 13)", () => {
+  it("valeurs par defaut : volume 1, qualityMode 'balanced'", () => {
+    const store = createPlayerStore();
+    expect(store.getState().volume).toBe(1);
+    expect(store.getState().qualityMode).toBe("balanced");
+  });
+
+  it("setVolume borne a [0,1], reflete l'etat ET pilote le moteur", () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    store.getState().setVolume(0.33);
+    expect(store.getState().volume).toBeCloseTo(0.33, 5);
+    store.getState().setVolume(2); // borne haute
+    expect(store.getState().volume).toBe(1);
+    store.getState().setVolume(-1); // borne basse
+    expect(store.getState().volume).toBe(0);
+    expect(eng.calls.volume).toEqual([0.33, 1, 0]);
+  });
+
+  it("setQualityMode reflete l'etat ET declenche la recreation de contexte rattachee", () => {
+    const store = createPlayerStore();
+    const seen: string[] = [];
+    store.getState().attachQualityRebuild((m) => seen.push(m));
+    store.getState().setQualityMode("economy");
+    expect(store.getState().qualityMode).toBe("economy");
+    store.getState().setQualityMode("max");
+    expect(store.getState().qualityMode).toBe("max");
+    expect(seen).toEqual(["economy", "max"]);
+  });
+
+  it("setVolume / setQualityMode sans rattachement ne jettent pas (tests node)", () => {
+    const store = createPlayerStore();
+    expect(() => store.getState().setVolume(0.5)).not.toThrow();
+    expect(() => store.getState().setQualityMode("economy")).not.toThrow();
+    expect(store.getState().volume).toBe(0.5);
+    expect(store.getState().qualityMode).toBe("economy");
   });
 });
