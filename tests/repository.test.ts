@@ -5,11 +5,14 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { openDb } from "../src/main/library/db";
 import {
+  addSource,
   getAlbums,
   getAllTracks,
   getArtists,
+  getSources,
   getTrackByPath,
   getTracksByAlbum,
+  removeSource,
   removeTracks,
   upsertTracks,
 } from "../src/main/library/repository";
@@ -151,6 +154,27 @@ describe("repository", () => {
 
     // Album X / Artist A restent references par deux pistes -> conserves.
     expect(getAllTracks(db, { limit: 100, offset: 0 })).toHaveLength(2);
+  });
+
+  it("addSource is idempotent on path and getSources returns the rows", () => {
+    addSource(db, "/m/a");
+    addSource(db, "/m/b");
+    addSource(db, "/m/a"); // doublon : ignore
+    const sources = getSources(db);
+    expect(sources.map((s) => s.path)).toEqual(["/m/a", "/m/b"]);
+    for (const s of sources) {
+      expect(typeof s.id).toBe("number");
+      expect(typeof s.addedAt).toBe("number");
+      expect(s.addedAt).toBeGreaterThan(0);
+    }
+  });
+
+  it("removeSource deletes the row by id", () => {
+    addSource(db, "/m/a");
+    addSource(db, "/m/b");
+    const toRemove = getSources(db).find((s) => s.path === "/m/a")!;
+    removeSource(db, toRemove.id);
+    expect(getSources(db).map((s) => s.path)).toEqual(["/m/b"]);
   });
 
   it("migrates by user_version and is reopenable", () => {

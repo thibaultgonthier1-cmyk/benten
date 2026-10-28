@@ -61,6 +61,14 @@ export interface Page {
   offset: number;
 }
 
+/** Racine de bibliothèque persistée. `audio:read-file` ne lit que sous ces racines. */
+export interface SourceRow {
+  id: number;
+  path: string;
+  /** Horodatage d'ajout (ms epoch). */
+  addedAt: number;
+}
+
 export type LibraryRow = AlbumRow | TrackRow | ArtistRow;
 
 export interface LibraryQueryResult {
@@ -96,6 +104,12 @@ export interface BentenApi {
   dialog: {
     /** Ouvre le selecteur de dossier natif. Renvoie le chemin choisi, ou `null` si annule. */
     pickFolder(): Promise<string | null>;
+  };
+  sources: {
+    /** Racines persistées (ajoutées par `library.scan`). */
+    list(): Promise<SourceRow[]>;
+    /** Retire une racine par `id`. */
+    remove(id: number): Promise<void>;
   };
 }
 

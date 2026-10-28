@@ -5,6 +5,8 @@ export const CHANNELS = {
   AUDIO_DEFAULT_DEVICE: "audio:default-device",
   AUDIO_READ_FILE: "audio:read-file",
   DIALOG_PICK_FOLDER: "dialog:pick-folder",
+  SOURCES_LIST: "sources:list",
+  SOURCES_REMOVE: "sources:remove",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

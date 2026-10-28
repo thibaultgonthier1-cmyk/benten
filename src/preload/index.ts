@@ -19,6 +19,10 @@ const api: BentenApi = {
   dialog: {
     pickFolder: () => invoke(CHANNELS.DIALOG_PICK_FOLDER),
   },
+  sources: {
+    list: () => invoke(CHANNELS.SOURCES_LIST),
+    remove: (id) => invoke(CHANNELS.SOURCES_REMOVE, id),
+  },
 };
 
 contextBridge.exposeInMainWorld("benten", api);

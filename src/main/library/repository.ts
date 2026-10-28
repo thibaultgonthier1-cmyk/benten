@@ -3,6 +3,7 @@ import type {
   AlbumRow,
   ArtistRow,
   Page,
+  SourceRow,
   TrackInput,
   TrackRow,
 } from "../../shared/types";
@@ -86,6 +87,9 @@ function statements(db: Db) {
     // les sous-requetes ne renvoient pas de NULL et le `NOT IN` reste correct.
     pruneAlbums: db.prepare("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)"),
     pruneArtists: db.prepare("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)"),
+    insertSource: db.prepare("INSERT OR IGNORE INTO sources (path, added_at) VALUES (?, ?)"),
+    sources: db.prepare("SELECT id, path, added_at AS addedAt FROM sources ORDER BY added_at, id"),
+    deleteSource: db.prepare("DELETE FROM sources WHERE id = ?"),
   };
 }
 
@@ -167,6 +171,24 @@ export function getTrackStat(
   return stmts(db).trackStat.get(path) as
     | { mtimeMs: number | null; sizeBytes: number | null; artKey: string | null }
     | undefined;
+}
+
+/**
+ * Enregistre une racine de bibliothèque comme source persistée. Idempotent sur `path`
+ * (`INSERT OR IGNORE` : une racine déjà présente n'est ni dupliquée ni réhorodatée).
+ */
+export function addSource(db: Db, path: string): void {
+  stmts(db).insertSource.run(path, Date.now());
+}
+
+/** Racines persistées, de la plus ancienne à la plus récente. */
+export function getSources(db: Db): SourceRow[] {
+  return stmts(db).sources.all() as SourceRow[];
+}
+
+/** Retire une source par `id` (no-op si l'id n'existe pas). */
+export function removeSource(db: Db, id: number): void {
+  stmts(db).deleteSource.run(id);
 }
 
 /**

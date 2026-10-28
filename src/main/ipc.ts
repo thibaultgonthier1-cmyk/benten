@@ -1,6 +1,6 @@
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type Database from "better-sqlite3";
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
@@ -12,10 +12,18 @@ import type {
   LibraryView,
   Page,
   ScanSummary,
+  SourceRow,
 } from "../shared/types";
 import { defaultOutputDevice } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
-import { getAlbums, getAllTracks, getArtists } from "./library/repository";
+import {
+  addSource,
+  getAlbums,
+  getAllTracks,
+  getArtists,
+  getSources,
+  removeSource,
+} from "./library/repository";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
@@ -100,9 +108,52 @@ export function validateAudioPath(path: unknown): string {
   return path;
 }
 
-/** Lit les octets d'un fichier audio et les renvoie en `ArrayBuffer` (copie propre, sans offset). */
-export async function readAudioFile(path: unknown): Promise<ArrayBuffer> {
+/**
+ * Vrai si `filePath` **résolu** est contenu dans l'une des `roots` **résolues**. Fonction PURE
+ * (sécurité) : on résout le realpath du fichier ET de chaque racine (les liens symboliques sont
+ * suivis, donc une évasion via lien est bloquée), on normalise les séparateurs via `path.resolve`,
+ * puis on compare sur une frontière de préfixe terminée par `path.sep` — ainsi `/library` n'est
+ * PAS considéré dans `/lib`. L'égalité exacte fichier == racine compte comme « dedans ».
+ *
+ * `realpath` est injectable pour les tests ; par défaut `fs.realpathSync`. Toute erreur de
+ * résolution (chemin inexistant, lien cassé) => `false` (fail closed).
+ */
+export function isPathWithinRoots(
+  filePath: string,
+  roots: readonly string[],
+  realpath: (p: string) => string = realpathSync,
+): boolean {
+  let resolvedFile: string;
+  try {
+    resolvedFile = realpath(resolve(filePath));
+  } catch {
+    return false; // chemin irrésoluble : on ferme la porte.
+  }
+  for (const root of roots) {
+    let resolvedRoot: string;
+    try {
+      resolvedRoot = realpath(resolve(root));
+    } catch {
+      continue; // racine irrésoluble : on l'ignore, sans élargir le périmètre.
+    }
+    if (resolvedFile === resolvedRoot) return true;
+    const withSep = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep;
+    if (resolvedFile.startsWith(withSep)) return true;
+  }
+  return false;
+}
+
+/**
+ * Lit les octets d'un fichier audio et les renvoie en `ArrayBuffer` (copie propre, sans offset).
+ * SÉCURITÉ : après les gardes de `validateAudioPath`, le chemin doit être confiné à l'une des
+ * racines persistées (`sources`), realpath du fichier ET des racines ; sinon on rejette.
+ */
+export async function readAudioFile(db: Database.Database, path: unknown): Promise<ArrayBuffer> {
   const file = validateAudioPath(path);
+  const roots = getSources(db).map((s) => s.path);
+  if (!isPathWithinRoots(file, roots)) {
+    throw new Error(`audio:read-file: path outside indexed roots: ${file}`);
+  }
   const buf = await readFile(file);
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 }
@@ -157,6 +208,9 @@ export function registerIpc(db: Database.Database): void {
   ipcMain.handle(CHANNELS.LIBRARY_SCAN, async (event, paths: unknown): Promise<ScanSummary> => {
     assertTrusted(event);
     const roots = validateScanPaths(paths);
+    // Les racines scannées deviennent des sources persistées (idempotent) : ce sont
+    // exactement les racines que `audio:read-file` accepte de lire ensuite.
+    for (const root of roots) addSource(db, root);
     let last: ScanSummary = { scanned: 0, added: 0, skipped: 0, errors: 0 };
     const { added, skipped } = await indexLibrary(db, roots, (p) => {
       last = p;
@@ -171,11 +225,24 @@ export function registerIpc(db: Database.Database): void {
 
   ipcMain.handle(CHANNELS.AUDIO_READ_FILE, (event, path: unknown): Promise<ArrayBuffer> => {
     assertTrusted(event);
-    return readAudioFile(path);
+    return readAudioFile(db, path);
   });
 
   ipcMain.handle(CHANNELS.DIALOG_PICK_FOLDER, (event): Promise<string | null> => {
     assertTrusted(event);
     return pickFolder(BrowserWindow.fromWebContents(event.sender));
+  });
+
+  ipcMain.handle(CHANNELS.SOURCES_LIST, (event): SourceRow[] => {
+    assertTrusted(event);
+    return getSources(db);
+  });
+
+  ipcMain.handle(CHANNELS.SOURCES_REMOVE, (event, id: unknown): void => {
+    assertTrusted(event);
+    if (typeof id !== "number" || !Number.isInteger(id)) {
+      throw new Error("sources:remove: id must be an integer");
+    }
+    removeSource(db, id);
   });
 }
