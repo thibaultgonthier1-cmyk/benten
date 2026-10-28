@@ -51,6 +51,7 @@ async function* scanRoots(roots: readonly string[]): AsyncGenerator<string> {
  * - `added` : pistes lisibles absentes de la base avant ce passage (donc 0 au 2e passage).
  * - `skipped` : fichiers non lisibles (.m4p, tronques, illisibles) ou dont la lecture a
  *   echoue ; ils ne sont pas inseres. Un echec de lecture n'interrompt jamais le passage.
+ * - Une erreur d'ecriture en base fait rejeter `indexLibrary` (jamais avalee, `added` non gonfle).
  * - `onProgress` est appele apres chaque lot ecrit et une derniere fois a la fin.
  */
 export async function indexLibrary(
@@ -74,30 +75,43 @@ export async function indexLibrary(
     const batch = buffer;
     buffer = [];
     // Les chemins sont uniques (dedoublonnes par scanRoots) : le comptage est exact.
-    for (const t of batch) if (exists.get(t.path) === undefined) stats.added++;
+    let fresh = 0;
+    for (const t of batch) if (exists.get(t.path) === undefined) fresh++;
+    // Une erreur d'ecriture (disque plein, SQLITE_BUSY...) remonte : jamais avalee,
+    // et `added` n'est incremente qu'apres un upsert reussi.
     upsertTracks(db, batch);
+    stats.added += fresh;
     emit();
   };
 
   const files = scanRoots(roots);
 
+  let failed = false;
   const worker = async (): Promise<void> => {
-    for (;;) {
-      const next = await files.next();
-      if (next.done) return;
-      stats.scanned++;
-      try {
-        const track = await read(next.value);
-        if (track.playable) {
-          buffer.push(track);
-          if (buffer.length >= batchSize) flush();
-        } else {
+    try {
+      while (!failed) {
+        const next = await files.next();
+        if (next.done) return;
+        stats.scanned++;
+        let track: TrackInput | undefined;
+        try {
+          track = await read(next.value);
+        } catch {
+          // Seul l'echec de LECTURE d'un fichier est tolere (compte skipped + errors).
           stats.skipped++;
+          stats.errors++;
+          continue;
         }
-      } catch {
-        stats.skipped++;
-        stats.errors++;
+        if (!track.playable) {
+          stats.skipped++;
+          continue;
+        }
+        buffer.push(track);
+        if (buffer.length >= batchSize) flush();
       }
+    } catch (err) {
+      failed = true; // arrete les autres workers ; Promise.all rejette avec cette erreur
+      throw err;
     }
   };
 

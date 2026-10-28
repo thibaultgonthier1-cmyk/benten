@@ -110,4 +110,30 @@ describe("indexLibrary", () => {
     expect(res.added).toBe(6);
     expect(peak).toBe(3);
   });
+
+  // Fix round 1 : une erreur d'ecriture DB ne doit ni etre avalee ni gonfler `added`.
+  it("une erreur d'ecriture DB fait rejeter indexLibrary et n'est pas comptee dans added", async () => {
+    db.exec(
+      "CREATE TRIGGER boom BEFORE INSERT ON tracks BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    const events: ScanSummary[] = [];
+    await expect(
+      indexLibrary(db, [join(FIX, "library")], (p) => events.push({ ...p })),
+    ).rejects.toThrow(/disk full/);
+    expect(count()).toBe(0);
+    // Aucun etat de progression ne rapporte de titres ajoutes qui n'ont pas ete ecrits.
+    expect(events.every((e) => e.added === 0)).toBe(true);
+  });
+
+  it("une erreur d'ecriture DB en milieu de passe : added reflete uniquement les lots ecrits", async () => {
+    db.exec(`CREATE TRIGGER boom BEFORE INSERT ON tracks WHEN NEW.title = 'Pardon'
+             BEGIN SELECT RAISE(ABORT, 'busy'); END`);
+    let last: ScanSummary | undefined;
+    await expect(
+      indexLibrary(db, [join(FIX, "library")], (p) => (last = { ...p }), { batchSize: 2, concurrency: 1 }),
+    ).rejects.toThrow(/busy/);
+    // Les lots precedents (2 pistes chacun) sont persistes ; added == lignes reellement en base.
+    expect(last?.added ?? 0).toBe(count());
+    expect(last?.errors ?? 0).toBe(0);
+  });
 });
