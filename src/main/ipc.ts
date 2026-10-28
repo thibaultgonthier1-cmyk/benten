@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type Database from "better-sqlite3";
@@ -17,6 +18,8 @@ import { getAlbums, getAllTracks, getArtists } from "./library/repository";
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1000;
 const MAX_SCAN_PATHS = 64;
+/** Garde-fou : un fichier audio plus gros que ca est tenu pour aberrant (chemin errone). */
+const MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024;
 const VIEWS: ReadonlySet<string> = new Set<LibraryView>(["albums", "tracks", "artists"]);
 
 /**
@@ -79,6 +82,29 @@ export function validateScanPaths(paths: unknown): string[] {
   return out;
 }
 
+/** Valide le chemin d'un fichier audio : chaine absolue, sans octet nul, pointant un fichier existant. */
+export function validateAudioPath(path: unknown): string {
+  if (typeof path !== "string" || path.length === 0 || path.includes("\0") || !isAbsolute(path)) {
+    throw new Error("audio:read-file: path must be an absolute path string");
+  }
+  let st: ReturnType<typeof statSync>;
+  try {
+    st = statSync(path);
+  } catch {
+    throw new Error(`audio:read-file: not a file: ${path}`);
+  }
+  if (!st.isFile()) throw new Error(`audio:read-file: not a file: ${path}`);
+  if (st.size > MAX_AUDIO_BYTES) throw new Error(`audio:read-file: file too large: ${path}`);
+  return path;
+}
+
+/** Lit les octets d'un fichier audio et les renvoie en `ArrayBuffer` (copie propre, sans offset). */
+export async function readAudioFile(path: unknown): Promise<ArrayBuffer> {
+  const file = validateAudioPath(path);
+  const buf = await readFile(file);
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+}
+
 /** Normalise limit/offset : jamais NaN/undefined (better-sqlite3 leve sinon), borne a [1, MAX_LIMIT] / >= 0. */
 export function normalizePage(args: Partial<Pick<LibraryQueryArgs, "limit" | "offset">>): Page {
   const int = (v: unknown, fallback: number): number =>
@@ -121,5 +147,10 @@ export function registerIpc(db: Database.Database): void {
       last = p;
     });
     return { ...last, added, skipped };
+  });
+
+  ipcMain.handle(CHANNELS.AUDIO_READ_FILE, (event, path: unknown): Promise<ArrayBuffer> => {
+    assertTrusted(event);
+    return readAudioFile(path);
   });
 }

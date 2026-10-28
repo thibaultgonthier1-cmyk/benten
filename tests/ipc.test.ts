@@ -38,8 +38,13 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
-  it("enregistre ping, library:query et library:scan", () => {
-    expect([...handlers.keys()].sort()).toEqual(["app:ping", "library:query", "library:scan"]);
+  it("enregistre ping, library:query, library:scan et audio:read-file", () => {
+    expect([...handlers.keys()].sort()).toEqual([
+      "app:ping",
+      "audio:read-file",
+      "library:query",
+      "library:scan",
+    ]);
   });
 
   it("library:scan indexe un dossier valide et renvoie le resume", async () => {
@@ -74,6 +79,23 @@ describe("registerIpc", () => {
     await expect(call("library:scan", evil, [FIX])).rejects.toThrow(/untrusted sender/);
     await expect(call("library:query", evil, { view: "albums" })).rejects.toThrow(/untrusted sender/);
     await expect(call("library:scan", {}, [FIX])).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("audio:read-file renvoie les octets d'un fichier FLAC existant", async () => {
+    const flac = join(FIX, "library", "NSYNC", "No Strings Attached", "01 - Bye Bye Bye.flac");
+    const buf = (await call("audio:read-file", trusted, flac)) as ArrayBuffer;
+    expect(buf).toBeInstanceOf(ArrayBuffer);
+    expect(buf.byteLength).toBeGreaterThan(0);
+    // Signature FLAC : "fLaC" en tete de fichier.
+    expect(Buffer.from(buf.slice(0, 4)).toString("ascii")).toBe("fLaC");
+  });
+
+  it("audio:read-file rejette un expediteur non fiable et des chemins invalides", async () => {
+    const flac = join(FIX, "library", "NSYNC", "No Strings Attached", "01 - Bye Bye Bye.flac");
+    await expect(call("audio:read-file", evil, flac)).rejects.toThrow(/untrusted sender/);
+    for (const bad of [undefined, "", "relatif.flac", join(dir, "absent.flac"), FIX]) {
+      await expect(call("audio:read-file", trusted, bad)).rejects.toThrow(/audio:read-file/);
+    }
   });
 
   it("library:scan rejette des chemins invalides", async () => {

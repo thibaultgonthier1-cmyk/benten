@@ -7,6 +7,10 @@ import { openDb } from "./library/db";
 // Le schema doit etre declare avant que l'app soit prete.
 registerArtScheme();
 
+// Lecteur de musique : la lecture demarre sans geste utilisateur prealable. Sans cela, la
+// politique d'autoplay de Chromium laisserait l'AudioContext suspendu et « play » resterait muet.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1200,

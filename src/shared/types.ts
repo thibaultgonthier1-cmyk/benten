@@ -81,6 +81,8 @@ export interface BentenApi {
   };
   audio: {
     defaultDevice(): Promise<AudioDeviceInfo>;
+    /** Octets bruts d'un fichier audio, pour decodage cote Renderer. Rejette si illisible. */
+    readFile(path: string): Promise<ArrayBuffer>;
   };
 }
 
