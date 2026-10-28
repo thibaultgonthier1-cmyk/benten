@@ -18,7 +18,9 @@ function track(over: Partial<TrackInput> & { path: string }): TrackInput {
     title: "Untitled",
     artist: "Artist A",
     album: "Album X",
+    albumArtist: null,
     trackNo: 1,
+    discNo: null,
     durationSec: 180,
     format: "flac",
     sampleRate: 44100,
@@ -90,7 +92,7 @@ describe("repository", () => {
   });
 
   it("migrates by user_version and is reopenable", () => {
-    expect(db.pragma("user_version", { simple: true })).toBe(1);
+    expect(db.pragma("user_version", { simple: true })).toBe(2);
     upsertTracks(db, records());
     const path = db.name;
     db.close();

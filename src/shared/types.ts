@@ -15,9 +15,13 @@ export interface TrackRow {
   title: string;
   artist: string;
   album: string;
+  /** Artiste de l'album (tag `albumartist`) ; `null` si absent. */
+  albumArtist: string | null;
   albumId: number;
   /** Numéro de piste, `null` si absent des tags. */
   trackNo: number | null;
+  /** Numéro de disque, `null` si absent des tags. */
+  discNo: number | null;
   durationSec: number;
   format: string;
   /** Hz ; `null` si inconnu. */

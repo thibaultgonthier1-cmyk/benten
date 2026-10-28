@@ -38,6 +38,52 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX idx_tracks_artist   ON tracks(artist);
   CREATE INDEX idx_tracks_title    ON tracks(title);
   `,
+
+  // v2 : additif (Phase 2). Nouvelles colonnes nullables, index de tri en NOCASE,
+  // tables sources/playlists/favoris/état. Ne supprime ni ne réécrit aucune donnée v1.
+  `
+  ALTER TABLE tracks ADD COLUMN album_artist TEXT;
+  ALTER TABLE tracks ADD COLUMN disc_no      INTEGER;
+  ALTER TABLE tracks ADD COLUMN mtime_ms     INTEGER;
+  ALTER TABLE tracks ADD COLUMN size_bytes   INTEGER;
+
+  ALTER TABLE albums ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+
+  DROP INDEX idx_tracks_artist;
+  CREATE INDEX idx_tracks_artist ON tracks(artist COLLATE NOCASE);
+  DROP INDEX idx_tracks_title;
+  CREATE INDEX idx_tracks_title  ON tracks(title COLLATE NOCASE);
+
+  CREATE TABLE sources (
+    id       INTEGER PRIMARY KEY,
+    path     TEXT NOT NULL UNIQUE,
+    added_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE playlists (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE playlist_tracks (
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    track_id    INTEGER NOT NULL REFERENCES tracks(id)    ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    PRIMARY KEY (playlist_id, position)
+  );
+
+  CREATE TABLE favorites (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    added_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 function migrate(db: Database.Database): void {

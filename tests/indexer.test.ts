@@ -77,7 +77,7 @@ describe("indexLibrary", () => {
       calls++;
       if (calls === 2) throw new Error("boom");
       return {
-        path, title: "t", artist: "a", album: "b", trackNo: null, durationSec: 1,
+        path, title: "t", artist: "a", album: "b", albumArtist: null, trackNo: null, discNo: null, durationSec: 1,
         format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true, artKey: null,
       };
     };
@@ -98,7 +98,7 @@ describe("indexLibrary", () => {
       await new Promise((r) => setTimeout(r, 15));
       inFlight--;
       return {
-        path, title: path, artist: "a", album: "b", trackNo: null, durationSec: 1,
+        path, title: path, artist: "a", album: "b", albumArtist: null, trackNo: null, discNo: null, durationSec: 1,
         format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true, artKey: null,
       };
     };
