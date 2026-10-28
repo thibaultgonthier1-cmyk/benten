@@ -11,6 +11,13 @@ registerArtScheme();
 // politique d'autoplay de Chromium laisserait l'AudioContext suspendu et « play » resterait muet.
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
+// Harnais de vérification CDP : en dev uniquement, ouvre le port de debogage distant pour que
+// `scripts/cdp-smoke.mjs` puisse piloter le vrai renderer. Garde sur ELECTRON_RENDERER_URL afin
+// de ne jamais exposer ce port dans un build de production.
+if (process.env["ELECTRON_RENDERER_URL"]) {
+  app.commandLine.appendSwitch("remote-debugging-port", "9222");
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1200,

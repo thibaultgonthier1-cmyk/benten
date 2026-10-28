@@ -13,6 +13,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "check:cdp": "node scripts/cdp-smoke.mjs",
     "postinstall": "install-electron",
     "rebuild:native": "electron-rebuild -f -w better-sqlite3"
   },
