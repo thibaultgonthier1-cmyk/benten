@@ -17,18 +17,21 @@ export interface CoverProps {
 }
 
 export function Cover({ artKey, seed, size = 256, alt = "" }: CoverProps): JSX.Element {
-  const [failed, setFailed] = useState(false);
+  // On memorise l'URL qui a ECHOUE (pas un simple booleen) : ainsi, quand `artKey`/`url` change
+  // (changement de morceau dans un <Cover> persistant comme le mini-lecteur / la vue lecture), on
+  // retente automatiquement la vraie pochette au lieu de rester bloque sur le repli generatif.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const url = artUrl(artKey, size);
   const gen = useMemo(() => generativeCover(seed), [seed]);
 
-  if (url && !failed) {
+  if (url && failedUrl !== url) {
     return (
       <img
         src={url}
         alt={alt}
         loading="lazy"
         draggable={false}
-        onError={() => setFailed(true)}
+        onError={() => setFailedUrl(url)}
       />
     );
   }

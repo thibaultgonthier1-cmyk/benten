@@ -21,6 +21,11 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Le transport est pompe par une boucle requestAnimationFrame (engine.tick()) ; Chromium
+      // etrangle les timers/rAF des fenetres cachees/minimisees, ce qui stopperait le
+      // prechargement et la programmation gapless (trou audible pendant une minimisation). On
+      // desactive cet etranglement pour garantir un enchainement sans silence en arriere-plan.
+      backgroundThrottling: false,
     },
   });
 

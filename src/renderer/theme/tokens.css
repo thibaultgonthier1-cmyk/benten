@@ -686,13 +686,21 @@ body {
   z-index: 40;
   background: var(--ink);
   transform: translateY(100%);
-  transition: transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1);
+  /* Fermee : masquee APRES la glissee (delai = duree) -> non focusable, pas de focus piege. */
+  visibility: hidden;
+  transition:
+    transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1),
+    visibility 0s linear 0.55s;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 #now.open {
   transform: none;
+  visibility: visible;
+  transition:
+    transform 0.55s cubic-bezier(0.2, 0.9, 0.25, 1),
+    visibility 0s linear 0s;
 }
 #now .np-bg {
   position: absolute;
