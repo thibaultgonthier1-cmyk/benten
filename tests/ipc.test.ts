@@ -51,18 +51,55 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
-  it("enregistre ping, library:*, audio:*, dialog:pick-folder et sources:*", () => {
+  it("enregistre ping, library:*, audio:*, dialog:pick-folder, sources:* et favorites:*", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
       "audio:default-device",
       "audio:read-file",
       "dialog:pick-folder",
+      "favorites:list",
+      "favorites:toggle",
       "library:query",
       "library:scan",
       "library:search",
       "sources:list",
       "sources:remove",
     ]);
+  });
+
+  it("favorites:toggle persiste un favori, favorites:list le renvoie, garde l'id entier et l'expediteur fiable", async () => {
+    upsertTracks(db, [
+      {
+        path: "/f/1.flac",
+        title: "Fav",
+        artist: "A",
+        album: "AA",
+        albumArtist: null,
+        trackNo: 1,
+        discNo: null,
+        durationSec: 100,
+        format: "flac",
+        sampleRate: 44100,
+        bitDepth: 16,
+        playable: true,
+        artKey: null,
+        mtimeMs: null,
+        sizeBytes: null,
+      },
+    ]);
+    const id = db.prepare("SELECT id FROM tracks WHERE path = ?").pluck().get("/f/1.flac") as number;
+
+    expect(await call("favorites:list", trusted)).toEqual([]);
+    await call("favorites:toggle", trusted, id, true);
+    expect(await call("favorites:list", trusted)).toEqual([id]);
+    await call("favorites:toggle", trusted, id, false);
+    expect(await call("favorites:list", trusted)).toEqual([]);
+
+    // Garde-fou entier + expediteur fiable.
+    await expect(call("favorites:toggle", trusted, 1.5, true)).rejects.toThrow(/favorites:toggle/);
+    await expect(call("favorites:toggle", trusted, "x", true)).rejects.toThrow(/favorites:toggle/);
+    await expect(call("favorites:toggle", evil, id, true)).rejects.toThrow(/untrusted sender/);
+    await expect(call("favorites:list", evil)).rejects.toThrow(/untrusted sender/);
   });
 
   it("audio:default-device renvoie un peripherique nomme et rejette un expediteur non fiable", async () => {

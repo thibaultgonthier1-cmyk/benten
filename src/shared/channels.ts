@@ -8,6 +8,8 @@ export const CHANNELS = {
   DIALOG_PICK_FOLDER: "dialog:pick-folder",
   SOURCES_LIST: "sources:list",
   SOURCES_REMOVE: "sources:remove",
+  FAVORITES_TOGGLE: "favorites:toggle",
+  FAVORITES_LIST: "favorites:list",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

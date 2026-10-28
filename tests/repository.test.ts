@@ -9,12 +9,15 @@ import {
   getAlbums,
   getAllTracks,
   getArtists,
+  getFavoriteIds,
   getSources,
   getTrackByPath,
   getTracksByAlbum,
+  isFavorite,
   removeSource,
   removeTracks,
   searchTracks,
+  setFavorite,
   upsertTracks,
 } from "../src/main/library/repository";
 import type { SortField, TrackInput } from "../src/shared/types";
@@ -298,6 +301,41 @@ describe("repository", () => {
     expect(albums.map((a) => a.title)).toEqual(["Album X"]);
     const tracks = getAllTracks(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } });
     expect(tracks.map((t) => t.path)).toEqual(["/m/a/01.flac"]);
+  });
+
+  it("setFavorite(true) marks a track favorite (isFavorite + getFavoriteIds), idempotent, and setFavorite(false) removes it", () => {
+    upsertTracks(db, records());
+    const t = getTrackByPath(db, "/m/a/01.flac")!;
+    expect(isFavorite(db, t.id)).toBe(false);
+    expect(getFavoriteIds(db)).toEqual([]);
+
+    setFavorite(db, t.id, true);
+    expect(isFavorite(db, t.id)).toBe(true);
+    expect(getFavoriteIds(db)).toContain(t.id);
+
+    // Idempotent : un second setFavorite(true) ne duplique pas (PK track_id + INSERT OR IGNORE).
+    setFavorite(db, t.id, true);
+    expect(getFavoriteIds(db).filter((id) => id === t.id)).toHaveLength(1);
+
+    setFavorite(db, t.id, false);
+    expect(isFavorite(db, t.id)).toBe(false);
+    expect(getFavoriteIds(db)).not.toContain(t.id);
+  });
+
+  it("getAlbums(filter:{favoritesOnly:true}) keeps only albums with >=1 favorited track (via setFavorite)", () => {
+    upsertTracks(db, records());
+    // Un favori dans Album X seulement.
+    const fav = getTrackByPath(db, "/m/a/01.flac")!;
+    setFavorite(db, fav.id, true);
+
+    const albums = getAlbums(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } });
+    expect(albums.map((a) => a.title)).toEqual(["Album X"]);
+    const tracks = getAllTracks(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } });
+    expect(tracks.map((t) => t.path)).toEqual(["/m/a/01.flac"]);
+
+    // En retirant le favori, plus aucun album favori.
+    setFavorite(db, fav.id, false);
+    expect(getAlbums(db, { limit: 50, offset: 0 }, { filter: { favoritesOnly: true } })).toEqual([]);
   });
 
   it("migrates by user_version and is reopenable", () => {

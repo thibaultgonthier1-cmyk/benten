@@ -26,9 +26,11 @@ import {
   getAlbums,
   getAllTracks,
   getArtists,
+  getFavoriteIds,
   getSources,
   removeSource,
   searchTracks,
+  setFavorite,
   type SortOpts,
 } from "./library/repository";
 
@@ -302,5 +304,18 @@ export function registerIpc(db: Database.Database): void {
       throw new Error("sources:remove: id must be an integer");
     }
     removeSource(db, id);
+  });
+
+  ipcMain.handle(CHANNELS.FAVORITES_TOGGLE, (event, trackId: unknown, on: unknown): void => {
+    assertTrusted(event);
+    if (typeof trackId !== "number" || !Number.isInteger(trackId)) {
+      throw new Error("favorites:toggle: trackId must be an integer");
+    }
+    setFavorite(db, trackId, on === true);
+  });
+
+  ipcMain.handle(CHANNELS.FAVORITES_LIST, (event): number[] => {
+    assertTrusted(event);
+    return getFavoriteIds(db);
   });
 }

@@ -31,6 +31,8 @@ export interface PlayerState {
   durationSec: number;
   /** Vue « lecture plein ecran » ouverte. */
   nowPlayingOpen: boolean;
+  /** Ensemble des ids de pistes favorites — source de verite UI pour le rendu instantane du cœur. */
+  favoriteIds: ReadonlySet<number>;
 
   // --- Actions (pures) ------------------------------------------------------------------------
   /** Fixe la file et la piste courante (etat optimiste ; le moteur confirmera via statechange). */
@@ -47,6 +49,19 @@ export interface PlayerState {
   applyEngineState(state: PlaybackState): void;
   /** Ouvre/ferme la vue lecture. */
   setNowPlayingOpen(open: boolean): void;
+  /**
+   * Bascule l'appartenance de `trackId` a `favoriteIds` (etat optimiste, nouvelle reference de Set),
+   * puis persiste via IPC si `window.benten` est present ; en cas d'echec de persistance, l'etat
+   * local est reconcilie (la bascule est annulee). Hors fenetre (tests node), seul l'etat local change.
+   */
+  toggleFavorite(trackId: number): void;
+  /** Amorce `favoriteIds` depuis `favorites:list` (no-op hors `window.benten`). */
+  loadFavorites(): Promise<void>;
+}
+
+/** Acces defensif a l'API favoris : `undefined` hors fenetre (tests node) ou si non exposee. */
+function favoritesApi(): { toggle(id: number, on: boolean): Promise<void>; list(): Promise<number[]> } | undefined {
+  return typeof window !== "undefined" ? window.benten?.favorites : undefined;
 }
 
 const clampIndex = (i: number, len: number): number =>
@@ -64,6 +79,7 @@ export function createPlayerStore(): PlayerStore {
     positionSec: 0,
     durationSec: 0,
     nowPlayingOpen: false,
+    favoriteIds: new Set<number>(),
 
     setQueue(tracks, index = 0) {
       const queue = tracks.slice();
@@ -129,6 +145,35 @@ export function createPlayerStore(): PlayerStore {
 
     setNowPlayingOpen(open) {
       set({ nowPlayingOpen: open });
+    },
+
+    toggleFavorite(trackId) {
+      const next = new Set(get().favoriteIds);
+      const nowOn = !next.has(trackId);
+      if (nowOn) next.add(trackId);
+      else next.delete(trackId);
+      set({ favoriteIds: next });
+
+      const api = favoritesApi();
+      if (!api) return; // hors fenetre (tests) : etat local uniquement.
+      void api.toggle(trackId, nowOn).catch(() => {
+        // Reconciliation : la persistance a echoue, on annule notre bascule sur cet id precis.
+        const revert = new Set(get().favoriteIds);
+        if (nowOn) revert.delete(trackId);
+        else revert.add(trackId);
+        set({ favoriteIds: revert });
+      });
+    },
+
+    async loadFavorites() {
+      const api = favoritesApi();
+      if (!api) return;
+      try {
+        const ids = await api.list();
+        set({ favoriteIds: new Set(ids) });
+      } catch {
+        /* amorcage best-effort : on garde l'etat courant en cas d'echec. */
+      }
     },
   }));
 }

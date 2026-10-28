@@ -23,6 +23,7 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
   const status = usePlayer((s) => s.status);
   const positionSec = usePlayer((s) => s.positionSec);
   const durationSec = usePlayer((s) => s.durationSec);
+  const isFav = usePlayer((s) => (track ? s.favoriteIds.has(track.id) : false));
 
   const rootRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -126,6 +127,18 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
             <span className="tag">
               <b>{q.lossless ? "Sans perte" : "Avec perte"}</b>
             </span>
+            <button
+              className={"ic fav" + (isFav ? " on" : "")}
+              type="button"
+              title={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
+              aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
+              aria-pressed={isFav}
+              onClick={() => playerStore.getState().toggleFavorite(track.id)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 20.5l-1.3-1.2C5.4 14.5 2.5 11.9 2.5 8.6 2.5 6.2 4.4 4.3 6.8 4.3c1.4 0 2.7.65 3.6 1.7l1.6 1.9 1.6-1.9c.9-1.05 2.2-1.7 3.6-1.7 2.4 0 4.3 1.9 4.3 4.3 0 3.3-2.9 5.9-8.2 10.7L12 20.5z" />
+              </svg>
+            </button>
           </div>
 
           <div className="scrub">

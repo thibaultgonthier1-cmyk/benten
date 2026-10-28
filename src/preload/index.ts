@@ -24,6 +24,10 @@ const api: BentenApi = {
     list: () => invoke(CHANNELS.SOURCES_LIST),
     remove: (id) => invoke(CHANNELS.SOURCES_REMOVE, id),
   },
+  favorites: {
+    toggle: (trackId, on) => invoke(CHANNELS.FAVORITES_TOGGLE, trackId, on),
+    list: () => invoke(CHANNELS.FAVORITES_LIST),
+  },
 };
 
 contextBridge.exposeInMainWorld("benten", api);

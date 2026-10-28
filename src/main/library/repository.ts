@@ -94,6 +94,11 @@ function statements(db: Db) {
     insertSource: db.prepare("INSERT OR IGNORE INTO sources (path, added_at) VALUES (?, ?)"),
     sources: db.prepare("SELECT id, path, added_at AS addedAt FROM sources ORDER BY added_at, id"),
     deleteSource: db.prepare("DELETE FROM sources WHERE id = ?"),
+    // Favoris : PK = track_id (une piste est favorite ou non), cascade a la suppression de piste.
+    insertFavorite: db.prepare("INSERT OR IGNORE INTO favorites (track_id, added_at) VALUES (?, ?)"),
+    deleteFavorite: db.prepare("DELETE FROM favorites WHERE track_id = ?"),
+    isFavorite: db.prepare("SELECT 1 FROM favorites WHERE track_id = ?").pluck(),
+    favoriteIds: db.prepare("SELECT track_id FROM favorites ORDER BY added_at, track_id").pluck(),
   };
 }
 
@@ -348,6 +353,28 @@ export function getSources(db: Db): SourceRow[] {
 /** Retire une source par `id` (no-op si l'id n'existe pas). */
 export function removeSource(db: Db, id: number): void {
   stmts(db).deleteSource.run(id);
+}
+
+/**
+ * Marque (ou démarque) une piste comme favorite. `on=true` : `INSERT OR IGNORE` horodaté
+ * (idempotent — une piste déjà favorite n'est ni dupliquée ni ré-horodatée, grâce à la PK
+ * `track_id`). `on=false` : `DELETE` (no-op si absente). La jointure `filter.favoritesOnly`
+ * (`getAlbums`/`getAllTracks`) devient ainsi effective.
+ */
+export function setFavorite(db: Db, trackId: number, on: boolean): void {
+  const s = stmts(db);
+  if (on) s.insertFavorite.run(trackId, Date.now());
+  else s.deleteFavorite.run(trackId);
+}
+
+/** Vrai si la piste `trackId` est favorite. */
+export function isFavorite(db: Db, trackId: number): boolean {
+  return stmts(db).isFavorite.get(trackId) !== undefined;
+}
+
+/** Ids de toutes les pistes favorites (du plus ancien ajout au plus récent). */
+export function getFavoriteIds(db: Db): number[] {
+  return stmts(db).favoriteIds.all() as number[];
 }
 
 /**

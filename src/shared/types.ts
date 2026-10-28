@@ -144,6 +144,12 @@ export interface BentenApi {
     /** Retire une racine par `id`. */
     remove(id: number): Promise<void>;
   };
+  favorites: {
+    /** Marque (`on=true`) ou démarque (`on=false`) une piste comme favorite. */
+    toggle(trackId: number, on: boolean): Promise<void>;
+    /** Ids de toutes les pistes favorites (pour amorcer le store). */
+    list(): Promise<number[]>;
+  };
 }
 
 declare global {

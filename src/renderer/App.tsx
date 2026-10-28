@@ -61,6 +61,7 @@ export function App(): JSX.Element {
   const mainRef = useRef<HTMLElement>(null);
 
   const currentAlbumId = usePlayer((s) => s.currentTrack?.albumId ?? null);
+  const favoriteIds = usePlayer((s) => s.favoriteIds);
 
   // Branche le store sur le moteur + boucle rAF (pompe tick() et anime la position).
   useEffect(() => {
@@ -97,6 +98,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void reload();
+    // Amorce les favoris (ids) depuis la base : le cœur et le filtre favoris reflètent l'état persisté.
+    void playerStore.getState().loadFavorites();
   }, [reload]);
 
   // Recherche avec anti-rebond : terme vide -> on vide les resultats sans interroger. Un drapeau
@@ -174,7 +177,10 @@ export function App(): JSX.Element {
 
   // Tri + filtres appliqués côté vue (la SortFilterBar pilote la liste affichée). Même liste
   // blanche que le repository `getAlbums` ; voir `sortFilterAlbums`.
-  const shownAlbums = useMemo(() => sortFilterAlbums(albums, sortFilter), [albums, sortFilter]);
+  const shownAlbums = useMemo(
+    () => sortFilterAlbums(albums, sortFilter, favoriteIds),
+    [albums, sortFilter, favoriteIds],
+  );
 
   const empty = !loading && albums.length === 0;
   const searching = query.trim().length > 0;
@@ -197,7 +203,12 @@ export function App(): JSX.Element {
               <small>lecture locale</small>
             </div>
           </div>
-          <button className="nav-item active" type="button">
+          <button
+            className={"nav-item" + (sortFilter.favoritesOnly ? "" : " active")}
+            type="button"
+            aria-current={sortFilter.favoritesOnly ? undefined : "page"}
+            onClick={() => setSortFilter((sf) => ({ ...sf, favoritesOnly: false }))}
+          >
             <svg viewBox="0 0 24 24">
               <path d="M3 11l9-8 9 8" />
               <path d="M5 10v10h14V10" />
@@ -205,14 +216,16 @@ export function App(): JSX.Element {
             Accueil <span className="kanji">家</span>
           </button>
           <div className="nav-group">Ma bibliotheque</div>
-          <button className="nav-item soon-item" type="button" disabled aria-disabled="true">
-            <svg viewBox="0 0 24 24">
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
+          <button
+            className={"nav-item" + (sortFilter.favoritesOnly ? " active" : "")}
+            type="button"
+            aria-current={sortFilter.favoritesOnly ? "page" : undefined}
+            onClick={() => setSortFilter((sf) => ({ ...sf, favoritesOnly: true }))}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 20.5l-1.3-1.2C5.4 14.5 2.5 11.9 2.5 8.6 2.5 6.2 4.4 4.3 6.8 4.3c1.4 0 2.7.65 3.6 1.7l1.6 1.9 1.6-1.9c.9-1.05 2.2-1.7 3.6-1.7 2.4 0 4.3 1.9 4.3 4.3 0 3.3-2.9 5.9-8.2 10.7L12 20.5z" />
             </svg>
-            Albums <span className="soon">bientot</span>
+            Favoris <span className="kanji">好</span>
           </button>
         </nav>
 
@@ -310,7 +323,7 @@ export function App(): JSX.Element {
           ) : (
             <section className="section">
               <div className="section-head">
-                <h2>Albums</h2>
+                <h2>{sortFilter.favoritesOnly ? "Favoris" : "Albums"}</h2>
                 <SortFilterBar value={sortFilter} onChange={setSortFilter} />
                 <span className="count">
                   {loading ? "chargement…" : `${shownAlbums.length} albums`}

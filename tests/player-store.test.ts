@@ -144,4 +144,27 @@ describe("player store — logique pure", () => {
     expect(store.getState().positionSec).toBeCloseTo(12.75, 5);
     expect(store.getState().durationSec).toBe(240);
   });
+
+  it("favoriteIds est un Set vide au depart", () => {
+    const store = createPlayerStore();
+    expect(store.getState().favoriteIds).toBeInstanceOf(Set);
+    expect(store.getState().favoriteIds.size).toBe(0);
+  });
+
+  it("toggleFavorite bascule l'appartenance a favoriteIds (sans window.benten en env node)", () => {
+    const store = createPlayerStore();
+    // Ajout optimiste.
+    store.getState().toggleFavorite(42);
+    expect(store.getState().favoriteIds.has(42)).toBe(true);
+    // Un second toggle retire l'id.
+    store.getState().toggleFavorite(42);
+    expect(store.getState().favoriteIds.has(42)).toBe(false);
+    // Plusieurs ids coexistent et le Set precedent n'est pas mute (nouvelle reference).
+    const before = store.getState().favoriteIds;
+    store.getState().toggleFavorite(7);
+    store.getState().toggleFavorite(9);
+    expect(store.getState().favoriteIds.has(7)).toBe(true);
+    expect(store.getState().favoriteIds.has(9)).toBe(true);
+    expect(before.has(7)).toBe(false);
+  });
 });

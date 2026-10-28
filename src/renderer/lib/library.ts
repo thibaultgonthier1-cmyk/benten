@@ -40,23 +40,29 @@ function albumIsLossless(a: Album): boolean {
 }
 
 /**
- * Album « favori » : au moins une de ses pistes l'est. Le drapeau `favorite` sur la piste arrive en
- * Task 9 ; tant qu'il est absent, ce prédicat reste faux — le filtre est câblé de bout en bout mais
- * ne retient rien pour l'instant (miroir côté vue de la jointure `favorites` du repository).
+ * Album « favori » : au moins une de ses pistes figure dans `favoriteIds` (l'ensemble des ids
+ * favoris tenu par le store, source de vérité UI). On ne pose PAS de drapeau `favorite` sur la
+ * piste : l'appartenance se lit depuis le set (miroir côté vue de la jointure `favorites` du
+ * repository, câblée via `getAlbums(filter.favoritesOnly)` pour le chemin backend).
  */
-function albumIsFavorite(a: Album): boolean {
-  return a.tracks.some((t) => (t as TrackRow & { favorite?: boolean }).favorite === true);
+function albumIsFavorite(a: Album, favoriteIds: ReadonlySet<number>): boolean {
+  return a.tracks.some((t) => favoriteIds.has(t.id));
 }
 
 /**
  * Applique tri + filtres à une liste d'albums déjà regroupée (pure, stable, n'altère pas l'entrée).
  * Reflète côté vue la même liste blanche que `getAlbums` du repository : tri `title|artist|duration`,
- * sens `asc|desc`, filtres `favoritesOnly`/`losslessOnly`. Départage stable par titre puis id.
+ * sens `asc|desc`, filtres `favoritesOnly`/`losslessOnly`. Le filtre favoris s'appuie sur
+ * `favoriteIds` (ids favoris du store ; défaut : ensemble vide). Départage stable par titre puis id.
  */
-export function sortFilterAlbums(albums: readonly Album[], sf: AlbumSortFilter): Album[] {
+export function sortFilterAlbums(
+  albums: readonly Album[],
+  sf: AlbumSortFilter,
+  favoriteIds: ReadonlySet<number> = new Set<number>(),
+): Album[] {
   const filtered = albums.filter((a) => {
     if (sf.losslessOnly && !albumIsLossless(a)) return false;
-    if (sf.favoritesOnly && !albumIsFavorite(a)) return false;
+    if (sf.favoritesOnly && !albumIsFavorite(a, favoriteIds)) return false;
     return true;
   });
   const dirMul = sf.dir === "desc" ? -1 : 1;
