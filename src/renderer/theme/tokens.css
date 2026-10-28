@@ -253,6 +253,26 @@ body {
   color: var(--sumi-dim);
   font-size: 13px;
 }
+/* Entree de nav non fonctionnelle (Phase 2) : non interactive, marquee « bientot ». */
+.nav-item.soon-item {
+  opacity: 0.5;
+  cursor: default;
+}
+.nav-item.soon-item:hover {
+  color: var(--sumi);
+  background: none;
+}
+.nav-item .soon {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sumi-dim);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-weight: 600;
+}
 
 /* --- Zone principale --- */
 .main {
@@ -308,6 +328,25 @@ body {
 }
 .search input::placeholder {
   color: var(--sumi-dim);
+}
+.search input:disabled {
+  cursor: not-allowed;
+}
+/* Recherche non fonctionnelle (Phase 2) : visiblement inerte, marquee « bientot ». */
+.search.soon-search {
+  opacity: 0.55;
+}
+.search.soon-search .soon {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sumi-dim);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-weight: 600;
+  flex: none;
 }
 .top-actions {
   margin-left: auto;
@@ -981,6 +1020,36 @@ body {
   background: #f04d8f;
 }
 .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.scan-actions {
+  margin-top: 4px;
+}
+.btn.ghost {
+  background: var(--ink-2);
+  color: var(--paper);
+  border: 1px solid var(--line);
+}
+.btn.ghost:hover {
+  background: var(--ink-3);
+}
+.scan-hint {
+  background: none;
+  border: none;
+  color: var(--gold);
+  font-family: var(--ui);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 2px 4px;
+}
+.scan-hint:hover {
+  color: var(--paper);
+}
+.scan-hint:disabled {
   opacity: 0.5;
   cursor: default;
 }

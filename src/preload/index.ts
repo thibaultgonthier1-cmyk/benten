@@ -16,6 +16,9 @@ const api: BentenApi = {
     defaultDevice: () => invoke(CHANNELS.AUDIO_DEFAULT_DEVICE),
     readFile: (path) => invoke(CHANNELS.AUDIO_READ_FILE, path),
   },
+  dialog: {
+    pickFolder: () => invoke(CHANNELS.DIALOG_PICK_FOLDER),
+  },
 };
 
 contextBridge.exposeInMainWorld("benten", api);

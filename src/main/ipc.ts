@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type Database from "better-sqlite3";
-import { ipcMain, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { CHANNELS } from "../shared/channels";
 import type {
   AudioDeviceInfo,
@@ -107,6 +107,19 @@ export async function readAudioFile(path: unknown): Promise<ArrayBuffer> {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 }
 
+/**
+ * Ouvre le selecteur de dossier natif (`openDirectory`). Renvoie le chemin choisi, ou `null`
+ * si l'utilisateur annule. Rattache la boite a la fenetre appelante quand elle est connue.
+ */
+export async function pickFolder(win: BrowserWindow | null): Promise<string | null> {
+  const options: Electron.OpenDialogOptions = { properties: ["openDirectory"] };
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0] ?? null;
+}
+
 /** Normalise limit/offset : jamais NaN/undefined (better-sqlite3 leve sinon), borne a [1, MAX_LIMIT] / >= 0. */
 export function normalizePage(args: Partial<Pick<LibraryQueryArgs, "limit" | "offset">>): Page {
   const int = (v: unknown, fallback: number): number =>
@@ -159,5 +172,10 @@ export function registerIpc(db: Database.Database): void {
   ipcMain.handle(CHANNELS.AUDIO_READ_FILE, (event, path: unknown): Promise<ArrayBuffer> => {
     assertTrusted(event);
     return readAudioFile(path);
+  });
+
+  ipcMain.handle(CHANNELS.DIALOG_PICK_FOLDER, (event): Promise<string | null> => {
+    assertTrusted(event);
+    return pickFolder(BrowserWindow.fromWebContents(event.sender));
   });
 }

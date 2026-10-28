@@ -85,6 +85,10 @@ export interface BentenApi {
     /** Octets bruts d'un fichier audio, pour decodage cote Renderer. Rejette si illisible. */
     readFile(path: string): Promise<ArrayBuffer>;
   };
+  dialog: {
+    /** Ouvre le selecteur de dossier natif. Renvoie le chemin choisi, ou `null` si annule. */
+    pickFolder(): Promise<string | null>;
+  };
 }
 
 declare global {

@@ -9,8 +9,11 @@ type Handler = (event: unknown, ...args: unknown[]) => unknown;
 const handlers = new Map<string, Handler>();
 vi.mock("electron", () => ({
   ipcMain: { handle: (ch: string, fn: Handler) => void handlers.set(ch, fn) },
+  dialog: { showOpenDialog: vi.fn() },
+  BrowserWindow: { fromWebContents: vi.fn(() => null) },
 }));
 
+import { dialog } from "electron";
 import { isTrustedUrl, normalizePage, registerIpc, validateScanPaths } from "../src/main/ipc";
 import { openDb } from "../src/main/library/db";
 
@@ -38,11 +41,12 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
-  it("enregistre ping, library:query, library:scan, audio:default-device et audio:read-file", () => {
+  it("enregistre ping, library:query, library:scan, audio:default-device, audio:read-file et dialog:pick-folder", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
       "audio:default-device",
       "audio:read-file",
+      "dialog:pick-folder",
       "library:query",
       "library:scan",
     ]);
@@ -104,6 +108,25 @@ describe("registerIpc", () => {
     for (const bad of [undefined, "", "relatif.flac", join(dir, "absent.flac"), FIX]) {
       await expect(call("audio:read-file", trusted, bad)).rejects.toThrow(/audio:read-file/);
     }
+  });
+
+  it("dialog:pick-folder renvoie le chemin choisi et rejette un expediteur non fiable", async () => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ["C:\\musique"],
+    } as Awaited<ReturnType<typeof dialog.showOpenDialog>>);
+    const path = await call("dialog:pick-folder", trusted);
+    expect(path).toBe("C:\\musique");
+    expect(dialog.showOpenDialog).toHaveBeenCalledWith({ properties: ["openDirectory"] });
+    await expect(call("dialog:pick-folder", evil)).rejects.toThrow(/untrusted sender/);
+  });
+
+  it("dialog:pick-folder renvoie null quand l'utilisateur annule", async () => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({
+      canceled: true,
+      filePaths: [],
+    } as Awaited<ReturnType<typeof dialog.showOpenDialog>>);
+    expect(await call("dialog:pick-folder", trusted)).toBeNull();
   });
 
   it("library:scan rejette des chemins invalides", async () => {

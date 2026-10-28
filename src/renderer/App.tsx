@@ -12,6 +12,9 @@ import { NowPlaying } from "./components/NowPlaying";
 
 const PAGE = 1000;
 
+/** Bibliotheque locale connue : proposee en raccourci sur l'ecran d'accueil. */
+const KNOWN_LIBRARY = "C:\\Users\\Dream\\Downloads\\REA DS\\.prism-profile\\documents\\Prism Library";
+
 /** Charge TOUTES les pistes (pagine) puis les regroupe en albums. */
 async function fetchAllAlbums(): Promise<Album[]> {
   const all: TrackRow[] = [];
@@ -73,21 +76,45 @@ export function App(): JSX.Element {
     void reload();
   }, [reload]);
 
-  const runScan = useCallback(async (): Promise<void> => {
-    const path = scanPath.trim();
-    if (!path || scanning) return;
-    setScanning(true);
-    setScanMsg("Analyse en cours…");
+  const runScan = useCallback(
+    async (pathArg?: string): Promise<void> => {
+      const path = (pathArg ?? scanPath).trim();
+      if (!path || scanning) return;
+      setScanning(true);
+      setScanMsg("Analyse en cours…");
+      try {
+        const summary = await window.benten.library.scan([path]);
+        setScanMsg(`Indexation : ${summary.added} ajoutes, ${summary.skipped} ignores.`);
+        await reload();
+      } catch (err) {
+        setScanMsg(`Echec : ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setScanning(false);
+      }
+    },
+    [scanPath, scanning, reload],
+  );
+
+  // Selecteur de dossier natif (process Main) : chemin propose plutot que saisi a la main.
+  const pickFolder = useCallback(async (): Promise<void> => {
+    if (scanning) return;
     try {
-      const summary = await window.benten.library.scan([path]);
-      setScanMsg(`Indexation : ${summary.added} ajoutes, ${summary.skipped} ignores.`);
-      await reload();
+      const path = await window.benten.dialog.pickFolder();
+      if (path) {
+        setScanPath(path);
+        await runScan(path);
+      }
     } catch (err) {
       setScanMsg(`Echec : ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setScanning(false);
     }
-  }, [scanPath, scanning, reload]);
+  }, [scanning, runScan]);
+
+  // Raccourci : pre-remplit et indexe la bibliotheque locale connue.
+  const useKnownLibrary = useCallback((): void => {
+    if (scanning) return;
+    setScanPath(KNOWN_LIBRARY);
+    void runScan(KNOWN_LIBRARY);
+  }, [scanning, runScan]);
 
   const empty = !loading && albums.length === 0;
 
@@ -117,25 +144,26 @@ export function App(): JSX.Element {
             Accueil <span className="kanji">家</span>
           </button>
           <div className="nav-group">Ma bibliotheque</div>
-          <button className="nav-item" type="button">
+          <button className="nav-item soon-item" type="button" disabled aria-disabled="true">
             <svg viewBox="0 0 24 24">
               <rect x="3" y="3" width="7" height="7" />
               <rect x="14" y="3" width="7" height="7" />
               <rect x="3" y="14" width="7" height="7" />
               <rect x="14" y="14" width="7" height="7" />
             </svg>
-            Albums <span className="kanji">集</span>
+            Albums <span className="soon">bientot</span>
           </button>
         </nav>
 
         <main className="main" ref={mainRef}>
           <div className="topbar">
-            <label className="search">
+            <label className="search soon-search" aria-disabled="true">
               <svg viewBox="0 0 24 24">
                 <circle cx="11" cy="11" r="7" />
                 <path d="M21 21l-4-4" />
               </svg>
-              <input placeholder="Chercher un titre, un album, un artiste…" />
+              <input placeholder="Recherche — bientot" disabled aria-label="Recherche (bientot disponible)" />
+              <span className="soon">bientot</span>
             </label>
             <div className="top-actions">
               <span className="chip">
@@ -163,20 +191,44 @@ export function App(): JSX.Element {
                   Indique le dossier de ta bibliotheque locale pour l'indexer. Benten lit les
                   fichiers sur place, hors-ligne.
                 </p>
+                <div className="scan-actions">
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => void pickFolder()}
+                    disabled={scanning}
+                  >
+                    {scanning ? "Analyse…" : "Choisir un dossier"}
+                  </button>
+                </div>
                 <div className="scan-row">
                   <input
                     value={scanPath}
                     onChange={(e) => setScanPath(e.target.value)}
-                    placeholder="C:\\chemin\\vers\\ta\\musique"
+                    placeholder="… ou colle un chemin ici"
                     spellCheck={false}
+                    disabled={scanning}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") void runScan();
                     }}
                   />
-                  <button className="btn" type="button" onClick={() => void runScan()} disabled={scanning}>
-                    {scanning ? "Analyse…" : "Scanner"}
+                  <button
+                    className="btn ghost"
+                    type="button"
+                    onClick={() => void runScan()}
+                    disabled={scanning}
+                  >
+                    Scanner
                   </button>
                 </div>
+                <button
+                  className="scan-hint"
+                  type="button"
+                  onClick={useKnownLibrary}
+                  disabled={scanning}
+                >
+                  utiliser ma bibliotheque
+                </button>
                 {scanMsg && <div className="scan-note">{scanMsg}</div>}
               </div>
             </section>
