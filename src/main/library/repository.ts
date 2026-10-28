@@ -143,9 +143,15 @@ function dirLiteral(dir: SortDir | undefined): "ASC" | "DESC" {
   return dir === "desc" ? "DESC" : "ASC";
 }
 
-/** Expression de tri PRISE DANS LA LISTE BLANCHE ; clé absente/inconnue -> défaut `title`. */
+/**
+ * Expression de tri PRISE DANS LA LISTE BLANCHE ; toute clé absente/inconnue -> défaut `title`.
+ * On exige une propriété PROPRE (`Object.hasOwn`) : une clé héritée d'`Object.prototype`
+ * (`__proto__`, `toString`, `constructor`, `valueOf`…) est truthy par simple indexation et
+ * renverrait un objet/fonction, interpolé en `ORDER BY [object Object]` qui ferait LEVER
+ * `db.prepare`. Le repli reste donc garanti sans exception, même pour ces clés.
+ */
 function sortExpr(map: Readonly<Record<string, string>>, sort: SortField | undefined): string {
-  return (sort !== undefined && map[sort]) || map[DEFAULT_SORT]!;
+  return sort !== undefined && Object.hasOwn(map, sort) ? map[sort]! : map[DEFAULT_SORT]!;
 }
 
 /** Fragment de filtre : jointure favoris (restrictive) — constante, activée par booléen. */
@@ -198,7 +204,11 @@ function buildAlbumsQuery(opts: SortOpts): string {
     LIMIT @limit OFFSET @offset`;
 }
 
-/** Requête « tracks ». Mêmes garanties anti-injection que `buildAlbumsQuery`. */
+/**
+ * Requête « tracks ». Mêmes garanties anti-injection que `buildAlbumsQuery`. Tri `COLLATE NOCASE`
+ * + départage `t.id` : comme pour les albums, cet ordre peut différer du `localeCompare` sensible
+ * aux accents utilisé côté Renderer — divergence connue et assumée pour le chemin IPC/vue `tracks`.
+ */
 function buildAllTracksQuery(opts: SortOpts): string {
   const order = sortExpr(TRACK_SORTS, opts.sort);
   const dir = dirLiteral(opts.dir);
@@ -253,6 +263,14 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
  * duration`, défaut `title`), un sens (`asc|desc`, défaut `asc`) et des filtres cumulables
  * (`favoritesOnly` via jointure `favorites`, `losslessOnly` via `bit_depth IS NOT NULL`). Les parties
  * dynamiques du SQL sont exclusivement des constantes en liste blanche (voir `buildAlbumsQuery`).
+ *
+ * NB (chemin de tri) : la vue albums du Renderer ne passe PAS par ce tri — `App.tsx` regroupe les
+ * albums côté client depuis la requête `tracks` et les trie via `sortFilterAlbums` (`localeCompare`,
+ * sensible aux accents), qui est le chemin UI voulu pour une bibliothèque accentuée. Ce tri backend
+ * sert le chemin IPC / la vue `tracks` (et un futur câblage direct de la vue albums). Il s'appuie sur
+ * `COLLATE NOCASE` + départage `al.id`, ce qui PEUT ordonner les titres accentués différemment de
+ * `localeCompare` : divergence connue et assumée — câbler la vue albums sur ce tri backend serait
+ * donc un choix d'ordonnancement délibéré.
  */
 export function getAlbums(db: Db, page: Page, opts: SortOpts = {}): AlbumRow[] {
   return prepareCached(db, buildAlbumsQuery(opts)).all(page) as AlbumRow[];

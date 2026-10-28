@@ -256,6 +256,29 @@ describe("repository", () => {
     expect(getAlbums(db, { limit: 50, offset: 0 })).toHaveLength(3);
   });
 
+  it("falls back to default for prototype-named sort keys (__proto__/toString), no throw", () => {
+    upsertTracks(db, [
+      track({ path: "/pp/b.flac", title: "b", album: "b", albumArtist: "Band" }),
+      track({ path: "/pp/a.flac", title: "A", album: "A", albumArtist: "Band" }),
+      track({ path: "/pp/c.flac", title: "c", album: "c", albumArtist: "Band" }),
+    ]);
+    // Clés héritées d'Object.prototype : truthy par indexation, mais PAS des propriétés propres.
+    // Elles doivent retomber sur le tri par défaut (title asc) sans lever (sinon db.prepare throw).
+    for (const proto of ["__proto__", "toString", "constructor", "valueOf"]) {
+      const key = proto as unknown as SortField;
+      expect(() => getAlbums(db, { limit: 50, offset: 0 }, { sort: key })).not.toThrow();
+      expect(getAlbums(db, { limit: 50, offset: 0 }, { sort: key }).map((a) => a.title)).toEqual([
+        "A",
+        "b",
+        "c",
+      ]);
+      expect(() => getAllTracks(db, { limit: 50, offset: 0 }, { sort: key })).not.toThrow();
+      expect(
+        getAllTracks(db, { limit: 50, offset: 0 }, { sort: key }).map((t) => t.path),
+      ).toEqual(["/pp/a.flac", "/pp/b.flac", "/pp/c.flac"]);
+    }
+  });
+
   it("filter.losslessOnly keeps only albums/tracks with a non-null bit_depth", () => {
     upsertTracks(db, [
       track({ path: "/ll/flac.flac", album: "Lossless", albumArtist: "Band", bitDepth: 16 }),

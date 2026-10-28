@@ -373,6 +373,20 @@ describe("queryLibrary sort / filter", () => {
     expect(queryLibrary(db, { view: "albums" }).rows).toHaveLength(3);
   });
 
+  it("ne lève pas pour une clé de tri héritée d'Object.prototype (__proto__/toString), table intacte", () => {
+    for (const proto of ["__proto__", "toString", "constructor", "valueOf"]) {
+      const key = proto as unknown as SortField;
+      let rows: AlbumRow[] = [];
+      expect(() => {
+        rows = queryLibrary(db, { view: "albums", sort: key, dir: "asc" }).rows as AlbumRow[];
+      }).not.toThrow();
+      // Repli sur le tri par défaut (title asc), sans que la chaîne atteigne le SQL.
+      expect(rows.map((a) => a.title)).toEqual(["A", "b", "c"]);
+    }
+    // La table existe toujours : requête par défaut OK.
+    expect(queryLibrary(db, { view: "albums" }).rows).toHaveLength(3);
+  });
+
   it("accepte un argument filter (losslessOnly / favoritesOnly) sans erreur", () => {
     const lossless = queryLibrary(db, { view: "tracks", filter: { losslessOnly: true } })
       .rows as TrackRow[];
