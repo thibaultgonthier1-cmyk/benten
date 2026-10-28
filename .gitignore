@@ -2,7 +2,10 @@ node_modules/
 .superpowers/
 dist/
 out/
-build/
+release/
+# build/ holds electron-builder buildResources (committed icon.ico); ignore only its generated output
+build/*.exe
+build/*.blockmap
 *.log
 .DS_Store
 .vite/

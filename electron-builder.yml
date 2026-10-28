@@ -1,0 +1,42 @@
+appId: com.benten.player
+productName: Benten
+# Offline, self-contained app: no auto-update / telemetry server.
+publish: null
+
+directories:
+  output: release
+  buildResources: build
+
+# App's own files. electron-builder copies production dependencies' node_modules
+# automatically (dev deps are pruned), so we only list the electron-vite output
+# and package.json here.
+files:
+  - out/**/*
+  - package.json
+
+# better-sqlite3 ships a native .node addon that cannot be require()'d from inside
+# an asar archive — it must live unpacked on disk. Unpack it and its loader deps.
+asarUnpack:
+  - "**/node_modules/better-sqlite3/**"
+  - "**/node_modules/bindings/**"
+  - "**/node_modules/file-uri-to-path/**"
+  - "**/node_modules/node-gyp-build/**"
+
+# electron-builder rebuilds native deps against the target Electron ABI by default.
+npmRebuild: true
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+    - portable
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: false
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: "${productName} ${version} Portable.${ext}"
