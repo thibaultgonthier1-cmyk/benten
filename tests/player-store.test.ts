@@ -104,6 +104,7 @@ describe("player store — logique pure", () => {
       positionSec: 42.5,
       durationSec: 200,
       trackId: null,
+      queueIndex: -1,
     };
     engine.emit("statechange", state);
 
@@ -126,16 +127,38 @@ describe("player store — logique pure", () => {
     const t2 = track({ id: 12 });
     store.getState().setQueue([t0, t1, t2], 0);
 
-    // Le moteur a enchaine (gapless) sur la piste d'id 12 : le store suit.
+    // Le moteur a enchaine (gapless) sur la piste d'id 12 : le store suit. `queueIndex:-1` (hors
+    // bornes) force ici le REPLI sur la recherche par trackId — le chemin qu'on veut couvrir.
     engine.emit("statechange", {
       status: "playing",
       positionSec: 0,
       durationSec: 180,
       trackId: 12,
+      queueIndex: -1,
     } satisfies PlaybackState);
 
     expect(store.getState().currentIndex).toBe(2);
     expect(store.getState().currentTrack).toMatchObject({ id: 12 });
+  });
+
+  it("applyEngineState suit le queueIndex du moteur pour un id DUPLIQUE (bonne occurrence)", () => {
+    const store = createPlayerStore();
+    const dup = track({ id: 42, title: "Dup" });
+    const other = track({ id: 7, title: "Other" });
+    // Meme id present a l'index 0 ET 2 (file atteignable en Phase 2 : piste ajoutee deux fois).
+    store.getState().setQueue([dup, other, dup], 0);
+
+    store.getState().applyEngineState({
+      status: "playing",
+      positionSec: 0,
+      durationSec: 100,
+      trackId: 42,
+      queueIndex: 2,
+    });
+
+    // L'index faisant autorite du moteur gagne : la 2e occurrence (index 2), PAS la 1re (index 0).
+    expect(store.getState().currentIndex).toBe(2);
+    expect(store.getState().currentTrack).toMatchObject({ id: 42 });
   });
 
   it("setPosition met a jour positionSec (boucle rAF)", () => {

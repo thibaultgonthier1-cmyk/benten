@@ -199,11 +199,19 @@ export function createPlayerStore(): PlayerStore {
 
     applyEngineState(state) {
       const { queue, currentIndex } = get();
-      // Reconcilie l'index depuis le trackId reellement joue (promotion gapless, saut d'une
-      // piste non lisible, etc.). On ne change l'index que si le moteur pointe une autre piste.
+      // Reconcilie l'index courant depuis le moteur (promotion gapless, saut d'une piste non lisible,
+      // etc.). L'index de file du moteur fait AUTORITE : il suit la position par index, robuste aux
+      // ids DUPLIQUES (une meme piste peut figurer deux fois dans la file en Phase 2). S'il est dans
+      // les bornes, on l'utilise DIRECTEMENT — c'est la bonne occurrence. Repli sur la recherche par
+      // `trackId` (1re occurrence) uniquement si l'index est hors bornes/invalide (moteur non
+      // rattache en tests node, file vide, etc.).
       let nextIndex = currentIndex;
       let nextTrack = get().currentTrack;
-      if (state.trackId != null) {
+      const qi = state.queueIndex;
+      if (Number.isInteger(qi) && qi >= 0 && qi < queue.length) {
+        nextIndex = qi;
+        nextTrack = queue[qi] ?? nextTrack;
+      } else if (state.trackId != null) {
         const found = queue.findIndex((t) => t.id === state.trackId);
         if (found >= 0) {
           nextIndex = found;

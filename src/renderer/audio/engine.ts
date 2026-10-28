@@ -64,6 +64,12 @@ export interface PlaybackState {
   durationSec: number;
   /** `id` de la piste courante, `null` si aucune. */
   trackId: number | null;
+  /**
+   * Index de la piste courante dans la file (`queue`), faisant AUTORITE. Le moteur suit la position
+   * par index (robuste aux ids dupliques) ; le store s'y fie dans `applyEngineState` au lieu de
+   * rechercher par `trackId` (qui pointerait la 1re occurrence en cas de doublon). `-1` hors file.
+   */
+  queueIndex: number;
 }
 
 /** Charge utile de chaque evenement emis par le moteur. */
@@ -323,6 +329,8 @@ export class AudioEngine {
       positionSec: this.status === "playing" ? this.computePosition() : this.pausedPositionSec,
       durationSec: this.durationSec,
       trackId: this.trackId,
+      // Index courant faisant autorite (par POSITION, robuste aux ids dupliques). `-1` hors file.
+      queueIndex: this.queue.length > 0 ? this.queueIndex : -1,
     };
   }
 
@@ -842,7 +850,19 @@ export class AudioEngine {
       this.preloadedForIndex !== nextIndex &&
       shouldPreload(position, this.durationSec, PRELOAD_LEAD_SEC)
     ) {
-      void this.beginPreload(nextIndex);
+      if (nextIndex === this.queueIndex && this.buffer) {
+        // `repeat:"one"` (ou file a UNE seule piste bouclee) : la suivante EST la courante, deja
+        // decodee dans `this.buffer`. On REUTILISE ce buffer au lieu de relire+redecoder le fichier a
+        // chaque boucle — le reste du chemin (scheduleNext -> promoteScheduled) reste identique, donc
+        // la boucle repeat:"one" demeure strictement gapless. Apres `promoteScheduled` (qui remet
+        // l'etat de preload a zero mais garde `this.buffer` sur la piste promue, inchangee ici), la
+        // boucle suivante re-reutilise le meme buffer.
+        this.preloadStartedForIndex = nextIndex;
+        this.preloadedBuffer = this.buffer;
+        this.preloadedForIndex = nextIndex;
+      } else {
+        void this.beginPreload(nextIndex);
+      }
     }
     if (
       this.preloadedForIndex === nextIndex &&

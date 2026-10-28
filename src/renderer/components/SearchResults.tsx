@@ -16,6 +16,12 @@ export interface SearchResultsProps {
   scrollRef: React.RefObject<HTMLElement>;
   playingAlbumId?: number | null;
   onPlay: (album: Album) => void;
+  /**
+   * `true` une fois qu'une recherche a REELLEMENT abouti pour le terme courant. Tant qu'elle est en
+   * vol (anti-rebond de 150 ms), on n'affiche NI « aucun resultat » NI « Rien ne correspond » : cela
+   * evitait de faire clignoter le vide avant la premiere reponse.
+   */
+  searched?: boolean;
 }
 
 export function SearchResults({
@@ -24,20 +30,22 @@ export function SearchResults({
   scrollRef,
   playingAlbumId,
   onPlay,
+  searched = true,
 }: SearchResultsProps): JSX.Element {
   const albums = useMemo(() => groupTracksToAlbums(tracks), [tracks]);
+  const empty = albums.length === 0;
   return (
     <section className="section">
       <div className="section-head">
         <h2>Resultats</h2>
         <span className="count">
-          {albums.length === 0 ? "aucun resultat" : `${albums.length} albums`}
+          {empty ? (searched ? "aucun resultat" : "recherche…") : `${albums.length} albums`}
         </span>
       </div>
-      {albums.length === 0 ? (
-        <div className="scan-note">
-          Rien ne correspond a « {query.trim()} ».
-        </div>
+      {empty ? (
+        searched ? (
+          <div className="scan-note">Rien ne correspond a « {query.trim()} ».</div>
+        ) : null
       ) : (
         <LibraryGrid
           albums={albums}

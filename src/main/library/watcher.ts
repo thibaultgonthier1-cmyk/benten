@@ -21,7 +21,15 @@ export interface WatchHandle {
 /** Fabrique de watcher (prod : `chokidar.watch`). Injectable → les tests passent un faux. */
 export type WatchFactory = (
   paths: readonly string[],
-  options: { ignoreInitial?: boolean },
+  options: {
+    ignoreInitial?: boolean;
+    /**
+     * Stabilisation d'ecriture chokidar : un fichier encore EN COURS d'ecriture ne declenche pas un
+     * `change` avec des metadonnees incompletes ; chokidar attend que sa taille soit stable
+     * (`stabilityThreshold` ms) avant d'emettre, en la sondant toutes les `pollInterval` ms.
+     */
+    awaitWriteFinish?: { stabilityThreshold: number; pollInterval: number };
+  },
 ) => WatchHandle;
 
 /** Bilan d'un lot de veille, passe a `onChanged` une fois par lot. */
@@ -142,7 +150,12 @@ export function createWatcher(
     schedule();
   };
 
-  const fsw = watch(roots, { ignoreInitial: true });
+  const fsw = watch(roots, {
+    ignoreInitial: true,
+    // Attend la fin d'ecriture avant d'emettre : evite d'indexer un fichier a moitie copie
+    // (metadonnees/duree incompletes). Voir le « fichier en cours d'ecriture » du Review Focus.
+    awaitWriteFinish: { stabilityThreshold: 500, pollInterval: 100 },
+  });
   fsw.on("add", onAddOrChange);
   fsw.on("change", onAddOrChange);
   fsw.on("unlink", onUnlink);

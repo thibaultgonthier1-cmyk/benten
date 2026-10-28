@@ -426,7 +426,7 @@ describe("isPathWithinRoots", () => {
   });
 
   it("bloque de maniere DETERMINISTE une evasion : realpath resout un chemin interne hors racine", () => {
-    // Sans FS ni privilege : le strealpath pretend que /root/sneaky pointe en realite hors racine.
+    // Sans FS ni privilege : le realpath pretend que /root/sneaky pointe en realite hors racine.
     // Le prefixe BRUT ("/root/sneaky" commence par "/root/") passerait ; c'est la RESOLUTION
     // realpath qui doit fermer la porte -> false.
     const realpath = (p: string): string => (p === resolve("/root/sneaky") ? resolve("/evil/outside") : p);
