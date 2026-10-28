@@ -248,7 +248,22 @@ describe("isPathWithinRoots", () => {
     }
   });
 
-  it("bloque une evasion par lien symbolique (realpath resout hors racine)", () => {
+  it("bloque de maniere DETERMINISTE une evasion : realpath resout un chemin interne hors racine", () => {
+    // Sans FS ni privilege : le strealpath pretend que /root/sneaky pointe en realite hors racine.
+    // Le prefixe BRUT ("/root/sneaky" commence par "/root/") passerait ; c'est la RESOLUTION
+    // realpath qui doit fermer la porte -> false.
+    const realpath = (p: string): string => (p === resolve("/root/sneaky") ? resolve("/evil/outside") : p);
+    expect(isPathWithinRoots("/root/sneaky", ["/root"], realpath)).toBe(false);
+  });
+
+  it("accepte de maniere DETERMINISTE un lien resolu vers un autre chemin INTERNE a la racine", () => {
+    // Converse : realpath redirige vers un autre chemin interne -> reste contenu -> true.
+    const realpath = (p: string): string =>
+      p === resolve("/root/alias") ? resolve("/root/real/x.flac") : p;
+    expect(isPathWithinRoots("/root/alias", ["/root"], realpath)).toBe(true);
+  });
+
+  it("bloque une evasion par lien symbolique reel (realpath resout hors racine)", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "benten-link-root-")));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "benten-link-out-")));
     try {

@@ -147,14 +147,26 @@ export function isPathWithinRoots(
  * Lit les octets d'un fichier audio et les renvoie en `ArrayBuffer` (copie propre, sans offset).
  * SÉCURITÉ : après les gardes de `validateAudioPath`, le chemin doit être confiné à l'une des
  * racines persistées (`sources`), realpath du fichier ET des racines ; sinon on rejette.
+ *
+ * Anti-TOCTOU : on résout le chemin réel UNE SEULE FOIS (`realpathSync`), on décide le confinement
+ * sur ce chemin canonique, puis on **lit ce même chemin canonique** (et non le `file` d'origine).
+ * Un lien symbolique échangé entre la vérification et la lecture ne peut donc pas rediriger la
+ * lecture hors d'une racine : le chemin canonique ne contient plus aucun lien à ré-suivre.
  */
 export async function readAudioFile(db: Database.Database, path: unknown): Promise<ArrayBuffer> {
   const file = validateAudioPath(path);
+  let realFile: string;
+  try {
+    realFile = realpathSync(resolve(file));
+  } catch {
+    throw new Error(`audio:read-file: not a file: ${file}`);
+  }
   const roots = getSources(db).map((s) => s.path);
-  if (!isPathWithinRoots(file, roots)) {
+  // `realFile` est déjà canonique : la ré-résolution interne d'`isPathWithinRoots` est idempotente.
+  if (!isPathWithinRoots(realFile, roots)) {
     throw new Error(`audio:read-file: path outside indexed roots: ${file}`);
   }
-  const buf = await readFile(file);
+  const buf = await readFile(realFile);
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 }
 
