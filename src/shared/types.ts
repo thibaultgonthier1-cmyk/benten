@@ -8,10 +8,56 @@ export interface LibraryQueryArgs {
   offset?: number;
 }
 
-/** Les types de lignes (album/titre/artiste) arrivent avec le schéma DB (Task 3+). */
+/** Piste telle que lue dans la bibliothèque. */
+export interface TrackRow {
+  id: number;
+  path: string;
+  title: string;
+  artist: string;
+  album: string;
+  albumId: number;
+  /** Numéro de piste, `null` si absent des tags. */
+  trackNo: number | null;
+  durationSec: number;
+  format: string;
+  /** Hz ; `null` si inconnu. */
+  sampleRate: number | null;
+  /** Bits par échantillon ; `null` pour les formats avec perte / inconnu. */
+  bitDepth: number | null;
+  /** `false` si le fichier est indexé mais non lisible. */
+  playable: boolean;
+  /** Clé de la pochette dans le cache d'art ; `null` si aucune. */
+  artKey: string | null;
+}
+
+/** Piste à insérer / mettre à jour (clé naturelle : `path`). */
+export type TrackInput = Omit<TrackRow, "id" | "albumId">;
+
+export interface AlbumRow {
+  id: number;
+  title: string;
+  artist: string;
+  trackCount: number;
+  artKey: string | null;
+}
+
+export interface ArtistRow {
+  id: number;
+  name: string;
+  trackCount: number;
+  albumCount: number;
+}
+
+export interface Page {
+  limit: number;
+  offset: number;
+}
+
+export type LibraryRow = AlbumRow | TrackRow | ArtistRow;
+
 export interface LibraryQueryResult {
   view: LibraryView;
-  rows: readonly unknown[];
+  rows: readonly LibraryRow[];
 }
 
 export interface ScanSummary {
