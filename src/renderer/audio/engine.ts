@@ -24,7 +24,7 @@ import { nextStartTime, shouldPreload } from "./schedule";
  *  - A la fin naturelle, cette source deja en vol est PROMUE source courante (chemin gapless).
  *  - `next()`/`prev()` manuels annulent proprement toute source (en vol ET programmee) avec un
  *    fondu de gain de quelques ms (anti-clic), puis demarrent la cible — il ne reste JAMAIS
- *    qu'UNE source vivante. `prev()` dans les 3 premieres secondes redemarre la piste courante.
+ *    qu'UNE source vivante. `prev()` au-dela de 3 s redemarre la piste courante, sinon recule.
  *  - Le prechargement est pompe par `tick()` (l'UI l'appelle a la cadence de sa barre de
  *    progression) ; aucun timer interne, donc teardown sans fuite et tests deterministes.
  */
@@ -399,13 +399,14 @@ export class AudioEngine {
   }
 
   /**
-   * Recule. Dans les `PREV_RESTART_SEC` premieres secondes de la piste, redemarre la piste
-   * courante (seek 0) ; au-dela, va a la piste lisible precedente. Sans precedente : redemarre.
+   * Recule (convention usuelle). Au-dela de `PREV_RESTART_SEC` secondes ecoulees, redemarre la
+   * piste courante (seek 0) ; dans les premieres secondes, va a la piste lisible precedente.
+   * Sans precedente (ou file vide) : redemarre la piste courante.
    */
   async prev(): Promise<void> {
     if (!this.buffer && this.queue.length === 0) return;
     const position = this.getState().positionSec;
-    if (this.queue.length === 0 || position < PREV_RESTART_SEC) {
+    if (this.queue.length === 0 || position > PREV_RESTART_SEC) {
       this.restartCurrent();
       return;
     }

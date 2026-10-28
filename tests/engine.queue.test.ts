@@ -299,7 +299,7 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     expect(ctx.liveSources().length).toBe(1);
   });
 
-  it("prev() dans les 3 premieres secondes redemarre la piste courante (seek 0)", async () => {
+  it("prev() dans les 3 premieres secondes va a la piste precedente", async () => {
     const durs = new Map([
       ["C:\\m\\0.flac", 50],
       ["C:\\m\\1.flac", 50],
@@ -313,14 +313,13 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     ctx.currentTime = 2; // position 2 s (< 3) sur la piste d'index 1
     await engine.prev();
     await flush();
-    // Reste sur la meme piste, redemarree au debut.
-    expect(engine.getQueueIndex()).toBe(1);
-    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 11 });
-    expect(engine.getState().positionSec).toBeCloseTo(0, 1);
+    // Debut de piste : on recule vers la piste precedente.
+    expect(engine.getQueueIndex()).toBe(0);
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
     expect(ctx.liveSources().length).toBe(1);
   });
 
-  it("prev() au-dela de 3 s va a la piste precedente", async () => {
+  it("prev() au-dela de 3 s redemarre la piste courante (seek 0)", async () => {
     const durs = new Map([
       ["C:\\m\\0.flac", 50],
       ["C:\\m\\1.flac", 50],
@@ -334,8 +333,10 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     ctx.currentTime = 5; // position 5 s (> 3)
     await engine.prev();
     await flush();
-    expect(engine.getQueueIndex()).toBe(0);
-    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+    // Bien engage dans la piste : on redemarre au debut sans changer de piste.
+    expect(engine.getQueueIndex()).toBe(1);
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 11 });
+    expect(engine.getState().positionSec).toBeCloseTo(0, 1);
     expect(ctx.liveSources().length).toBe(1);
   });
 
