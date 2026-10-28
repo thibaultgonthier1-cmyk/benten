@@ -1,7 +1,11 @@
 import { app, BrowserWindow } from "electron";
 import { join } from "node:path";
+import { registerArtProtocol, registerArtScheme } from "./artprotocol";
 import { registerIpc } from "./ipc";
 import { openDb } from "./library/db";
+
+// Le schema doit etre declare avant que l'app soit prete.
+registerArtScheme();
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -26,6 +30,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  registerArtProtocol();
   registerIpc(openDb(join(app.getPath("userData"), "benten.db")));
   createWindow();
   app.on("activate", () => {

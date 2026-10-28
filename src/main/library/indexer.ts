@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { ScanSummary, TrackInput } from "../../shared/types";
+import { getOrCreateArt } from "./artcache";
 import { readMetadata as defaultReadMetadata } from "./metadata";
 import { upsertTracks } from "./repository";
 import { AUDIO_EXTENSIONS, scanAudioFiles } from "./scanner";
@@ -27,6 +28,8 @@ export type IndexProgressHandler = (progress: ScanSummary) => void;
 export interface IndexOptions {
   /** Lecteur de metadonnees (injectable pour les tests). */
   readMetadata?: (path: string) => Promise<TrackInput>;
+  /** Extraction/cache de pochette (injectable pour les tests) ; defaut : `getOrCreateArt`. */
+  getArt?: (path: string) => Promise<string | null>;
   concurrency?: number;
   batchSize?: number;
 }
@@ -52,6 +55,7 @@ async function* scanRoots(roots: readonly string[]): AsyncGenerator<string> {
  * - `skipped` : fichiers non lisibles (.m4p, tronques, illisibles) ou dont la lecture a
  *   echoue ; ils ne sont pas inseres. Un echec de lecture n'interrompt jamais le passage.
  * - Une erreur d'ecriture en base fait rejeter `indexLibrary` (jamais avalee, `added` non gonfle).
+ * - `artKey` est renseigne via `getArt` (pochette en cache) ; `null` sans pochette ou en cas d'erreur.
  * - `onProgress` est appele apres chaque lot ecrit et une derniere fois a la fin.
  */
 export async function indexLibrary(
@@ -61,6 +65,7 @@ export async function indexLibrary(
   options: IndexOptions = {},
 ): Promise<IndexResult> {
   const read = options.readMetadata ?? defaultReadMetadata;
+  const getArt = options.getArt ?? ((path: string) => getOrCreateArt({ path }));
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? DEFAULT_CONCURRENCY));
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? DEFAULT_BATCH_SIZE));
 
@@ -105,6 +110,12 @@ export async function indexLibrary(
         if (!track.playable) {
           stats.skipped++;
           continue;
+        }
+        // Une pochette manquante ou en erreur n'empeche jamais d'indexer la piste.
+        try {
+          track = { ...track, artKey: await getArt(track.path) };
+        } catch {
+          track = { ...track, artKey: null };
         }
         buffer.push(track);
         if (buffer.length >= batchSize) flush();
