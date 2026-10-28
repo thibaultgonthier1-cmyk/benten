@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./theme/tokens.css";
-import { AudioEngine } from "./audio/engine";
+import { AudioEngine, qualitySampleRate } from "./audio/engine";
 import { NativeDecoder } from "./audio/decoder";
 import { bindEngine, playerStore, usePlayer } from "./state/player";
 import { createControls } from "./components/controls";
@@ -12,7 +12,7 @@ import {
   type AlbumSortFilter,
 } from "./lib/library";
 import { makeThrottle } from "./lib/throttle";
-import type { TrackRow } from "../shared/types";
+import type { QualityMode, TrackRow } from "../shared/types";
 import { LibraryGrid } from "./components/LibraryGrid";
 import { SortFilterBar } from "./components/SortFilterBar";
 import { SearchResults } from "./components/SearchResults";
@@ -77,6 +77,29 @@ export function App(): JSX.Element {
     const unbind = bindEngine(playerStore, engine);
     // Rattache le moteur au store pour les mutations de file A CHAUD (updateQueue / jumpTo).
     playerStore.getState().attachEngine(engine);
+
+    // Recreation PROPRE du contexte au changement de mode (Task 13). L'App est la SEULE a creer un
+    // `AudioContext` : le store appelle ce gestionnaire, qui fabrique le nouveau contexte a la
+    // frequence du mode, demande au moteur de reconstruire son graphe dessus (hors-lecture, en
+    // pause, sans clic), PUIS ferme l'ANCIEN contexte — il n'y a donc jamais plus d'UN contexte
+    // vivant. L'instance du moteur ne change pas : `window.__benten.engine` reste valide.
+    const rebuildForQuality = async (mode: QualityMode): Promise<void> => {
+      const oldCtx = engine.getContext();
+      const rate = qualitySampleRate(mode, oldCtx.sampleRate);
+      let newCtx: AudioContext;
+      try {
+        newCtx = new AudioContext({ sampleRate: rate });
+      } catch {
+        newCtx = new AudioContext(); // frequence refusee par la plateforme : repli au defaut
+      }
+      await engine.rebuildContext(newCtx, new NativeDecoder(newCtx));
+      if (oldCtx !== newCtx) {
+        void oldCtx.close?.(); // un seul contexte vivant : l'ancien est ferme (pas de fuite)
+      }
+    };
+    playerStore.getState().attachQualityRebuild((mode) => {
+      void rebuildForQuality(mode);
+    });
     // Pont de verification DEV-ONLY : expose le VRAI moteur + le store pour piloter/observer le
     // gapless/shuffle/repeat via CDP (Runtime.evaluate). `import.meta.env.DEV` est `false` dans un
     // build de production -> ce pont n'est JAMAIS attache en prod. Nettoye au demontage.
@@ -102,6 +125,7 @@ export function App(): JSX.Element {
       cancelAnimationFrame(raf);
       unbind();
       playerStore.getState().attachEngine(null);
+      playerStore.getState().attachQualityRebuild(null);
       if (import.meta.env.DEV) {
         delete (window as unknown as { __benten?: unknown }).__benten;
       }

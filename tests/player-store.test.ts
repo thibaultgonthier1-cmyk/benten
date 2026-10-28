@@ -181,6 +181,7 @@ function queueEngineStub() {
     jumps: [] as number[],
     repeat: [] as string[],
     shuffle: [] as boolean[],
+    volume: [] as number[],
   };
   return {
     calls,
@@ -195,6 +196,9 @@ function queueEngineStub() {
     },
     setShuffle(on: boolean): void {
       calls.shuffle.push(on);
+    },
+    setVolume(v: number): void {
+      calls.volume.push(v);
     },
   };
 }
@@ -311,5 +315,45 @@ describe("player store — shuffle & repeat (Task 12)", () => {
     expect(() => store.getState().setShuffle(true)).not.toThrow();
     expect(store.getState().repeat).toBe("all");
     expect(store.getState().shuffle).toBe(true);
+  });
+});
+
+describe("player store — volume & qualite (Task 13)", () => {
+  it("valeurs par defaut : volume 1, qualityMode 'balanced'", () => {
+    const store = createPlayerStore();
+    expect(store.getState().volume).toBe(1);
+    expect(store.getState().qualityMode).toBe("balanced");
+  });
+
+  it("setVolume borne a [0,1], reflete l'etat ET pilote le moteur", () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    store.getState().setVolume(0.33);
+    expect(store.getState().volume).toBeCloseTo(0.33, 5);
+    store.getState().setVolume(2); // borne haute
+    expect(store.getState().volume).toBe(1);
+    store.getState().setVolume(-1); // borne basse
+    expect(store.getState().volume).toBe(0);
+    expect(eng.calls.volume).toEqual([0.33, 1, 0]);
+  });
+
+  it("setQualityMode reflete l'etat ET declenche la recreation de contexte rattachee", () => {
+    const store = createPlayerStore();
+    const seen: string[] = [];
+    store.getState().attachQualityRebuild((m) => seen.push(m));
+    store.getState().setQualityMode("economy");
+    expect(store.getState().qualityMode).toBe("economy");
+    store.getState().setQualityMode("max");
+    expect(store.getState().qualityMode).toBe("max");
+    expect(seen).toEqual(["economy", "max"]);
+  });
+
+  it("setVolume / setQualityMode sans rattachement ne jettent pas (tests node)", () => {
+    const store = createPlayerStore();
+    expect(() => store.getState().setVolume(0.5)).not.toThrow();
+    expect(() => store.getState().setQualityMode("economy")).not.toThrow();
+    expect(store.getState().volume).toBe(0.5);
+    expect(store.getState().qualityMode).toBe("economy");
   });
 });

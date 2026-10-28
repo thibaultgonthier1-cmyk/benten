@@ -15,6 +15,7 @@ const api: BentenApi = {
   },
   audio: {
     defaultDevice: () => invoke(CHANNELS.AUDIO_DEFAULT_DEVICE),
+    listDevices: () => invoke(CHANNELS.AUDIO_LIST_DEVICES),
     readFile: (path) => invoke(CHANNELS.AUDIO_READ_FILE, path),
   },
   dialog: {

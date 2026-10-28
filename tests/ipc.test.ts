@@ -55,6 +55,7 @@ describe("registerIpc", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
       "audio:default-device",
+      "audio:list-devices",
       "audio:read-file",
       "dialog:pick-folder",
       "favorites:list",

@@ -132,6 +132,13 @@ export interface AudioDeviceInfo {
   sampleRate?: number;
 }
 
+/**
+ * Mode de qualite de lecture (Task 13). `max`/`balanced` suivent la frequence de la sortie ;
+ * `economy` force 44.1 kHz. Le changement de mode recree PROPREMENT l'`AudioContext` (hors-lecture)
+ * — voir `qualitySampleRate` et `AudioEngine.rebuildContext`.
+ */
+export type QualityMode = "max" | "balanced" | "economy";
+
 /** API exposée au Renderer sous `window.benten` (contextBridge). */
 export interface BentenApi {
   ping(): Promise<"pong">;
@@ -143,6 +150,8 @@ export interface BentenApi {
   };
   audio: {
     defaultDevice(): Promise<AudioDeviceInfo>;
+    /** Enumeration fine des sorties detectees (repli sur le defaut, jamais vide, ne rejette pas). */
+    listDevices(): Promise<AudioDeviceInfo[]>;
     /** Octets bruts d'un fichier audio, pour decodage cote Renderer. Rejette si illisible. */
     readFile(path: string): Promise<ArrayBuffer>;
   };

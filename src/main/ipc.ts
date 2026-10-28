@@ -20,7 +20,7 @@ import type {
   SourceRow,
   TrackRow,
 } from "../shared/types";
-import { defaultOutputDevice } from "./audio/devices";
+import { defaultOutputDevice, listOutputDevices } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
 import {
   addSource,
@@ -321,6 +321,11 @@ export function registerIpc(db: Database.Database): void {
   ipcMain.handle(CHANNELS.AUDIO_DEFAULT_DEVICE, (event): Promise<AudioDeviceInfo> => {
     assertTrusted(event);
     return defaultOutputDevice();
+  });
+
+  ipcMain.handle(CHANNELS.AUDIO_LIST_DEVICES, (event): Promise<AudioDeviceInfo[]> => {
+    assertTrusted(event);
+    return listOutputDevices();
   });
 
   ipcMain.handle(CHANNELS.AUDIO_READ_FILE, (event, path: unknown): Promise<ArrayBuffer> => {

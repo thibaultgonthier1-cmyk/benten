@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AudioEngine } from "../src/renderer/audio/engine";
+import { AudioEngine, qualitySampleRate } from "../src/renderer/audio/engine";
 import type { Decoder } from "../src/renderer/audio/decoder";
 import type { TrackRow } from "../src/shared/types";
 
@@ -150,19 +150,22 @@ describe("AudioEngine", () => {
     expect(ctx.resumeCount).toBeGreaterThan(0);
   });
 
-  it("cable le graphe source -> gain -> analyser -> destination (gain/analyser reutilises)", async () => {
+  it("cable le graphe source -> gain -> analyser -> volumeGain -> destination (noeuds reutilises)", async () => {
     const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
     await engine.load(track());
     engine.play();
     expect(ctx.createdSources).toBe(1);
-    expect(ctx.gainCount).toBe(1);
+    // Deux GainNode : `gain` (fondu anti-clic) + `volumeGain` (volume utilisateur, Task 13).
+    expect(ctx.gainCount).toBe(2);
     expect(ctx.analyserCount).toBe(1);
     const src = ctx.sources[0]!;
     const gain = src.connectedTo as FakeGain;
     expect(gain).toBeInstanceOf(FakeGain);
     const analyser = gain.connectedTo as FakeAnalyser;
     expect(analyser).toBeInstanceOf(FakeAnalyser);
-    expect(analyser.connectedTo).toBe(ctx.destination);
+    const volume = analyser.connectedTo as FakeGain;
+    expect(volume).toBeInstanceOf(FakeGain);
+    expect(volume.connectedTo).toBe(ctx.destination);
   });
 
   it("la position derive de currentTime puis se fige au pause", async () => {
@@ -329,5 +332,90 @@ describe("AudioEngine", () => {
     await engine.load(track({ id: 2, durationSec: 50 }));
     expect(first.stopped).toBe(true);
     expect(engine.getState()).toMatchObject({ status: "ready", trackId: 2, positionSec: 0 });
+  });
+
+  // === Task 13 : volume, qualite, recreation de contexte =====================================
+
+  describe("qualitySampleRate (pur)", () => {
+    it("economy -> 44100 quelle que soit la sortie", () => {
+      expect(qualitySampleRate("economy", 48000)).toBe(44100);
+      expect(qualitySampleRate("economy", 96000)).toBe(44100);
+      expect(qualitySampleRate("economy", undefined)).toBe(44100);
+    });
+    it("max / balanced suivent la frequence de la sortie", () => {
+      expect(qualitySampleRate("max", 96000)).toBe(96000);
+      expect(qualitySampleRate("max", 44100)).toBe(44100);
+      expect(qualitySampleRate("balanced", 48000)).toBe(48000);
+    });
+    it("max / balanced retombent sur 48000 quand la sortie est inconnue ou aberrante", () => {
+      expect(qualitySampleRate("balanced", undefined)).toBe(48000);
+      expect(qualitySampleRate("max", undefined)).toBe(48000);
+      expect(qualitySampleRate("max", 0)).toBe(48000);
+      expect(qualitySampleRate("balanced", -1)).toBe(48000);
+      expect(qualitySampleRate("max", Number.NaN)).toBe(48000);
+    });
+  });
+
+  describe("setVolume", () => {
+    it("regle le gain de volume dedie (≈0.5) independamment des fondus anti-clic", async () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      await engine.setQueue([track({ id: 1 }), track({ id: 2 })], 0);
+      engine.play();
+      engine.setVolume(0.5);
+      expect(engine.getVolume()).toBeCloseTo(0.5, 5);
+
+      // Un changement manuel de piste declenche un fondu anti-clic sur `gain` : il ne doit PAS
+      // ecraser le volume (noeud dedie). Le volume reste a 0.5.
+      await engine.next();
+      expect(engine.getVolume()).toBeCloseTo(0.5, 5);
+    });
+
+    it("borne le volume dans [0,1]", () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      engine.setVolume(2);
+      expect(engine.getVolume()).toBe(1);
+      engine.setVolume(-1);
+      expect(engine.getVolume()).toBe(0);
+    });
+  });
+
+  describe("rebuildContext (contextes mockes)", () => {
+    it("conserve trackId et se repositionne EN PAUSE a la position memorisee", async () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(200)));
+      await engine.load(track({ id: 42, durationSec: 200 }));
+      engine.play();
+      ctx.currentTime = 37;
+      expect(engine.getState().positionSec).toBeCloseTo(37, 5);
+
+      const ctx2 = new FakeAudioContext();
+      const dec2 = okDecoder(new FakeAudioBuffer(200));
+      await engine.rebuildContext(ctx2 as unknown as AudioContext, dec2);
+
+      const s = engine.getState();
+      expect(s.trackId).toBe(42); // piste conservee
+      expect(s.status).toBe("paused"); // JAMAIS en lecture (pas de clic)
+      expect(s.positionSec).toBeCloseTo(37, 5); // repositionne a la position d'avant
+      // Le graphe est reconstruit sur le NOUVEAU contexte (un seul contexte vivant a la fois).
+      expect(ctx2.gainCount).toBe(2);
+      expect(ctx2.analyserCount).toBe(1);
+    });
+
+    it("reapplique le volume utilisateur sur le nouveau contexte", async () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      await engine.load(track({ id: 1 }));
+      engine.setVolume(0.25);
+      const ctx2 = new FakeAudioContext();
+      await engine.rebuildContext(ctx2 as unknown as AudioContext, okDecoder(new FakeAudioBuffer(100)));
+      expect(engine.getVolume()).toBeCloseTo(0.25, 5);
+    });
+
+    it("sans piste chargee, swap propre sans jeter", async () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      const ctx2 = new FakeAudioContext();
+      await expect(
+        engine.rebuildContext(ctx2 as unknown as AudioContext, okDecoder(new FakeAudioBuffer(100))),
+      ).resolves.toBeUndefined();
+      expect(ctx2.gainCount).toBe(2);
+    });
   });
 });

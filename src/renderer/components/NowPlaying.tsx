@@ -4,7 +4,8 @@ import { usePlayer, playerStore } from "../state/player";
 import { describeQuality, formatTime } from "../lib/library";
 import { useFocusTrap } from "../lib/focusTrap";
 import { coverAccent, Cover } from "./Cover";
-import { QualityBadge, QualitySheet } from "./QualityBadge";
+import { QualityBadge } from "./QualityBadge";
+import { QualitySheet } from "./QualitySheet";
 import type { PlayerControls } from "./controls";
 
 /** Pas de deplacement clavier du scrubber, en secondes. */

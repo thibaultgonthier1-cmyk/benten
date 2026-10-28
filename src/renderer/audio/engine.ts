@@ -1,9 +1,31 @@
-import type { TrackRow } from "../../shared/types";
+import type { QualityMode, TrackRow } from "../../shared/types";
 import type { Decoder } from "./decoder";
 import { nextStartTime, shouldPreload } from "./schedule";
 import { buildOrder, nextInOrder, prevInOrder, type RepeatMode } from "./order";
 
 export type { RepeatMode } from "./order";
+
+/** Frequence par defaut quand la sortie est inconnue/aberrante (suivie par max/balanced). */
+const DEFAULT_SAMPLE_RATE = 48000;
+/** Frequence du mode econome (et plancher historique CD). */
+const ECONOMY_SAMPLE_RATE = 44100;
+
+/**
+ * Frequence d'echantillonnage (Hz) a demander a l'`AudioContext` pour un mode de qualite. PURE.
+ *
+ *  - `economy` → `44100` (toujours), pour menager CPU/batterie.
+ *  - `max` / `balanced` → suivent la sortie (`deviceRate`). Si la sortie est inconnue ou aberrante
+ *    (absente, non finie, ≤ 0), on retombe sur `48000` (defaut moderne), le plancher restant 44100
+ *    via le mode econome. v1 ne fait PAS de bit-perfect : `max` et `balanced` partagent donc la
+ *    meme cible (suivre la sortie) ; la distinction est reservee a une version ulterieure.
+ */
+export function qualitySampleRate(mode: QualityMode, deviceRate: number | undefined): number {
+  if (mode === "economy") return ECONOMY_SAMPLE_RATE;
+  if (typeof deviceRate === "number" && Number.isFinite(deviceRate) && deviceRate > 0) {
+    return deviceRate;
+  }
+  return DEFAULT_SAMPLE_RATE;
+}
 
 /**
  * Moteur audio — graphe Web Audio, decodage, transport (load / play / pause / seek).
@@ -75,13 +97,23 @@ const PREV_RESTART_SEC = 3;
 const FADE_SEC = 0.005;
 
 export class AudioEngine {
-  private readonly context: AudioContext;
-  private readonly decoder: Decoder;
+  // NON `readonly` : `rebuildContext` (Task 13) echange le contexte + le decodeur et reconstruit le
+  // graphe sur le nouveau contexte. L'INSTANCE du moteur, elle, ne change jamais (le pont dev et le
+  // store gardent la meme reference apres une recreation de contexte).
+  private context: AudioContext;
+  private decoder: Decoder;
   private readonly readBytes: ReadBytes;
 
-  // Graphe reutilise : gain -> analyser -> destination (cable une seule fois).
-  private readonly gain: GainNode;
-  private readonly analyser: AnalyserNode;
+  // Graphe : source -> gain -> analyser -> volumeGain -> destination (cable par `buildGraph`).
+  // `gain` porte les fondus anti-clic (changements manuels) ; `volumeGain` porte le VOLUME
+  // utilisateur, sur un noeud DEDIE pour que les fondus et le volume ne se marchent jamais dessus.
+  private gain!: GainNode;
+  private analyser!: AnalyserNode;
+  private volumeGain!: GainNode;
+  /** Volume utilisateur [0,1], conserve hors graphe pour etre reapplique apres un rebuild. */
+  private userVolume = 1;
+  /** Piste courante (ligne complete) : necessaire pour la recharger lors d'un rebuild de contexte. */
+  private currentTrackRow: TrackRow | null = null;
 
   private readonly listeners: { [E in EngineEvent]: Set<Listener<E>> } = {
     statechange: new Set(),
@@ -154,15 +186,32 @@ export class AudioEngine {
     this.context = context;
     this.decoder = decoder;
     this.readBytes = readBytes;
-    this.gain = context.createGain();
-    this.analyser = context.createAnalyser();
+    this.buildGraph();
+  }
+
+  /**
+   * (Re)construit le graphe sur `this.context` : source -> gain -> analyser -> volumeGain ->
+   * destination. Appele par le constructeur et par `rebuildContext`. Reapplique le volume courant
+   * sur le nouveau `volumeGain` (le volume survit a une recreation de contexte).
+   */
+  private buildGraph(): void {
+    this.gain = this.context.createGain();
+    this.analyser = this.context.createAnalyser();
+    this.volumeGain = this.context.createGain();
     this.gain.connect(this.analyser);
-    this.analyser.connect(context.destination);
+    this.analyser.connect(this.volumeGain);
+    this.volumeGain.connect(this.context.destination);
+    this.applyVolumeToNode();
   }
 
   /** Nœud d'analyse (spectre / VU-metre), pour l'UI. */
   getAnalyser(): AnalyserNode {
     return this.analyser;
+  }
+
+  /** `AudioContext` courant (l'App en a besoin pour fermer l'ancien apres un rebuild). */
+  getContext(): AudioContext {
+    return this.context;
   }
 
   on<E extends EngineEvent>(event: E, cb: Listener<E>): () => void {
@@ -202,6 +251,7 @@ export class AudioEngine {
     this.pausedPositionSec = 0;
     this.startOffsetSec = 0;
     this.trackId = track.id;
+    this.currentTrackRow = track; // conserve la ligne pour un eventuel rebuild de contexte
 
     const fail = (reason: string): void => {
       if (token !== this.loadToken) return; // une autre piste a ete demandee entre-temps
@@ -886,6 +936,7 @@ export class AudioEngine {
     const promotedPos = this.order.indexOf(index);
     if (promotedPos >= 0) this.orderPos = promotedPos;
     this.trackId = this.queue[index]?.id ?? this.trackId;
+    this.currentTrackRow = this.queue[index] ?? this.currentTrackRow;
     this.startOffsetSec = 0;
     this.startedAtCtxTime = when;
     this.pausedPositionSec = 0;
@@ -1003,5 +1054,91 @@ export class AudioEngine {
     } else if (typeof gp.value === "number") {
       gp.value = 1;
     }
+  }
+
+  // === Volume & recreation de contexte (Task 13) ==============================================
+
+  /**
+   * Regle le volume utilisateur [0,1] sur un noeud DEDIE (`volumeGain`), DISTINCT du `gain` qui
+   * porte les fondus anti-clic. Les deux concerns sont ainsi orthogonaux : un changement de piste
+   * (fondu sur `gain`) n'ecrase jamais le volume, et regler le volume ne perturbe aucun fondu.
+   */
+  setVolume(v01: number): void {
+    this.userVolume = clamp(Number.isFinite(v01) ? v01 : 1, 0, 1);
+    this.applyVolumeToNode();
+  }
+
+  /** Volume utilisateur courant [0,1], lu depuis le noeud dedie (source de verite du graphe). */
+  getVolume(): number {
+    const v = this.volumeGain.gain.value;
+    return typeof v === "number" ? v : this.userVolume;
+  }
+
+  /** Ecrit `userVolume` sur `volumeGain` (immediat, hors toute rampe). */
+  private applyVolumeToNode(): void {
+    const gp = this.volumeGain.gain;
+    if (
+      typeof gp.cancelScheduledValues === "function" &&
+      typeof gp.setValueAtTime === "function"
+    ) {
+      const now = this.context.currentTime;
+      gp.cancelScheduledValues(now);
+      gp.setValueAtTime(this.userVolume, now);
+    } else if (typeof gp.value === "number") {
+      gp.value = this.userVolume;
+    }
+  }
+
+  /**
+   * Recreation PROPRE du contexte audio (Task 13) — HORS LECTURE, sans clic.
+   *
+   * Protocole : on memorise `trackId` + position AVANT tout teardown, on annule proprement toutes
+   * les sources de l'ANCIEN contexte (il n'en reste aucune vivante), on bascule sur le NOUVEAU
+   * contexte + decodeur et on reconstruit le graphe dessus (le volume utilisateur est reapplique),
+   * puis on RECHARGE la piste courante via le nouveau decodeur et on se repositionne EN PAUSE a la
+   * position memorisee (JAMAIS en lecture : aucun son ne demarre, donc aucun clic).
+   *
+   * Un seul contexte a la fois : l'App ferme l'ANCIEN contexte apres cet appel (`getContext()` le
+   * lui a donne). Si rien n'etait charge, on fait un swap propre et on reste en etat neutre.
+   */
+  async rebuildContext(newContext: AudioContext, newDecoder: Decoder): Promise<void> {
+    // 1) Capture AVANT teardown (la position derive de l'ancien contexte).
+    const savedPosition = this.getState().positionSec;
+    const savedTrack = this.currentTrackRow;
+
+    // 2) Annule toute source de l'ancien contexte (plus aucune source vivante cote ancien graphe).
+    //    `load` plus bas incremente `loadToken`, ce qui defuse en plus tout decode encore en vol.
+    this.teardownSource();
+    this.teardownScheduled();
+    this.clearPreload();
+
+    // 3) Bascule contexte + decodeur, reconstruit le graphe dessus (volume reapplique).
+    this.context = newContext;
+    this.decoder = newDecoder;
+    this.buildGraph();
+
+    // 4) Etat de transport remis a plat (hors-lecture).
+    this.source = null;
+    this.buffer = null;
+    this.startOffsetSec = 0;
+    this.startedAtCtxTime = 0;
+
+    if (!savedTrack) {
+      // Rien n'etait charge : swap propre, etat neutre.
+      this.durationSec = 0;
+      this.pausedPositionSec = 0;
+      this.trackId = null;
+      this.currentTrackRow = null;
+      this.setStatus("idle");
+      return;
+    }
+
+    // 5) Recharge la piste via le NOUVEAU decodeur, puis se fige EN PAUSE a la position memorisee.
+    await this.load(savedTrack);
+    if (this.buffer) {
+      this.pausedPositionSec = clamp(savedPosition, 0, this.durationSec);
+      this.setStatus("paused");
+    }
+    // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }

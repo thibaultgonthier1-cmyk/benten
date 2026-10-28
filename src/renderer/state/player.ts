@@ -1,7 +1,9 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { AudioEngine, PlaybackState, PlaybackStatus, RepeatMode } from "../audio/engine";
-import type { TrackRow } from "../../shared/types";
+import type { QualityMode, TrackRow } from "../../shared/types";
+
+export type { QualityMode } from "../../shared/types";
 
 export type { RepeatMode } from "../audio/engine";
 
@@ -32,6 +34,8 @@ export interface QueueEngineApi {
   setRepeatMode(mode: RepeatMode): void;
   /** Lecture aleatoire. */
   setShuffle(on: boolean): void;
+  /** Volume utilisateur [0,1] sur le noeud de volume dedie (Task 13). */
+  setVolume(v01: number): void;
 }
 
 export interface PlayerState {
@@ -57,6 +61,10 @@ export interface PlayerState {
   repeat: RepeatMode;
   /** Lecture aleatoire active (reflete l'etat du moteur). */
   shuffle: boolean;
+  /** Mode de qualite courant (Task 13) ; son changement recree proprement le contexte audio. */
+  qualityMode: QualityMode;
+  /** Volume utilisateur [0,1] (Task 13). */
+  volume: number;
 
   // --- Actions (pures) ------------------------------------------------------------------------
   /** Fixe la file et la piste courante (etat optimiste ; le moteur confirmera via statechange). */
@@ -93,6 +101,19 @@ export interface PlayerState {
   setRepeat(mode: RepeatMode): void;
   /** Active/desactive la lecture aleatoire (etat + moteur). */
   setShuffle(on: boolean): void;
+  /** Regle le volume utilisateur [0,1] (etat + moteur, noeud dedie). */
+  setVolume(v01: number): void;
+  /**
+   * Change le mode de qualite (etat) PUIS declenche la recreation PROPRE du contexte audio via le
+   * gestionnaire rattache par l'App (`attachQualityRebuild`). Hors App (tests node), seul l'etat
+   * change : la recreation de contexte appartient a l'App (elle seule cree l'`AudioContext`).
+   */
+  setQualityMode(mode: QualityMode): void;
+  /**
+   * Rattache le gestionnaire de recreation de contexte (fourni par l'App). `null` detache (nettoyage
+   * au demontage). Appele par `setQualityMode` avec le nouveau mode.
+   */
+  attachQualityRebuild(fn: ((mode: QualityMode) => void) | null): void;
   /**
    * Bascule l'appartenance de `trackId` a `favoriteIds` (etat optimiste, nouvelle reference de Set),
    * puis persiste via IPC si `window.benten` est present ; en cas d'echec de persistance, l'etat
@@ -117,6 +138,9 @@ export type PlayerStore = StoreApi<PlayerState>;
 export function createPlayerStore(): PlayerStore {
   // Moteur rattache hors de l'etat rendu (objet mutable, jamais serialise/affiche). Absent en node.
   let queueEngine: QueueEngineApi | null = null;
+  // Gestionnaire de recreation de contexte (fourni par l'App : elle seule cree l'`AudioContext`).
+  // Hors App (tests node), reste `null` : `setQualityMode` ne fait alors que changer l'etat.
+  let qualityRebuild: ((mode: QualityMode) => void) | null = null;
 
   return createStore<PlayerState>((set, get) => ({
     queue: [],
@@ -130,6 +154,8 @@ export function createPlayerStore(): PlayerStore {
     favoriteIds: new Set<number>(),
     repeat: "off",
     shuffle: false,
+    qualityMode: "balanced",
+    volume: 1,
 
     setQueue(tracks, index = 0) {
       const queue = tracks.slice();
@@ -289,6 +315,22 @@ export function createPlayerStore(): PlayerStore {
     setShuffle(on) {
       set({ shuffle: on });
       queueEngine?.setShuffle(on);
+    },
+
+    setVolume(v01) {
+      const v = Math.max(0, Math.min(1, Number.isFinite(v01) ? v01 : 1));
+      set({ volume: v });
+      queueEngine?.setVolume?.(v);
+    },
+
+    setQualityMode(mode) {
+      set({ qualityMode: mode });
+      // La recreation PROPRE du contexte appartient a l'App (seule a creer l'`AudioContext`).
+      qualityRebuild?.(mode);
+    },
+
+    attachQualityRebuild(fn) {
+      qualityRebuild = fn;
     },
 
     toggleFavorite(trackId) {

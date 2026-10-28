@@ -4,6 +4,7 @@ export const CHANNELS = {
   LIBRARY_SCAN: "library:scan",
   LIBRARY_SEARCH: "library:search",
   AUDIO_DEFAULT_DEVICE: "audio:default-device",
+  AUDIO_LIST_DEVICES: "audio:list-devices",
   AUDIO_READ_FILE: "audio:read-file",
   DIALOG_PICK_FOLDER: "dialog:pick-folder",
   SOURCES_LIST: "sources:list",

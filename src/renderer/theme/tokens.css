@@ -1645,6 +1645,92 @@ body {
   stroke-width: 2;
 }
 
+/* ---- Feuille qualite FONCTIONNELLE (Task 13) : modes cliquables, sortie, volume ------------ */
+/* `.qopt` est desormais un <button role="radio"> : on neutralise le style natif du bouton. */
+button.qopt {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+button.qopt:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 2px;
+}
+/* Selecteur de sortie. */
+.qsel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.qsel-lbl {
+  font-size: 12px;
+  color: var(--sumi);
+  flex: none;
+  width: 54px;
+}
+.qsel select {
+  flex: 1;
+  min-width: 0;
+  background: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--paper);
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+.qsel select:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 2px;
+}
+.qsel select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* Ligne de volume. */
+.qvol {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.qvol-ic {
+  color: var(--sumi);
+  line-height: 0;
+  flex: none;
+}
+.qvol-ic svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+.qvol input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--magenta);
+  cursor: pointer;
+}
+.qvol input[type="range"]:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 3px;
+}
+.qvol-val {
+  font-variant-numeric: tabular-nums;
+  color: var(--sumi);
+  font-size: 12px;
+  width: 40px;
+  text-align: right;
+  flex: none;
+}
+
 /* ============================ MENU D'ACTIONS DE CARTE (Task 11) ============================ */
 .card-wrap {
   position: relative;
