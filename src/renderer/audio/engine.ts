@@ -1,6 +1,9 @@
 import type { TrackRow } from "../../shared/types";
 import type { Decoder } from "./decoder";
 import { nextStartTime, shouldPreload } from "./schedule";
+import { buildOrder, nextInOrder, prevInOrder, type RepeatMode } from "./order";
+
+export type { RepeatMode } from "./order";
 
 /**
  * Moteur audio — graphe Web Audio, decodage, transport (load / play / pause / seek).
@@ -111,6 +114,18 @@ export class AudioEngine {
   private queue: readonly TrackRow[] = [];
   /** Index de la piste courante dans `queue`. */
   private queueIndex = 0;
+
+  // --- Ordre de lecture (shuffle) & navigation (repeat) — Tache 12 ----------------------------
+  /** Ordre de lecture : permutation d'indices dans `queue`. Identite si `shuffle=false`. */
+  private order: number[] = [];
+  /** Position de la piste courante DANS `order` (invariant : `order[orderPos] === queueIndex`). */
+  private orderPos = 0;
+  /** Mode de repetition. */
+  private repeat: RepeatMode = "off";
+  /** Lecture aleatoire active. */
+  private shuffle = false;
+  /** Graine du melange courant : fixe l'ordre deterministe tant que shuffle reste actif. */
+  private shuffleSeed = 0;
 
   /** Jeton de prechargement : incremente a chaque annulation pour defuser un decode en vol. */
   private preloadToken = 0;
@@ -315,21 +330,33 @@ export class AudioEngine {
    * lisible (saut silencieux d'une piste non lisible), ou on passe en `ended` en fin de file.
    */
   private onCurrentSourceEnded(): void {
-    const nextIndex = this.queueIndex + 1;
-    if (this.scheduledSource && this.scheduledForIndex === nextIndex) {
-      this.promoteScheduled();
-      return;
+    // Jointure gapless : si la SUIVANTE IMMEDIATE de l'ordre (via `nextInOrder`, repeat compris)
+    // est deja programmee et en vol, on la PROMEUT (zero trou). `repeat:"one"` renvoie la meme
+    // position -> meme piste programmee -> loop seamless par le meme chemin de promotion.
+    const immediatePos = nextInOrder(this.order, this.orderPos, this.repeat);
+    if (immediatePos !== null) {
+      const immediateIndex = this.order[immediatePos];
+      if (
+        immediateIndex !== undefined &&
+        this.scheduledSource &&
+        this.scheduledForIndex === immediateIndex
+      ) {
+        this.promoteScheduled();
+        return;
+      }
     }
-    const target = this.findPlayableFrom(nextIndex, +1);
+    // Sinon : on cherche la prochaine position LISIBLE de l'ordre (saut silencieux des .m4p) et on
+    // avance via load (petit silence possible a CETTE jointure seulement). `null` = fin de file.
+    const target = this.stepPlayableOrderPos(+1);
     if (target === null) {
       this.handleNaturalEnd();
       return;
     }
-    // Pas de source pre-decodee a temps (ou suivante non lisible) : on avance via load (petit
-    // silence possible a CETTE jointure seulement), en sautant les pistes non lisibles.
+    const targetIndex = this.order[target]!;
     this.teardownSource();
-    this.queueIndex = target;
-    void this.loadAndPlay(this.queue[target]!);
+    this.queueIndex = targetIndex;
+    this.orderPos = target;
+    void this.loadAndPlay(this.queue[targetIndex]!);
   }
 
   /** Detache et stoppe la source courante sans declencher `ended` (stop volontaire). */
@@ -371,15 +398,119 @@ export class AudioEngine {
     this.clearPreload();
     if (this.queue.length === 0) {
       this.queueIndex = 0;
+      this.order = [];
+      this.orderPos = 0;
       return;
     }
     this.queueIndex = clamp(Math.floor(index), 0, this.queue.length - 1);
+    this.rebuildOrder();
     await this.load(this.queue[this.queueIndex]!);
   }
 
   /** Index de la piste courante dans la file. */
   getQueueIndex(): number {
     return this.queueIndex;
+  }
+
+  /** Ordre de lecture courant (permutation d'indices de file). Copie defensive. */
+  getOrder(): number[] {
+    return this.order.slice();
+  }
+
+  /** Position de la piste courante dans `order`. */
+  getOrderPos(): number {
+    return this.orderPos;
+  }
+
+  /** Mode de repetition courant. */
+  getRepeat(): RepeatMode {
+    return this.repeat;
+  }
+
+  /** Lecture aleatoire active ? */
+  getShuffle(): boolean {
+    return this.shuffle;
+  }
+
+  /**
+   * Change le mode de repetition. La piste COURANTE n'est jamais coupee : on recalcule seulement ce
+   * qui etait programme comme suivante (une bascule vers/depuis `one`, ou le franchissement d'une
+   * borne, change la cible). La source programmee obsolete est annulee puis `pump()` reprogramme la
+   * bonne — toujours par le MEME chemin gapless (scheduleNext/promoteScheduled).
+   */
+  setRepeatMode(mode: RepeatMode): void {
+    this.repeat = mode;
+    this.teardownScheduled();
+    this.clearPreload();
+    this.pump();
+  }
+
+  /**
+   * Active / desactive la lecture aleatoire. La piste COURANTE reste courante (placee en tete de
+   * l'ordre melange) et sa source n'est JAMAIS coupee : on ne touche qu'a la programmation future.
+   * `seed` (optionnel) fixe un melange deterministe (tests / reproductibilite) ; sinon une graine
+   * aleatoire est tiree a chaque activation.
+   */
+  setShuffle(on: boolean, seed?: number): void {
+    this.shuffle = on;
+    if (on) {
+      this.shuffleSeed = seed ?? (Math.floor(Math.random() * 0x100000000) >>> 0);
+    }
+    this.rebuildOrder();
+    // La suivante programmee date de l'ancien ordre : on la jette et on reprogramme sur le nouvel
+    // ordre, sans jamais toucher `this.source` (aucune coupure du son en cours).
+    this.teardownScheduled();
+    this.clearPreload();
+    this.pump();
+  }
+
+  /**
+   * (Re)construit `order`/`orderPos` pour la file courante selon l'etat shuffle, en gardant la piste
+   * courante (`queueIndex`) comme piste courante : en tete de l'ordre melange, ou a son indice
+   * naturel en mode identite.
+   */
+  private rebuildOrder(): void {
+    const count = this.queue.length;
+    if (count === 0) {
+      this.order = [];
+      this.orderPos = 0;
+      return;
+    }
+    if (this.shuffle) {
+      this.order = buildOrder(count, {
+        shuffle: true,
+        seed: this.shuffleSeed,
+        current: this.queueIndex,
+      });
+      this.orderPos = Math.max(0, this.order.indexOf(this.queueIndex));
+    } else {
+      this.order = Array.from({ length: count }, (_, i) => i);
+      this.orderPos = clamp(this.queueIndex, 0, count - 1);
+    }
+  }
+
+  /**
+   * Position d'ordre LISIBLE suivante (`dir=+1`) ou precedente (`dir=-1`) depuis `orderPos`, en
+   * respectant `repeat` (via `nextInOrder`/`prevInOrder`) et en SAUTANT les entrees non lisibles
+   * (`.m4p` / `playable:false`). Renvoie `null` aux bornes (`off`) ou si rien de lisible.
+   */
+  private stepPlayableOrderPos(dir: 1 | -1): number | null {
+    const n = this.order.length;
+    if (n === 0) return null;
+    const advance = (pos: number): number | null =>
+      dir === 1
+        ? nextInOrder(this.order, pos, this.repeat)
+        : prevInOrder(this.order, pos, this.repeat);
+    let pos = this.orderPos;
+    for (let guard = 0; guard < n; guard++) {
+      const np = advance(pos);
+      if (np === null) return null; // borne atteinte (off)
+      const qi = this.order[np];
+      if (qi !== undefined && this.queue[qi]?.playable) return np; // lisible trouvee
+      if (np === this.orderPos) return null; // tour complet (all) sans autre lisible
+      pos = np; // entree non lisible : on continue de sauter
+    }
+    return null;
   }
 
   /**
@@ -421,6 +552,8 @@ export class AudioEngine {
     // File vide : coupe proprement (fondu anti-clic) et revient a l'etat neutre.
     if (nextQueue.length === 0) {
       this.queueIndex = 0;
+      this.order = [];
+      this.orderPos = 0;
       this.cancelAllSourcesAntiClick();
       this.clearPreload();
       this.buffer = null;
@@ -445,6 +578,8 @@ export class AudioEngine {
       if (target === null) target = this.findPlayableFrom(anchor, -1);
       if (target === null) {
         // Aucune piste lisible : silence propre.
+        this.order = [];
+        this.orderPos = 0;
         this.cancelAllSourcesAntiClick();
         this.clearPreload();
         this.buffer = null;
@@ -455,12 +590,15 @@ export class AudioEngine {
         this.setStatus("idle");
         return;
       }
+      // La courante a disparu : on bascule sur `target`. On reconstruit l'ordre pour la NOUVELLE
+      // file en le centrant sur la nouvelle courante (en tete si shuffle, indice naturel sinon).
+      this.queueIndex = target;
+      this.rebuildOrder();
       if (wasPlaying) {
-        void this.switchTo(target); // fondu anti-clic + load + play
+        void this.switchTo(target, this.orderPos); // fondu anti-clic + load + play
       } else {
         this.teardownScheduled();
         this.clearPreload();
-        this.queueIndex = target;
         void this.load(this.queue[target]!); // charge sans demarrer (l'UI jouera)
       }
       return;
@@ -468,8 +606,17 @@ export class AudioEngine {
 
     // --- Piste courante toujours presente : on NE touche PAS this.source. --------------------
     this.queueIndex = foundIndex;
-    const newNextIndex = foundIndex + 1;
-    const newNextId = newNextIndex < nextQueue.length ? nextQueue[newNextIndex]!.id : null;
+    // Reconstruit l'ordre pour la nouvelle file en gardant la courante. En mode identite, la
+    // suivante de l'ordre est `foundIndex+1` : la comparaison d'identite ci-dessous preserve donc
+    // exactement l'optimisation Task 11 (garder la source programmee si la suivante n'a pas change).
+    // En shuffle, l'ordre est redeterministe (meme graine) : un simple reordonnancement de la file
+    // redonne la meme suivante -> source programmee preservee ; un ajout/retrait change le compte et
+    // reprogramme. Dans tous les cas, `this.source` (courante) n'est jamais touchee -> zero coupure.
+    this.rebuildOrder();
+    const nextPos = nextInOrder(this.order, this.orderPos, this.repeat);
+    const newNextIndex = nextPos !== null ? (this.order[nextPos] ?? -1) : -1;
+    const newNextId =
+      newNextIndex >= 0 && newNextIndex < nextQueue.length ? nextQueue[newNextIndex]!.id : null;
     const programmedNextId = scheduledTrackId ?? preloadedTrackId;
 
     if (programmedNextId !== null && newNextId !== null && programmedNextId === newNextId) {
@@ -505,12 +652,14 @@ export class AudioEngine {
     this.pump();
   }
 
-  /** Avance a la prochaine piste lisible (fondu anti-clic). Sans effet en fin de file. */
+  /** Avance a la prochaine piste lisible DE L'ORDRE (fondu anti-clic). Sans effet en fin de file. */
   async next(): Promise<void> {
     if (this.queue.length === 0) return;
-    const target = this.findPlayableFrom(this.queueIndex + 1, +1);
-    if (target === null) return; // fin de file : on ne touche a rien
-    await this.switchTo(target);
+    const pos = this.stepPlayableOrderPos(+1);
+    if (pos === null) return; // fin de file (off) : on ne touche a rien
+    const target = this.order[pos];
+    if (target === undefined) return;
+    await this.switchTo(target, pos);
   }
 
   /**
@@ -525,15 +674,24 @@ export class AudioEngine {
       this.restartCurrent();
       return;
     }
-    const target = this.findPlayableFrom(this.queueIndex - 1, -1);
-    if (target === null) {
+    const pos = this.stepPlayableOrderPos(-1);
+    if (pos === null) {
       this.restartCurrent();
       return;
     }
-    await this.switchTo(target);
+    const target = this.order[pos];
+    if (target === undefined) {
+      this.restartCurrent();
+      return;
+    }
+    await this.switchTo(target, pos);
   }
 
-  /** Premiere piste lisible a partir de `start` dans la direction `dir` (±1), ou `null`. */
+  /**
+   * Premiere piste lisible a partir de `start` dans la direction `dir` (±1) dans la FILE brute, ou
+   * `null`. Utilise uniquement par `updateQueue` quand la piste courante disparait : on cherche alors
+   * la plus proche lisible par POSITION dans la nouvelle file (l'ordre n'est pas encore reconstruit).
+   */
   private findPlayableFrom(start: number, dir: 1 | -1): number | null {
     for (let i = start; i >= 0 && i < this.queue.length; i += dir) {
       if (this.queue[i]!.playable) return i;
@@ -547,9 +705,12 @@ export class AudioEngine {
    * `queueIndex` de maniere synchrone ; une continuation obsolete (supplantee par un appel plus
    * recent) se retire sans creer de source. Il ne reste donc jamais qu'UNE source vivante.
    */
-  private async switchTo(index: number): Promise<void> {
+  private async switchTo(index: number, orderPos?: number): Promise<void> {
     this.cancelAllSourcesAntiClick(); // stoppe courante + programmee avec fondu de sortie
     this.queueIndex = index;
+    // Position dans l'ordre : fournie par le navigateur (next/prev) sinon retrouvee par identite
+    // (jumpTo / bascule updateQueue). `order` contient des indices uniques -> indexOf non ambigu.
+    this.orderPos = orderPos ?? Math.max(0, this.order.indexOf(index));
     const target = this.queue[index]!;
     await this.load(target); // incremente loadToken ; les decodes obsoletes sont jetes
     if (this.queueIndex !== index) return; // supplante par un next/prev plus recent
@@ -599,10 +760,16 @@ export class AudioEngine {
    */
   private pump(): void {
     if (this.status !== "playing" || !this.buffer) return;
-    const cur = this.queue[this.queueIndex];
+    const curIndex = this.order[this.orderPos];
+    const cur = curIndex !== undefined ? this.queue[curIndex] : undefined;
     if (!cur || cur.id !== this.trackId) return; // moteur desynchronise de la file : on s'abstient
-    const nextIndex = this.queueIndex + 1;
-    if (nextIndex >= this.queue.length) return; // pas de suivante
+    // Suivante IMMEDIATE de l'ordre (via `nextInOrder`, repeat compris). On programme UNIQUEMENT la
+    // suivante immediate : si elle est non lisible, `beginPreload` la laisse non programmee et le
+    // saut se fera via load a la fin naturelle (comme avant). `repeat:"one"` -> meme piste = loop.
+    const nextPos = nextInOrder(this.order, this.orderPos, this.repeat);
+    if (nextPos === null) return; // pas de suivante (fin de file, off)
+    const nextIndex = this.order[nextPos];
+    if (nextIndex === undefined) return;
 
     const position = this.computePosition();
     if (
@@ -714,6 +881,10 @@ export class AudioEngine {
     this.buffer = buffer;
     this.durationSec = Number.isFinite(buffer.duration) ? buffer.duration : 0;
     this.queueIndex = index;
+    // Realigne `orderPos` sur la position promue (indices uniques -> indexOf non ambigu).
+    // `repeat:"one"` promeut le meme index -> meme orderPos (loop sur place).
+    const promotedPos = this.order.indexOf(index);
+    if (promotedPos >= 0) this.orderPos = promotedPos;
     this.trackId = this.queue[index]?.id ?? this.trackId;
     this.startOffsetSec = 0;
     this.startedAtCtxTime = when;

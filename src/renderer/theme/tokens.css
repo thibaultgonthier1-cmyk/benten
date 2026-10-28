@@ -751,6 +751,27 @@ body {
 .ic.on {
   color: var(--magenta);
 }
+/* Bouton repeat : le petit « 1 » du mode « une piste », ancre en bas a droite de l'icone (aplat
+   magenta mat, DA-consistant). `position:relative` sur le bouton porte le badge. */
+.ic.rep {
+  position: relative;
+}
+.ic.rep .rep-one {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 1px;
+  border-radius: 6px;
+  background: var(--magenta);
+  color: #fff;
+  font-size: 8px;
+  line-height: 11px;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+}
 .play-btn {
   width: 46px;
   height: 46px;

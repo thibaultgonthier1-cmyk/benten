@@ -1,7 +1,9 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
-import type { AudioEngine, PlaybackState, PlaybackStatus } from "../audio/engine";
+import type { AudioEngine, PlaybackState, PlaybackStatus, RepeatMode } from "../audio/engine";
 import type { TrackRow } from "../../shared/types";
+
+export type { RepeatMode } from "../audio/engine";
 
 /**
  * Etat de lecture pour l'UI (store Zustand), DERIVE des evenements du moteur.
@@ -26,6 +28,10 @@ export interface QueueEngineApi {
   updateQueue(tracks: readonly TrackRow[], opts?: { keepCurrent?: boolean }): void;
   /** Saut manuel vers un index (chemin anti-clic). */
   jumpTo(index: number): void | Promise<void>;
+  /** Mode de repetition (off / all / one). */
+  setRepeatMode(mode: RepeatMode): void;
+  /** Lecture aleatoire. */
+  setShuffle(on: boolean): void;
 }
 
 export interface PlayerState {
@@ -47,6 +53,10 @@ export interface PlayerState {
   queueOpen: boolean;
   /** Ensemble des ids de pistes favorites — source de verite UI pour le rendu instantane du cœur. */
   favoriteIds: ReadonlySet<number>;
+  /** Mode de repetition (reflete l'etat du moteur). */
+  repeat: RepeatMode;
+  /** Lecture aleatoire active (reflete l'etat du moteur). */
+  shuffle: boolean;
 
   // --- Actions (pures) ------------------------------------------------------------------------
   /** Fixe la file et la piste courante (etat optimiste ; le moteur confirmera via statechange). */
@@ -79,6 +89,10 @@ export interface PlayerState {
   moveInQueue(from: number, to: number): void;
   /** Saute a la piste `index` (saut anti-clic via le moteur). */
   jumpTo(index: number): void;
+  /** Fixe le mode de repetition (etat + moteur). */
+  setRepeat(mode: RepeatMode): void;
+  /** Active/desactive la lecture aleatoire (etat + moteur). */
+  setShuffle(on: boolean): void;
   /**
    * Bascule l'appartenance de `trackId` a `favoriteIds` (etat optimiste, nouvelle reference de Set),
    * puis persiste via IPC si `window.benten` est present ; en cas d'echec de persistance, l'etat
@@ -114,6 +128,8 @@ export function createPlayerStore(): PlayerStore {
     nowPlayingOpen: false,
     queueOpen: false,
     favoriteIds: new Set<number>(),
+    repeat: "off",
+    shuffle: false,
 
     setQueue(tracks, index = 0) {
       const queue = tracks.slice();
@@ -263,6 +279,16 @@ export function createPlayerStore(): PlayerStore {
         durationSec: queue[i]?.durationSec ?? 0,
       });
       void queueEngine?.jumpTo(i);
+    },
+
+    setRepeat(mode) {
+      set({ repeat: mode });
+      queueEngine?.setRepeatMode(mode);
+    },
+
+    setShuffle(on) {
+      set({ shuffle: on });
+      queueEngine?.setShuffle(on);
     },
 
     toggleFavorite(trackId) {

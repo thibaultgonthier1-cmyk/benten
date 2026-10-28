@@ -20,6 +20,8 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
   const positionSec = usePlayer((s) => s.positionSec);
   const durationSec = usePlayer((s) => s.durationSec);
   const isFav = usePlayer((s) => (track ? s.favoriteIds.has(track.id) : false));
+  const repeat = usePlayer((s) => s.repeat);
+  const shuffle = usePlayer((s) => s.shuffle);
 
   if (!track) return null;
   const trackId = track.id;
@@ -30,6 +32,10 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
   const seed = `${track.albumId}:${track.album}`;
 
   const open = (): void => playerStore.getState().setNowPlayingOpen(true);
+  const cycleRepeat = (): void =>
+    playerStore.getState().setRepeat(repeat === "off" ? "all" : repeat === "all" ? "one" : "off");
+  const repeatLabel =
+    repeat === "one" ? "Repeter : une piste" : repeat === "all" ? "Repeter : tout" : "Repetition desactivee";
 
   const onBarKey = (e: React.KeyboardEvent): void => {
     if (dur <= 0) return;
@@ -61,6 +67,22 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
         </div>
       </button>
       <div className="mp-controls">
+        <button
+          className={"ic" + (shuffle ? " on" : "")}
+          type="button"
+          title={shuffle ? "Lecture aleatoire activee" : "Lecture aleatoire"}
+          aria-label="Lecture aleatoire"
+          aria-pressed={shuffle}
+          onClick={() => playerStore.getState().setShuffle(!shuffle)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M4 5h3.5c1.3 0 2.5.6 3.2 1.7l5.6 8.6c.7 1.1 1.9 1.7 3.2 1.7H21" />
+            <path d="M4 19h3.5c1.3 0 2.5-.6 3.2-1.7" />
+            <path d="M14.5 6.7C15.2 5.6 16.4 5 17.7 5H21" />
+            <path d="M18 2.5L21 5l-3 2.5" />
+            <path d="M18 16.5L21 19l-3 2.5" />
+          </svg>
+        </button>
         <button className="ic" type="button" title="Precedent" aria-label="Morceau precedent" onClick={controls.prev}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 6v12M20 6L9 12l11 6z" />
@@ -81,6 +103,22 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M17 6v12M4 6l11 6L4 18z" />
           </svg>
+        </button>
+        <button
+          className={"ic rep" + (repeat !== "off" ? " on" : "")}
+          type="button"
+          title={repeatLabel}
+          aria-label={repeatLabel}
+          aria-pressed={repeat !== "off"}
+          onClick={cycleRepeat}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M17 2l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+            <path d="M7 22l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+          </svg>
+          {repeat === "one" && <span className="rep-one" aria-hidden="true">1</span>}
         </button>
       </div>
       <div className="mp-right">

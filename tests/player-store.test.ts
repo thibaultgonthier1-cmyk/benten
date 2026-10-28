@@ -179,6 +179,8 @@ function queueEngineStub() {
   const calls = {
     update: [] as Array<{ tracks: readonly TrackRow[]; opts?: { keepCurrent?: boolean } }>,
     jumps: [] as number[],
+    repeat: [] as string[],
+    shuffle: [] as boolean[],
   };
   return {
     calls,
@@ -187,6 +189,12 @@ function queueEngineStub() {
     },
     jumpTo(index: number): void {
       calls.jumps.push(index);
+    },
+    setRepeatMode(m: string): void {
+      calls.repeat.push(m);
+    },
+    setShuffle(on: boolean): void {
+      calls.shuffle.push(on);
     },
   };
 }
@@ -265,5 +273,43 @@ describe("player store — mutations de file (Task 11)", () => {
     expect(store.getState().queueOpen).toBe(false);
     store.getState().setQueueOpen(true);
     expect(store.getState().queueOpen).toBe(true);
+  });
+});
+
+describe("player store — shuffle & repeat (Task 12)", () => {
+  it("valeurs par defaut : repeat off, shuffle false", () => {
+    const store = createPlayerStore();
+    expect(store.getState().repeat).toBe("off");
+    expect(store.getState().shuffle).toBe(false);
+  });
+
+  it("setRepeat reflete l'etat ET pilote le moteur", () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    store.getState().setRepeat("all");
+    expect(store.getState().repeat).toBe("all");
+    store.getState().setRepeat("one");
+    expect(store.getState().repeat).toBe("one");
+    expect(eng.calls.repeat).toEqual(["all", "one"]);
+  });
+
+  it("setShuffle reflete l'etat ET pilote le moteur", () => {
+    const store = createPlayerStore();
+    const eng = queueEngineStub();
+    store.getState().attachEngine(eng as never);
+    store.getState().setShuffle(true);
+    expect(store.getState().shuffle).toBe(true);
+    store.getState().setShuffle(false);
+    expect(store.getState().shuffle).toBe(false);
+    expect(eng.calls.shuffle).toEqual([true, false]);
+  });
+
+  it("setRepeat/setShuffle sans moteur rattache ne jettent pas (tests node)", () => {
+    const store = createPlayerStore();
+    expect(() => store.getState().setRepeat("all")).not.toThrow();
+    expect(() => store.getState().setShuffle(true)).not.toThrow();
+    expect(store.getState().repeat).toBe("all");
+    expect(store.getState().shuffle).toBe(true);
   });
 });

@@ -77,6 +77,12 @@ export function App(): JSX.Element {
     const unbind = bindEngine(playerStore, engine);
     // Rattache le moteur au store pour les mutations de file A CHAUD (updateQueue / jumpTo).
     playerStore.getState().attachEngine(engine);
+    // Pont de verification DEV-ONLY : expose le VRAI moteur + le store pour piloter/observer le
+    // gapless/shuffle/repeat via CDP (Runtime.evaluate). `import.meta.env.DEV` est `false` dans un
+    // build de production -> ce pont n'est JAMAIS attache en prod. Nettoye au demontage.
+    if (import.meta.env.DEV) {
+      (window as unknown as { __benten?: unknown }).__benten = { engine, store: playerStore };
+    }
     let raf = 0;
     // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
     // ~15 Hz (66 ms) via une porte pure pilotee par le timestamp rAF : PRELOAD_LEAD_SEC = 10 s dans
@@ -96,6 +102,9 @@ export function App(): JSX.Element {
       cancelAnimationFrame(raf);
       unbind();
       playerStore.getState().attachEngine(null);
+      if (import.meta.env.DEV) {
+        delete (window as unknown as { __benten?: unknown }).__benten;
+      }
     };
   }, [engine]);
 

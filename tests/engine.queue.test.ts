@@ -3,6 +3,7 @@ import { AudioEngine } from "../src/renderer/audio/engine";
 import type { Decoder } from "../src/renderer/audio/decoder";
 import type { TrackRow } from "../src/shared/types";
 import { nextStartTime } from "../src/renderer/audio/schedule";
+import { buildOrder } from "../src/renderer/audio/order";
 
 /**
  * File d'attente + gapless + anti-clic — Web Audio mocke (environnement Node).
@@ -559,5 +560,190 @@ describe("AudioEngine — updateQueue a chaud (Task 11)", () => {
     expect(engine.getState()).toMatchObject({ status: "playing", trackId: 12 });
     expect(engine.getQueueIndex()).toBe(2);
     expect(ctx.liveSources().length).toBe(1);
+  });
+});
+
+/**
+ * Shuffle & repeat (Task 12) — le MEME chemin gapless (scheduleNext/promoteScheduled), rien de
+ * parallele. On prouve : repeat:"all" boucle de la DERNIERE vers la PREMIERE via la source
+ * programmee ; repeat:"one" reprogramme+promeut la MEME piste (loop sans trou) ; shuffle fait
+ * suivre l'enchainement a `order` sans jamais couper la courante au toggle ; une piste non lisible
+ * reste sautee silencieusement meme sous une rafale de `next()`, avec UNE seule source vivante.
+ */
+describe("AudioEngine — shuffle & repeat (Task 12)", () => {
+  let ctx: FakeAudioContext;
+  beforeEach(() => {
+    ctx = new FakeAudioContext();
+  });
+
+  it("repeat:all — la fin de la DERNIERE piste promeut la PREMIERE (gapless via scheduled)", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+    ]);
+    const ended = vi.fn();
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    engine.on("ended", ended);
+    await engine.setQueue(
+      [track({ id: 10, path: "C:\\m\\0.flac" }), track({ id: 11, path: "C:\\m\\1.flac" })],
+      1, // demarre sur la DERNIERE piste
+    );
+    engine.setRepeatMode("all");
+    engine.play();
+    ctx.currentTime = 11; // sur t11 (dur 15), reste 4 < lead 10
+    engine.tick();
+    await flush();
+
+    // La PREMIERE piste (t10, dur 20) est programmee pour s'enchainer apres la derniere.
+    expect(ctx.sources.length).toBe(2);
+    const scheduled = ctx.sources[1]!;
+    expect(scheduled.buffer!.duration).toBe(20);
+
+    // Fin naturelle de la derniere -> promotion de la premiere (PAS d'evenement ended).
+    ctx.currentTime = 15;
+    ctx.sources[0]!.onended?.();
+    expect(ended).not.toHaveBeenCalled();
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+    expect(engine.getQueueIndex()).toBe(0);
+    expect(scheduled.stopped).toBe(false); // la source promue vit
+    expect(ctx.liveSources().length).toBe(1);
+    expect(engine.getState().positionSec).toBeCloseTo(0, 5);
+  });
+
+  it("repeat:off — la fin de la DERNIERE piste termine (aucune boucle)", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+    ]);
+    const ended = vi.fn();
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    engine.on("ended", ended);
+    await engine.setQueue(
+      [track({ id: 10, path: "C:\\m\\0.flac" }), track({ id: 11, path: "C:\\m\\1.flac" })],
+      1,
+    );
+    engine.play();
+    ctx.currentTime = 11;
+    engine.tick();
+    await flush();
+    expect(ctx.sources.length).toBe(1); // rien de programme en fin de file (off)
+    ctx.currentTime = 15;
+    ctx.sources[0]!.onended?.();
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(engine.getState().status).toBe("ended");
+  });
+
+  it("repeat:one — la fin reprogramme+promeut la MEME piste (loop sans trou)", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 20],
+      ["C:\\m\\1.flac", 15],
+    ]);
+    const ended = vi.fn();
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    engine.on("ended", ended);
+    await engine.setQueue(
+      [track({ id: 10, path: "C:\\m\\0.flac" }), track({ id: 11, path: "C:\\m\\1.flac" })],
+      0,
+    );
+    engine.setRepeatMode("one");
+    engine.play();
+    ctx.currentTime = 11; // sur t10 (dur 20), reste 9 < 10
+    engine.tick();
+    await flush();
+
+    // La MEME piste (t10, dur 20) est programmee comme suivante.
+    expect(ctx.sources.length).toBe(2);
+    const scheduled = ctx.sources[1]!;
+    expect(scheduled.buffer!.duration).toBe(20);
+
+    ctx.currentTime = 20;
+    ctx.sources[0]!.onended?.();
+    expect(ended).not.toHaveBeenCalled();
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 }); // meme piste
+    expect(engine.getQueueIndex()).toBe(0);
+    expect(scheduled.stopped).toBe(false);
+    expect(ctx.liveSources().length).toBe(1);
+    expect(engine.getState().positionSec).toBeCloseTo(0, 5);
+  });
+
+  it("shuffle — l'enchainement suit `order` ; la courante est preservee au toggle (aucune coupure)", async () => {
+    const q: TrackRow[] = [];
+    const durs = new Map<string, number>();
+    for (let i = 0; i < 4; i++) {
+      const p = `C:\\m\\${i}.flac`;
+      durs.set(p, 20 + i);
+      q.push(track({ id: 10 + i, path: p }));
+    }
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    await engine.setQueue(q, 0);
+    engine.play();
+    const firstSource = ctx.sources[0]!;
+
+    // Active le shuffle avec une graine fixe (deterministe) : la courante (id 10) reste en tete.
+    engine.setShuffle(true, 777);
+    const expected = buildOrder(4, { shuffle: true, seed: 777, current: 0 });
+    expect(engine.getOrder()).toEqual(expected);
+    expect(engine.getOrderPos()).toBe(0);
+    expect(expected[0]).toBe(0);
+    // Toggle shuffle ne coupe PAS la source courante : meme instance, non stoppee, meme piste.
+    expect(ctx.sources[0]).toBe(firstSource);
+    expect(firstSource.stopped).toBe(false);
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 10 });
+
+    // Pres de la fin de la courante : programme la SUIVANTE DE L'ORDRE (= order[1]).
+    const curDur = 20; // t10
+    ctx.currentTime = curDur - 4; // reste 4 < 10
+    engine.tick();
+    await flush();
+    const scheduled = ctx.sources.find((s) => s !== firstSource && s.started)!;
+    const nextQi = expected[1]!;
+    expect(scheduled.buffer!.duration).toBe(durs.get(`C:\\m\\${nextQi}.flac`));
+
+    // Fin naturelle -> promotion de order[1].
+    ctx.currentTime = curDur;
+    firstSource.onended?.();
+    expect(engine.getState().trackId).toBe(q[nextQi]!.id);
+    expect(engine.getOrderPos()).toBe(1);
+    expect(ctx.liveSources().length).toBe(1);
+
+    // Desactiver le shuffle restaure l'ordre identite, orderPos sur l'index naturel courant.
+    engine.setShuffle(false);
+    expect(engine.getOrder()).toEqual([0, 1, 2, 3]);
+    expect(engine.getOrderPos()).toBe(nextQi);
+  });
+
+  it("REVIEW FOCUS — un .m4p au milieu + rafale next() : saut silencieux, UNE source vivante, bornes correctes", async () => {
+    const durs = new Map([
+      ["C:\\m\\0.flac", 100],
+      ["C:\\m\\2.flac", 100],
+      ["C:\\m\\3.flac", 100],
+    ]);
+    const unplayable = vi.fn();
+    const engine = makeEngine(ctx, makeDecoder(durs));
+    engine.on("unplayable", unplayable);
+    await engine.setQueue(
+      [
+        track({ id: 10, path: "C:\\m\\0.flac" }),
+        track({ id: 11, path: "C:\\m\\1.m4p", playable: false }), // non lisible, au milieu
+        track({ id: 12, path: "C:\\m\\2.flac" }),
+        track({ id: 13, path: "C:\\m\\3.flac" }),
+      ],
+      0,
+    );
+    engine.play();
+    expect(ctx.liveSources().length).toBe(1);
+
+    // Rafale de 5 next() : saute le .m4p (idx1), avance 0 -> 2 -> 3, puis bute sur la fin (off).
+    for (let i = 0; i < 5; i++) void engine.next();
+    await flush();
+    await flush();
+
+    expect(ctx.liveSources().length).toBe(1); // invariant n°1 : une seule source vivante
+    const live = ctx.liveSources()[0]!;
+    expect(live.stopped).toBe(false);
+    expect(engine.getQueueIndex()).toBe(3); // borne de fin atteinte, pas de depassement
+    expect(engine.getState()).toMatchObject({ status: "playing", trackId: 13 });
+    expect(engine.getState().trackId).not.toBe(11); // jamais la piste non lisible
+    expect(unplayable).not.toHaveBeenCalled(); // sautee sans jamais tenter de la jouer
   });
 });
