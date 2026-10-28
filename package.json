@@ -15,7 +15,9 @@
     "test": "vitest run",
     "check:cdp": "node scripts/cdp-smoke.mjs",
     "postinstall": "install-electron",
-    "rebuild:native": "electron-rebuild -f -w better-sqlite3"
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "build:win": "electron-vite build && electron-builder --win",
+    "pack:dir": "electron-vite build && electron-builder --win --dir"
   },
   "dependencies": {
     "@tanstack/react-virtual": "3.14.23",
@@ -34,6 +36,7 @@
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "6.1.2",
     "electron": "45.1.0",
+    "electron-builder": "24.13.3",
     "electron-vite": "6.0.0",
     "typescript": "5.9.3",
     "vite": "8.3.5",
