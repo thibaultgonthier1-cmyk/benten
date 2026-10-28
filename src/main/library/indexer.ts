@@ -37,6 +37,96 @@ export interface IndexOptions {
   batchSize?: number;
 }
 
+type ReadFn = (path: string) => Promise<TrackInput>;
+type ArtFn = (path: string) => Promise<string | null>;
+type StatFn = (path: string) => Promise<{ mtimeMs: number; size: number }>;
+
+/** Resout les options injectables une seule fois (lecture metadonnees / pochette / stat). */
+function resolveDeps(options: IndexOptions): { read: ReadFn; getArt: ArtFn; stat: StatFn } {
+  return {
+    read: options.readMetadata ?? defaultReadMetadata,
+    getArt: options.getArt ?? ((path: string) => getOrCreateArt({ path })),
+    stat: options.stat ?? ((path: string) => fs.stat(path)),
+  };
+}
+
+type Resolved =
+  | { status: "ok"; track: TrackInput }
+  | { status: "unreadable" }
+  | { status: "unplayable" };
+
+/**
+ * Prepare une piste pour l'upsert : lecture des metadonnees, puis stat + saut de pochette
+ * (reutilisation de `art_key` si `mtime`/`size` inchanges, sinon (re)extraction). Partage par
+ * `indexLibrary` (chemin par lot) et `indexOne` (chemin unitaire de la veille) afin que la meme
+ * logique de pochette/mtime s'applique partout.
+ *
+ * - `unreadable` : la lecture de metadonnees a leve (fichier tronque/illisible).
+ * - `unplayable` : lu mais non lisible (`.m4p`, flux absent...).
+ * - `ok` : `track` prete, `artKey`/`mtimeMs`/`sizeBytes` renseignes.
+ */
+async function resolveTrack(
+  db: Db,
+  path: string,
+  read: ReadFn,
+  getArt: ArtFn,
+  stat: StatFn,
+): Promise<Resolved> {
+  let track: TrackInput;
+  try {
+    track = await read(path);
+  } catch {
+    return { status: "unreadable" };
+  }
+  if (!track.playable) return { status: "unplayable" };
+  // Stat du fichier pour l'indexation incrementale. mtimeMs est arrondi : la colonne est INTEGER
+  // et la comparaison de saut doit porter sur la meme valeur.
+  let mtimeMs: number | null = null;
+  let sizeBytes: number | null = null;
+  try {
+    const st = await stat(track.path);
+    mtimeMs = Math.round(st.mtimeMs);
+    sizeBytes = st.size;
+  } catch {
+    // Stat indisponible : on laisse null (la pochette sera (re)lue).
+  }
+  // Saut de pochette : si la piste existe deja avec un art_key et un mtime/size identiques, on
+  // reutilise la cle sans rappeler getArt (fix pochette).
+  const prev = getTrackStat(db, track.path);
+  let artKey: string | null;
+  if (
+    prev !== undefined &&
+    prev.artKey !== null &&
+    mtimeMs !== null &&
+    prev.mtimeMs === mtimeMs &&
+    prev.sizeBytes === sizeBytes
+  ) {
+    artKey = prev.artKey;
+  } else {
+    // Une pochette manquante ou en erreur n'empeche jamais d'indexer la piste.
+    try {
+      artKey = await getArt(track.path);
+    } catch {
+      artKey = null;
+    }
+  }
+  return { status: "ok", track: { ...track, artKey, mtimeMs, sizeBytes } };
+}
+
+/**
+ * Indexe (ou met a jour) UN SEUL fichier et renvoie `true` s'il a ete upserte, `false` s'il etait
+ * illisible ou non lisible. Reutilise exactement la logique metadonnees + pochette/mtime +
+ * `upsertTracks` d'`indexLibrary` ; c'est le point d'entree unitaire de la veille (Task 14B).
+ * Ne leve pas sur un fichier illisible (renvoie `false`) ; une erreur d'ecriture en base remonte.
+ */
+export async function indexOne(db: Db, path: string, options: IndexOptions = {}): Promise<boolean> {
+  const { read, getArt, stat } = resolveDeps(options);
+  const resolved = await resolveTrack(db, path, read, getArt, stat);
+  if (resolved.status !== "ok") return false;
+  upsertTracks(db, [resolved.track]);
+  return true;
+}
+
 /** Chaque racine parcourue, sans doublon de chemin entre racines qui se chevauchent. */
 async function* scanRoots(roots: readonly string[]): AsyncGenerator<string> {
   const seen = new Set<string>();
@@ -67,9 +157,7 @@ export async function indexLibrary(
   onProgress?: IndexProgressHandler,
   options: IndexOptions = {},
 ): Promise<IndexResult> {
-  const read = options.readMetadata ?? defaultReadMetadata;
-  const getArt = options.getArt ?? ((path: string) => getOrCreateArt({ path }));
-  const stat = options.stat ?? ((path: string) => fs.stat(path));
+  const { read, getArt, stat } = resolveDeps(options);
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? DEFAULT_CONCURRENCY));
   const batchSize = Math.max(1, Math.floor(options.batchSize ?? DEFAULT_BATCH_SIZE));
 
@@ -102,52 +190,18 @@ export async function indexLibrary(
         const next = await files.next();
         if (next.done) return;
         stats.scanned++;
-        let track: TrackInput | undefined;
-        try {
-          track = await read(next.value);
-        } catch {
+        const resolved = await resolveTrack(db, next.value, read, getArt, stat);
+        if (resolved.status === "unreadable") {
           // Seul l'echec de LECTURE d'un fichier est tolere (compte skipped + errors).
           stats.skipped++;
           stats.errors++;
           continue;
         }
-        if (!track.playable) {
+        if (resolved.status === "unplayable") {
           stats.skipped++;
           continue;
         }
-        // Stat du fichier pour l'indexation incrementale. mtimeMs est arrondi : la
-        // colonne est INTEGER et la comparaison de saut doit porter sur la meme valeur.
-        let mtimeMs: number | null = null;
-        let sizeBytes: number | null = null;
-        try {
-          const st = await stat(track.path);
-          mtimeMs = Math.round(st.mtimeMs);
-          sizeBytes = st.size;
-        } catch {
-          // Stat indisponible : on laisse null (la pochette sera (re)lue).
-        }
-        // Saut de pochette : si la piste existe deja avec un art_key et un mtime/size
-        // identiques, on reutilise la cle sans rappeler getArt (fix pochette).
-        const prev = getTrackStat(db, track.path);
-        let artKey: string | null;
-        if (
-          prev !== undefined &&
-          prev.artKey !== null &&
-          mtimeMs !== null &&
-          prev.mtimeMs === mtimeMs &&
-          prev.sizeBytes === sizeBytes
-        ) {
-          artKey = prev.artKey;
-        } else {
-          // Une pochette manquante ou en erreur n'empeche jamais d'indexer la piste.
-          try {
-            artKey = await getArt(track.path);
-          } catch {
-            artKey = null;
-          }
-        }
-        track = { ...track, artKey, mtimeMs, sizeBytes };
-        buffer.push(track);
+        buffer.push(resolved.track);
         if (buffer.length >= batchSize) flush();
       }
     } catch (err) {

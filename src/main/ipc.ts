@@ -294,8 +294,14 @@ export function searchLibrary(db: Database.Database, args: unknown): TrackRow[] 
   return searchTracks(db, q, normalizePage({ limit }));
 }
 
+/** Crochets optionnels du process Main (ex. : (re)démarrer la veille quand les sources changent). */
+export interface IpcHooks {
+  /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
+  onSourcesChanged?: () => void;
+}
+
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
-export function registerIpc(db: Database.Database): void {
+export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
   ipcMain.handle(CHANNELS.PING, (): "pong" => "pong");
 
   ipcMain.handle(CHANNELS.LIBRARY_QUERY, (event, args: unknown): LibraryQueryResult => {
@@ -319,6 +325,9 @@ export function registerIpc(db: Database.Database): void {
     // Les racines scannées deviennent des sources persistées (idempotent) : ce sont
     // exactement les racines que `audio:read-file` accepte de lire ensuite.
     for (const root of roots) addSource(db, root);
+    // Une racine a pu s'ajouter : on prévient le gestionnaire de veille pour qu'il (re)démarre
+    // la surveillance sur l'ensemble des sources courantes (Task 14B).
+    hooks?.onSourcesChanged?.();
     let last: ScanSummary = { scanned: 0, added: 0, skipped: 0, errors: 0 };
     const { added, skipped } = await indexLibrary(db, roots, (p) => {
       last = p;
@@ -357,6 +366,8 @@ export function registerIpc(db: Database.Database): void {
       throw new Error("sources:remove: id must be an integer");
     }
     removeSource(db, id);
+    // Une source a disparu : on (re)démarre la veille sur l'ensemble restant (Task 14B).
+    hooks?.onSourcesChanged?.();
   });
 
   ipcMain.handle(CHANNELS.FAVORITES_TOGGLE, (event, trackId: unknown, on: unknown): void => {

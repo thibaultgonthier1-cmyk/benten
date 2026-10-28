@@ -44,6 +44,16 @@ const api: BentenApi = {
     get: (key) => invoke(CHANNELS.STATE_GET, key),
     set: (key, value) => invoke(CHANNELS.STATE_SET, key, value),
   },
+  // Abonnement au push « library:changed » (Task 14B). On enveloppe un listener qui ignore les
+  // arguments IPC (event/payload) et n'expose au Renderer qu'un callback sans argument. La valeur
+  // de retour est une fonction de desabonnement (retire le listener).
+  onLibraryChanged: (cb) => {
+    const listener = (): void => cb();
+    ipcRenderer.on(CHANNELS.LIBRARY_CHANGED, listener);
+    return () => {
+      ipcRenderer.removeListener(CHANNELS.LIBRARY_CHANGED, listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("benten", api);

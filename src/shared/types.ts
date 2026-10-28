@@ -201,6 +201,13 @@ export interface BentenApi {
     /** Écrit (upsert) la valeur d'une clé. */
     set(key: string, value: string): Promise<void>;
   };
+  /**
+   * S'abonne au signal PUSH Main -> Renderer « la bibliothèque a changé » (veille de dossiers,
+   * Task 14B). `cb` est appelé (sans argument) après chaque lot de re-scan incrémental ; l'UI
+   * doit se contenter de re-interroger la DB (la lecture n'est JAMAIS touchée). Renvoie une
+   * fonction de désabonnement.
+   */
+  onLibraryChanged(cb: () => void): () => void;
 }
 
 declare global {

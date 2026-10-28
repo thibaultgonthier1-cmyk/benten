@@ -279,6 +279,18 @@ export function App(): JSX.Element {
     void restorePlaybackState();
   }, [reload, refreshSources, restorePlaybackState]);
 
+  // Veille de dossiers (Task 14B) : à chaque lot de re-scan incrémental côté Main, on re-interroge
+  // la DB pour rafraîchir la grille. CRUCIAL : on ne touche PAS au moteur/à la file — la lecture
+  // continue sans interruption ; seule la liste d'albums est re-fetchée. Désabonnement au démontage.
+  useEffect(() => {
+    const api = window.benten?.onLibraryChanged;
+    if (!api) return; // hors fenêtre (tests) : no-op.
+    const unsubscribe = api(() => {
+      void reload();
+    });
+    return unsubscribe;
+  }, [reload]);
+
   // Recherche avec anti-rebond : terme vide -> on vide les resultats sans interroger. Un drapeau
   // `cancelled` ignore une reponse qui arrive apres un nouveau terme (course de frappe rapide).
   useEffect(() => {
