@@ -27,7 +27,6 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
   const pct = frac * 100;
   const seed = `${track.albumId}:${track.album}`;
 
-  const stop = (e: React.MouseEvent): void => e.stopPropagation();
   const open = (): void => playerStore.getState().setNowPlayingOpen(true);
 
   const onBarKey = (e: React.KeyboardEvent): void => {
@@ -45,27 +44,21 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
   };
 
   return (
-    <div
-      className="player"
-      role="button"
-      tabIndex={0}
-      aria-label="Ouvrir la vue lecture"
-      onClick={open}
-      onKeyDown={(e) => {
-        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
-          e.preventDefault();
-          open();
-        }
-      }}
-    >
-      <div className="mp-art">
-        <Cover artKey={track.artKey} seed={seed} size={128} alt={track.album} />
-      </div>
-      <div className="mp-meta">
-        <div className="t">{track.title}</div>
-        <div className="a">{track.artist}</div>
-      </div>
-      <div className="mp-controls" onClick={stop}>
+    // Conteneur PRESENTATIONNEL (aucun role/handler) : les anciens `role="button"` + boutons
+    // imbriques formaient un interactif-dans-interactif (signale a la revue Phase 1). L'ouverture de
+    // la vue lecture passe maintenant par un bouton dedie `.mp-open` (pochette + titre), distinct et
+    // frere des autres controles, chacun focusable separement.
+    <div className="player">
+      <button className="mp-open" type="button" aria-label="Ouvrir la vue lecture" onClick={open}>
+        <div className="mp-art">
+          <Cover artKey={track.artKey} seed={seed} size={128} alt={track.album} />
+        </div>
+        <div className="mp-meta">
+          <div className="t">{track.title}</div>
+          <div className="a">{track.artist}</div>
+        </div>
+      </button>
+      <div className="mp-controls">
         <button className="ic" type="button" title="Precedent" aria-label="Morceau precedent" onClick={controls.prev}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M7 6v12M20 6L9 12l11 6z" />
@@ -88,7 +81,7 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
           </svg>
         </button>
       </div>
-      <div className="mp-right" onClick={stop}>
+      <div className="mp-right">
         <span className="mp-time">{formatTime(positionSec)}</span>
         <div
           className="mp-bar"

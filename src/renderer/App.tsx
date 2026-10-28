@@ -5,6 +5,7 @@ import { NativeDecoder } from "./audio/decoder";
 import { bindEngine, playerStore, usePlayer } from "./state/player";
 import { createControls } from "./components/controls";
 import { groupTracksToAlbums, type Album } from "./lib/library";
+import { makeThrottle } from "./lib/throttle";
 import type { TrackRow } from "../shared/types";
 import { LibraryGrid } from "./components/LibraryGrid";
 import { MiniPlayer } from "./components/MiniPlayer";
@@ -50,10 +51,17 @@ export function App(): JSX.Element {
   useEffect(() => {
     const unbind = bindEngine(playerStore, engine);
     let raf = 0;
-    const loop = (): void => {
-      engine.tick();
-      const st = engine.getState();
-      if (st.status === "playing") playerStore.getState().setPosition(st.positionSec, st.durationSec);
+    // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
+    // ~15 Hz (66 ms) via une porte pure pilotee par le timestamp rAF : PRELOAD_LEAD_SEC = 10 s dans
+    // le moteur, donc 15 Hz suffit largement aux decisions de preload gapless, sans reveiller React
+    // 60x/s. Un seul AudioContext, une seule boucle tick() : on ne change QUE la cadence.
+    const gate = makeThrottle(66);
+    const loop = (ts: number): void => {
+      if (gate(ts)) {
+        engine.tick();
+        const st = engine.getState();
+        if (st.status === "playing") playerStore.getState().setPosition(st.positionSec, st.durationSec);
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);

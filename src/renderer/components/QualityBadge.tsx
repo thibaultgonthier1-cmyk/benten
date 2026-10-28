@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AudioDeviceInfo, TrackRow } from "../../shared/types";
 import { describeQuality } from "../lib/library";
+import { useFocusTrap } from "../lib/focusTrap";
 
 /**
  * Badge de qualite de la SOURCE : format + sampleRate/bitDepth de la ligne de piste
@@ -60,6 +61,12 @@ export interface QualitySheetProps {
 export function QualitySheet({ open, onClose, track }: QualitySheetProps): JSX.Element {
   const q = describeQuality(track);
   const [device, setDevice] = useState<AudioDeviceInfo | null>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  // Piege de focus de la feuille (dialogue modal) : confine Tab, Echap ferme, focus restaure a la
+  // fermeture. Imbrique dans la vue lecture : quand la feuille a le focus elle traite Tab/Echap en
+  // premier (preventDefault), et le piege parent respecte `defaultPrevented`.
+  useFocusTrap(sheetRef, { active: open, onEscape: onClose });
 
   // Interroge le peripherique de sortie a chaque ouverture (il peut changer entre deux lectures).
   useEffect(() => {
@@ -89,7 +96,7 @@ export function QualitySheet({ open, onClose, track }: QualitySheetProps): JSX.E
         tabIndex={open ? 0 : -1}
         onClick={onClose}
       />
-      <div className="sheet" role="dialog" aria-modal="true" aria-label="Qualite de lecture">
+      <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-label="Qualite de lecture">
         <button
           className="sheet-close"
           type="button"

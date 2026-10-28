@@ -588,10 +588,36 @@ body {
   gap: 16px;
   padding: 0 var(--gut-r) 0 var(--gut);
   padding-bottom: env(safe-area-inset-bottom, 0px);
-  cursor: pointer;
 }
 .player.hidden-p {
   display: none;
+}
+/* Bouton d'ouverture de la vue lecture : porte l'interactivite que .player avait autrefois
+   (pochette + titre), sans englober les autres controles. Reprend la ligne flex du cluster gauche. */
+.mp-open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 200px;
+  min-width: 0;
+  max-width: 340px;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 4px;
+  border-radius: 12px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.mp-open:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.mp-open:focus-visible {
+  outline: 2px solid var(--magenta);
+  outline-offset: 2px;
 }
 .mp-art {
   width: 56px;

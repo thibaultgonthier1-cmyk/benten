@@ -1,7 +1,8 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { usePlayer, playerStore } from "../state/player";
 import { describeQuality, formatTime } from "../lib/library";
+import { useFocusTrap } from "../lib/focusTrap";
 import { coverAccent, Cover } from "./Cover";
 import { QualityBadge, QualitySheet } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
@@ -23,6 +24,7 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
   const positionSec = usePlayer((s) => s.positionSec);
   const durationSec = usePlayer((s) => s.durationSec);
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -32,17 +34,17 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
     playerStore.getState().setNowPlayingOpen(false);
   };
 
-  // Echap : ferme d'abord la feuille qualite si ouverte, sinon la vue lecture (comportement proto).
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape") return;
+  // Piege de focus de la vue lecture (dialogue modal) : confine Tab, restaure le focus a la
+  // fermeture. Echap ferme d'abord la feuille qualite si ouverte, sinon la vue (comportement proto).
+  // La feuille qualite a son propre piege imbrique : quand elle a le focus, elle traite la touche
+  // en premier (defaultPrevented) et ce piege parent la laisse passer.
+  useFocusTrap(rootRef, {
+    active: open,
+    onEscape: () => {
       if (sheetOpen) setSheetOpen(false);
       else close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, sheetOpen]);
+    },
+  });
 
   if (!track) return null;
   const playing = status === "playing";
@@ -78,7 +80,11 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
   return (
     <div
       id="now"
+      ref={rootRef}
       className={open ? "open" : ""}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`En lecture — ${track.title}`}
       aria-hidden={!open}
     >
       <div
