@@ -39,9 +39,13 @@ export interface DiagContextLike {
   removeEventListener?(type: "statechange", cb: () => void): void;
 }
 
-/** Ce que le journal lit du moteur : abonnement `statechange` + `getState()` (lecture seule). */
+/**
+ * Ce que le journal lit du moteur : abonnements `statechange` et `seek` + `getState()` (lecture
+ * seule). `seek` est le signal explicite d'une discontinuite VOULUE (pas un saut inattendu).
+ */
 export interface DiagEngineLike {
   on(event: "statechange", cb: (s: PlaybackState) => void): () => void;
+  on(event: "seek", cb: (p: { positionSec: number; trackId: number | null }) => void): () => void;
   getState(): PlaybackState;
 }
 
@@ -348,6 +352,9 @@ export function startAudioDiagnostics(deps: AudioDiagnosticsDeps): AudioDiagnost
         }
         status = s.status;
         trackId = s.trackId;
+        // Toute transition (redemarrage playing -> playing, promotion gapless...) est une
+        // discontinuite connue : on re-cale la position attendue au prochain echantillon.
+        prevPos = null;
         if (s.status !== "playing") resetSamples();
       } catch {
         /* ignore */
@@ -355,6 +362,15 @@ export function startAudioDiagnostics(deps: AudioDiagnosticsDeps): AudioDiagnost
     });
   } catch {
     unsubscribeEngine = null;
+  }
+  // Seek utilisateur : saut de position VOULU, jamais journalise comme position-jump.
+  let unsubscribeSeek: (() => void) | null = null;
+  try {
+    unsubscribeSeek = engine.on("seek", () => {
+      prevPos = null;
+    });
+  } catch {
+    unsubscribeSeek = null;
   }
 
   // --- Peripheriques et fenetre -------------------------------------------------------------------
@@ -408,6 +424,7 @@ export function startAudioDiagnostics(deps: AudioDiagnosticsDeps): AudioDiagnost
       }
       try {
         unsubscribeEngine?.();
+        unsubscribeSeek?.();
       } catch {
         /* ignore */
       }

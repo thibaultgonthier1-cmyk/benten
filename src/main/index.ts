@@ -1,10 +1,11 @@
-import { app, BrowserWindow, powerMonitor } from "electron";
+import { app, BrowserWindow, dialog, powerMonitor } from "electron";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme } from "./artprotocol";
 import { registerDiagnosticsIpc, registerIpc } from "./ipc";
 import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
+import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
 import { backupDb, openDbSafe, wireDbClose } from "./library/dbsafety";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
@@ -26,6 +27,17 @@ if (process.env["ELECTRON_RENDERER_URL"]) {
 
 /** Journal audio (cree a `whenReady`, une fois `userData` connu). */
 let journal: JournalWriter | null = null;
+/** Fenetre principale (ramenee au premier plan sur un second lancement). */
+let mainWindow: BrowserWindow | null = null;
+
+// ── Instance unique ──────────────────────────────────────────────────────────────────────────
+// La build de dev (`benten`) et l'exe (`Benten`) partagent le meme %APPDATA% sous Windows : deux
+// processus ecrivant la meme base SQLite est une cause plausible de corruption. Un second
+// lancement rend la main a la fenetre existante et quitte SANS jamais ouvrir la base.
+const isPrimaryInstance = enforceSingleInstance(app, () => {
+  void journal?.log({ kind: "process", event: "second-instance" });
+  focusWindow(mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0]);
+});
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -55,6 +67,7 @@ function createWindow(): BrowserWindow {
   } else {
     void win.loadFile(join(__dirname, "../renderer/index.html"));
   }
+  mainWindow = win;
   return win;
 }
 
@@ -62,6 +75,8 @@ function createWindow(): BrowserWindow {
 const BACKUP_DELAY_MS = 5000;
 
 app.whenReady().then(() => {
+  // Seconde instance : `app.quit()` est deja demande ; elle n'ouvre NI la base NI de fenetre.
+  if (!isPrimaryInstance) return;
   registerArtProtocol();
   const userData = app.getPath("userData");
 
@@ -80,10 +95,24 @@ app.whenReady().then(() => {
   attachMainJournal({ app, powerMonitor, log: (e) => j.log(e) });
 
   // ── Base de bibliotheque crash-safe ────────────────────────────────────────────────────────
-  // Ouverture verifiee (quick_check) ; base corrompue -> fichiers mis a l'ecart dans
-  // `db-corrupted-<horodatage>/`, restauration de la derniere sauvegarde saine (ou base neuve),
-  // `app_state.dbRecovered`, entree de journal. L'app demarre normalement : la veille re-indexe.
-  const { db } = openDbSafe(userData, { log: (e) => j.log(e) });
+  // Copie pre-ouverture apres arret non propre ; ouverture verifiee (quick_check) ; corruption
+  // averee -> copie verifiee dans `db-corrupted-<horodatage>/`, restauration de la derniere
+  // sauvegarde saine (ou base neuve), `app_state.dbRecovered`, entree de journal. L'app demarre
+  // normalement : la veille re-indexe. Echec irrecuperable -> message clair puis sortie (exit 1).
+  let opened: ReturnType<typeof openDbSafe>["db"];
+  try {
+    opened = openDbSafe(userData, { log: (e) => j.log(e) }).db;
+  } catch (err) {
+    void j.log({
+      kind: "process",
+      event: "db",
+      action: "fatal",
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    reportFatalStartup({ app, dialog }, err, j.file);
+    return;
+  }
+  const db = opened;
 
   // ── Veille de dossiers (Task 14B) ────────────────────────────────────────────────────────────
   // Un seul watcher a la fois, pose sur l'ENSEMBLE des sources persistees. A chaque lot de re-scan
@@ -122,8 +151,9 @@ app.whenReady().then(() => {
   registerIpc(db, { onSourcesChanged: startWatcher });
 
   const win = createWindow();
-  // Sauvegarde tournante, UNE fois par lancement, apres l'affichage de la fenetre (asynchrone,
-  // differee) : `userData/db-backups/benten-<horodatage>.db`, 3 plus recentes gardees.
+  // Sauvegarde de lancement, apres l'affichage de la fenetre (asynchrone, differee) :
+  // `userData/db-backups/benten-<horodatage>.db`, sautee si la derniere a moins de 20 h ;
+  // retention = 3 plus recentes + une par jour sur 7 jours.
   win.once("show", () => {
     setTimeout(() => {
       void backupDb(db, userData);
@@ -138,8 +168,8 @@ app.whenReady().then(() => {
     watcher = null;
     if (previous) void previous.close();
   });
-  // Puis fermeture ORDONNEE de la base (checkpoint WAL final propre) — enregistree APRES la veille
-  // pour que celle-ci soit arretee d'abord.
+  // Puis fermeture ORDONNEE de la base (checkpoint WAL final propre) sur `will-quit` — enregistree
+  // APRES la veille pour que celle-ci soit arretee d'abord — ou sur `session-end` (Windows).
   wireDbClose(app, db);
 
   app.on("activate", () => {

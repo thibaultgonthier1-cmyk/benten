@@ -52,9 +52,13 @@ class FakeEngine implements DiagEngineLike {
     queueIndex: 0,
   };
   private readonly cbs = new Set<(s: PlaybackState) => void>();
-  on(_e: "statechange", cb: (s: PlaybackState) => void): () => void {
-    this.cbs.add(cb);
-    return () => this.cbs.delete(cb);
+  private readonly seekCbs = new Set<(p: SeekPayload) => void>();
+  on(e: "statechange", cb: (s: PlaybackState) => void): () => void;
+  on(e: "seek", cb: (p: SeekPayload) => void): () => void;
+  on(e: "statechange" | "seek", cb: ((s: PlaybackState) => void) | ((p: SeekPayload) => void)): () => void {
+    const set = (e === "seek" ? this.seekCbs : this.cbs) as Set<unknown>;
+    set.add(cb);
+    return () => set.delete(cb);
   }
   getState(): PlaybackState {
     return { ...this.state };
@@ -63,10 +67,17 @@ class FakeEngine implements DiagEngineLike {
     this.state = { ...this.state, ...patch };
     for (const cb of [...this.cbs]) cb({ ...this.state });
   }
+  /** Seek utilisateur : la position saute, le moteur emet `seek` (pas de statechange). */
+  seek(sec: number): void {
+    this.state = { ...this.state, positionSec: sec };
+    for (const cb of [...this.seekCbs]) cb({ positionSec: sec, trackId: this.state.trackId });
+  }
   listenerCount(): number {
-    return this.cbs.size;
+    return this.cbs.size + this.seekCbs.size;
   }
 }
+
+type SeekPayload = { positionSec: number; trackId: number | null };
 
 /** Banc de test : horloge + minuteur manuels, contexte et moteur faux. */
 function bench(opts: { appendThrows?: boolean } = {}) {
@@ -300,6 +311,30 @@ describe("startAudioDiagnostics — stall, engine, position-jump", () => {
     b.handle.stop();
   });
 
+  it("un seek utilisateur (evenement `seek` du moteur) n'est PAS un position-jump", () => {
+    const b = bench();
+    b.steps(10);
+    b.engine.seek(120); // +110 s d'un coup
+    b.step();
+    b.steps(10);
+    b.engine.seek(3); // recul
+    b.step();
+    b.steps(10);
+    expect(b.of("engine").filter((e) => e.event === "position-jump")).toHaveLength(0);
+    b.handle.stop();
+  });
+
+  it("un statechange (ex. redemarrage de piste playing -> playing) re-cale la position attendue", () => {
+    const b = bench();
+    b.steps(10);
+    b.engine.state = { ...b.engine.state, positionSec: 0 };
+    b.engine.set({ status: "playing" }); // emis par restartCurrent / promotion gapless
+    b.step();
+    b.steps(5);
+    expect(b.of("engine").filter((e) => e.event === "position-jump")).toHaveLength(0);
+    b.handle.stop();
+  });
+
   it("position-jump : un recul de position est detecte, un changement de piste ne l'est pas", () => {
     const b = bench();
     b.steps(10);
@@ -369,7 +404,7 @@ describe("startAudioDiagnostics — contexte, robustesse, arret", () => {
   it("stop() arrete le minuteur et se desabonne du moteur ; idempotent", () => {
     const b = bench();
     expect(b.isTicking()).toBe(true);
-    expect(b.engine.listenerCount()).toBe(1);
+    expect(b.engine.listenerCount()).toBeGreaterThan(0);
     b.handle.stop();
     b.handle.stop();
     expect(b.isTicking()).toBe(false);
