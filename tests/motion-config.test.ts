@@ -6,6 +6,7 @@ import {
   pageTransition,
   reducedMotionFor,
   PAGE_SLIDE_PX,
+  PAGE_EXIT_SEC,
 } from "../src/renderer/theme/ds/motion";
 
 /**
@@ -32,14 +33,17 @@ describe("pageTransition", () => {
     expect(t.animate.transition.duration).toBe(dur.base);
     expect(t.animate.transition.ease).toEqual(ease.out);
     expect(t.exit.opacity).toBe(0);
-    expect(t.exit.transition.duration).toBe(dur.fast);
+    // Sortie brève (90–120 ms) : la navigation reste vive malgré mode="wait".
+    expect(PAGE_EXIT_SEC).toBeGreaterThanOrEqual(0.09);
+    expect(PAGE_EXIT_SEC).toBeLessThanOrEqual(0.12);
+    expect(t.exit.transition.duration).toBe(PAGE_EXIT_SEC);
   });
 
   it("Sobre : mêmes mouvements, durées raccourcies via motionFor", () => {
     const m = motionFor("subtle", false);
     const t = pageTransition(m);
     expect(t.animate.transition.duration).toBeCloseTo(m.d(dur.base));
-    expect(t.exit.transition.duration).toBeCloseTo(m.d(dur.fast));
+    expect(t.exit.transition.duration).toBeCloseTo(m.d(PAGE_EXIT_SEC));
     expect(t.animate.transition.duration).toBeLessThan(dur.base);
   });
 

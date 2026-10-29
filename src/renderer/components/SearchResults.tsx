@@ -37,14 +37,14 @@ export function SearchResults({
   return (
     <section className="section">
       <div className="section-head">
-        <h2>Resultats</h2>
+        <h2>Résultats</h2>
         <span className="count">
-          {empty ? (searched ? "aucun resultat" : "recherche…") : `${albums.length} albums`}
+          {empty ? (searched ? "aucun résultat" : "recherche…") : `${albums.length} albums`}
         </span>
       </div>
       {empty ? (
         searched ? (
-          <div className="scan-note">Rien ne correspond a « {query.trim()} ».</div>
+          <div className="scan-note">Rien ne correspond à « {query.trim()} ».</div>
         ) : null
       ) : (
         <LibraryGrid

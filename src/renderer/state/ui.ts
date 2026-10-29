@@ -46,6 +46,11 @@ export interface UiState {
   future: Route[];
   compact: boolean;
   shortcutsHelpOpen: boolean;
+  /**
+   * Demande ponctuelle « créer une playlist » (bouton + de la barre latérale) : la vue Playlists
+   * focalise son champ de création puis la consomme (`consumePlaylistCreate`).
+   */
+  playlistCreateRequested: boolean;
   /** Pousse la route courante dans `past`, vide `future` ; ignore une route identique. */
   navigate(route: Route): void;
   back(): void;
@@ -54,6 +59,10 @@ export interface UiState {
   canForward(): boolean;
   setCompact(on: boolean): void;
   setShortcutsHelpOpen(on: boolean): void;
+  /** Ouvre la page Playlists et demande le focus du champ de création. */
+  requestPlaylistCreate(): void;
+  /** Vrai (une seule fois) si une création était demandée ; remet la demande à zéro. */
+  consumePlaylistCreate(): boolean;
 }
 
 /** Égalité de routes : même nom ET mêmes paramètres. */
@@ -113,6 +122,7 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
     future: [],
     compact: false,
     shortcutsHelpOpen: false,
+    playlistCreateRequested: false,
 
     navigate(route) {
       const { route: current, past } = get();
@@ -151,11 +161,40 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
     setShortcutsHelpOpen(on) {
       set({ shortcutsHelpOpen: on === true });
     },
+
+    requestPlaylistCreate() {
+      get().navigate({ name: "playlists" });
+      set({ playlistCreateRequested: true });
+    },
+
+    consumePlaylistCreate() {
+      if (!get().playlistCreateRequested) return false;
+      set({ playlistCreateRequested: false });
+      return true;
+    },
   }));
 }
 
 /** Store singleton de l'application. */
 export const uiStore: UiStore = createUiStore();
+
+/**
+ * Pont de vérification DEV-ONLY : attache `ui` à `window.__benten` en FUSIONNANT avec l'objet
+ * existant (le runtime audio y pose engine/store/… et fusionne lui aussi). Vit ici, et non dans
+ * le runtime audio, pour qu'un rechargement HMR de ce module ne dispose jamais le runtime.
+ */
+export function attachUiDevBridge(
+  target: { __benten?: unknown } | undefined,
+  store: UiStore = uiStore,
+): void {
+  if (!target) return;
+  const prev = (target.__benten ?? {}) as Record<string, unknown>;
+  target.__benten = { ...prev, ui: store };
+}
+
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  attachUiDevBridge(window as Window & { __benten?: unknown });
+}
 
 /** Hook React sélecteur sur le store singleton. */
 export function useUi<T>(selector: (state: UiState) => T): T {

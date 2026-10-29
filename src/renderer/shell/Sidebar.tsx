@@ -141,10 +141,11 @@ export function Sidebar(): JSX.Element {
             icon={Plus}
             size={26}
             className="sb-add"
-            onClick={() => uiStore.getState().navigate({ name: "playlists" })}
+            onClick={() => uiStore.getState().requestPlaylistCreate()}
           />
         </div>
-        <ul className="sb-pl-list">
+        {/* `layoutScroll` : l'indicateur partagé tient compte du défilement de cette liste. */}
+        <motion.ul className="sb-pl-list" layoutScroll>
           {playlists.length === 0 ? (
             <li className="sb-pl-empty">Aucune playlist</li>
           ) : (
@@ -170,7 +171,7 @@ export function Sidebar(): JSX.Element {
               );
             })
           )}
-        </ul>
+        </motion.ul>
       </section>
 
       <div className="sb-foot">

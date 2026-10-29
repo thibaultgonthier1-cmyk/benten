@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlaylistRow, TrackRow } from "../../shared/types";
 import { artUrl, formatTime } from "../lib/library";
 
@@ -14,6 +14,10 @@ import { artUrl, formatTime } from "../lib/library";
 export interface PlaylistsProps {
   /** Lance la lecture d'une liste de pistes depuis `index` (remplit la file + ouvre la lecture). */
   onPlay: (tracks: readonly TrackRow[], index?: number) => void;
+  /** Demande de création (bouton + de la barre latérale) : focalise le champ « nouvelle playlist ». */
+  createFocusRequested?: boolean;
+  /** Appelé une fois le champ focalisé (consomme la demande). */
+  onCreateFocused?: () => void;
 }
 
 /** API playlists exposée par le preload, ou `undefined` hors fenêtre (tests node). */
@@ -21,7 +25,18 @@ function playlistsApi(): typeof window.benten.playlists | undefined {
   return typeof window !== "undefined" ? window.benten?.playlists : undefined;
 }
 
-export function Playlists({ onPlay }: PlaylistsProps): JSX.Element {
+export function Playlists({
+  onPlay,
+  createFocusRequested = false,
+  onCreateFocused,
+}: PlaylistsProps): JSX.Element {
+  const createInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!createFocusRequested) return;
+    createInputRef.current?.focus();
+    onCreateFocused?.();
+  }, [createFocusRequested, onCreateFocused]);
+
   const [playlists, setPlaylists] = useState<PlaylistRow[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [tracks, setTracks] = useState<TrackRow[]>([]);
@@ -153,6 +168,7 @@ export function Playlists({ onPlay }: PlaylistsProps): JSX.Element {
 
       <div className="scan-row pl-create">
         <input
+          ref={createInputRef}
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="Nom de la nouvelle playlist"
@@ -163,12 +179,12 @@ export function Playlists({ onPlay }: PlaylistsProps): JSX.Element {
           }}
         />
         <button className="btn" type="button" onClick={() => void create()} disabled={busy || !newName.trim()}>
-          Creer
+          Créer
         </button>
       </div>
 
       {playlists.length === 0 ? (
-        <div className="scan-note">Aucune playlist pour l'instant. Cree-en une ci-dessus.</div>
+        <div className="scan-note">Aucune playlist pour l'instant. Crée-en une ci-dessus.</div>
       ) : (
         <ul className="pl-list">
           {playlists.map((p) => {

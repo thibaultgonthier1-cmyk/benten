@@ -24,13 +24,12 @@ for (const font of WARM_FONTS) {
   });
 }
 
-// Amorce les réglages persistés (intensité du mouvement, intro) ; best-effort, non bloquant.
-void settingsStore.getState().load();
 
 /**
  * Mouvement global piloté par le réglage d'intensité (réactif) : « Réduit » coupe les animations
  * framer-motion partout (`always`) ; sinon framer suit `prefers-reduced-motion` (`user`).
  * `data-motion` sur <html> permet aussi au CSS (shimmer, transitions) de suivre le réglage.
+ * NB : tout composant animé doit AUSSI respecter `useMotion()` (activation/durées via motionFor).
  */
 function MotionRoot({ children }: { children: ReactNode }): JSX.Element {
   const intensity = useSettings((s) => s.motionIntensity);
@@ -40,10 +39,18 @@ function MotionRoot({ children }: { children: ReactNode }): JSX.Element {
   return <MotionConfig reducedMotion={reducedMotionFor(intensity)}>{children}</MotionConfig>;
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <MotionRoot>
-      <App />
-    </MotionRoot>
-  </React.StrictMode>,
-);
+// Premier rendu RETENU jusqu'aux réglages persistés (quelques ms, écran noir) : framer-motion lit
+// `reducedMotion` au montage de chaque élément, l'intensité doit donc être connue avant. `load()`
+// ne lève jamais (défauts conservés en cas d'échec).
+void settingsStore
+  .getState()
+  .load()
+  .finally(() => {
+    createRoot(document.getElementById("root") as HTMLElement).render(
+      <React.StrictMode>
+        <MotionRoot>
+          <App />
+        </MotionRoot>
+      </React.StrictMode>,
+    );
+  });

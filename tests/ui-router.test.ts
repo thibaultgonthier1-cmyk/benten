@@ -6,6 +6,7 @@ import {
   routeKey,
   navSectionOf,
   HISTORY_LIMIT,
+  attachUiDevBridge,
   type Route,
 } from "../src/renderer/state/ui";
 import { startAudioRuntime, type AudioRuntime } from "../src/renderer/runtime/audioRuntime";
@@ -108,6 +109,20 @@ describe("ui router (navigate / back / forward)", () => {
     expect(s.getState().shortcutsHelpOpen).toBe(true);
   });
 
+  it("requestPlaylistCreate ouvre Playlists ; la demande se consomme une seule fois", () => {
+    const s = createUiStore();
+    expect(s.getState().consumePlaylistCreate()).toBe(false);
+    s.getState().requestPlaylistCreate();
+    expect(s.getState().route).toEqual({ name: "playlists" });
+    expect(s.getState().playlistCreateRequested).toBe(true);
+    expect(s.getState().consumePlaylistCreate()).toBe(true);
+    expect(s.getState().consumePlaylistCreate()).toBe(false);
+    // Déjà sur Playlists : pas de nouvelle entrée d'historique, mais la demande est reposée.
+    s.getState().requestPlaylistCreate();
+    expect(s.getState().past).toEqual([home]);
+    expect(s.getState().consumePlaylistCreate()).toBe(true);
+  });
+
   it("le singleton uiStore expose la même API", () => {
     expect(typeof uiStore.getState().navigate).toBe("function");
     expect(uiStore.getState().route.name).toBeDefined();
@@ -184,20 +199,36 @@ describe("pont dev", () => {
     vi.unstubAllGlobals();
   });
 
-  it("en dev, window.__benten.ui expose uiStore", () => {
+  const fakeDeps = () => ({
+    createContext: () => new FakeAudioContext() as unknown as AudioContext,
+    createDecoder: (): Decoder => ({
+      canDecode: () => true,
+      decode: async () => ({ duration: 1 }) as unknown as AudioBuffer,
+    }),
+    raf: () => 1,
+    caf: () => undefined,
+  });
+
+  it("attachUiDevBridge fusionne `ui` sans écraser les clés existantes", () => {
+    const win: { __benten?: unknown } = { __benten: { engine: "E" } };
+    attachUiDevBridge(win);
+    expect(win.__benten).toEqual({ engine: "E", ui: uiStore });
+    const empty: { __benten?: unknown } = {};
+    attachUiDevBridge(empty);
+    expect((empty.__benten as Record<string, unknown>).ui).toBe(uiStore);
+  });
+
+  it("le runtime audio FUSIONNE son pont avec `ui` et ne retire que ses clés au dispose", () => {
     vi.stubEnv("DEV", true);
-    const win: Record<string, unknown> = {};
+    const win: { __benten?: unknown } = {};
     vi.stubGlobal("window", win);
-    runtime = startAudioRuntime({
-      createContext: () => new FakeAudioContext() as unknown as AudioContext,
-      createDecoder: (): Decoder => ({
-        canDecode: () => true,
-        decode: async () => ({ duration: 1 }) as unknown as AudioBuffer,
-      }),
-      raf: () => 1,
-      caf: () => undefined,
-    });
+    attachUiDevBridge(win); // ordre réel : state/ui.ts est évalué avant le démarrage du runtime
+    runtime = startAudioRuntime(fakeDeps());
     const bridge = win.__benten as Record<string, unknown>;
     expect(bridge.ui).toBe(uiStore);
+    expect(bridge.engine).toBe(runtime.engine);
+    runtime.dispose();
+    runtime = null;
+    expect(win.__benten).toEqual({ ui: uiStore });
   });
 });

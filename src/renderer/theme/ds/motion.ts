@@ -69,6 +69,12 @@ export function reducedMotionFor(intensity: MotionIntensity): "always" | "user" 
 /** Amplitude (px) du glissé vertical à l'entrée d'une page. */
 export const PAGE_SLIDE_PX = 8;
 
+/**
+ * Durée (s) de sortie d'une page. Brève : la page entrante n'attend la sortante (mode « wait »,
+ * jamais deux pages montées) que ~100 ms, la navigation reste vive.
+ */
+export const PAGE_EXIT_SEC = 0.1;
+
 interface TweenTransition {
   duration: number;
   ease: readonly number[];
@@ -82,7 +88,7 @@ export interface PageTransition {
 
 /**
  * Transition de page (navigation) : la page entrante monte de 8 px en fondu (durée de base), la
- * sortante s'efface vite. Désactivé (Réduit ou préférence système) : bascule instantanée, sans
+ * sortante s'efface en ~100 ms. Désactivé (Réduit ou préférence système) : bascule instantanée, sans
  * glissé. Uniquement `opacity`/`transform` (GPU).
  */
 export function pageTransition(m: ResolvedMotion): PageTransition {
@@ -96,6 +102,6 @@ export function pageTransition(m: ResolvedMotion): PageTransition {
   return {
     initial: { opacity: 0, y: PAGE_SLIDE_PX },
     animate: { opacity: 1, y: 0, transition: { duration: m.d(dur.base), ease: ease.out } },
-    exit: { opacity: 0, transition: { duration: m.d(dur.fast), ease: ease.inOut } },
+    exit: { opacity: 0, transition: { duration: m.d(PAGE_EXIT_SEC), ease: ease.inOut } },
   };
 }

@@ -2,7 +2,6 @@ import { AudioEngine, qualitySampleRate } from "../audio/engine";
 import { NativeDecoder, type Decoder } from "../audio/decoder";
 import { bindEngine, playerStore, type PlayerState } from "../state/player";
 import { libraryStore } from "../state/library";
-import { uiStore } from "../state/ui";
 import { createControls, type PlayerControls } from "../components/controls";
 import { makeThrottle } from "../lib/throttle";
 import { restoreState, serializeState } from "../lib/persist";
@@ -96,14 +95,16 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   // Pont de verification DEV-ONLY : expose le VRAI moteur + les stores pour piloter/observer le
   // gapless/shuffle/repeat via CDP (Runtime.evaluate). `import.meta.env.DEV` est `false` dans un
   // build de production -> ce pont n'est JAMAIS attache en prod. Nettoye au dispose.
+  // FUSION avec un pont existant : `state/ui.ts` y attache `ui` (DEV) indépendamment du runtime.
   const w = win();
+  const BRIDGE_KEYS = ["engine", "store", "persist", "library"] as const;
   if (import.meta.env.DEV && w) {
     w.__benten = {
+      ...((w.__benten ?? {}) as Record<string, unknown>),
       engine,
       store: playerStore,
       persist: { serializeState, restoreState },
       library: libraryStore,
-      ui: uiStore,
     };
   }
   let raf = 0;
@@ -187,9 +188,12 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
     persistNow(); // capture finale (best-effort) de la position
     playerStore.getState().attachEngine(null);
     playerStore.getState().attachQualityRebuild(null);
+    // Retire seulement les clés du runtime (le `ui` de state/ui.ts reste) ; objet vide → supprimé.
     const wd = win();
-    if (import.meta.env.DEV && wd) {
-      delete wd.__benten;
+    if (import.meta.env.DEV && wd && wd.__benten) {
+      const bridge = wd.__benten as Record<string, unknown>;
+      for (const k of BRIDGE_KEYS) delete bridge[k];
+      if (Object.keys(bridge).length === 0) delete wd.__benten;
     }
     if (opts?.closeContext) {
       void engine.getContext().close?.(); // un seul contexte vivant : le remplaçant créera le sien

@@ -73,23 +73,17 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
       return <HomePage scrollRef={scrollRef} actions={actions} />;
     case "albums":
       return (
-        <>
-          <AlbumsHeader title="Albums" />
-          <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly={false} />
-        </>
+        <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly={false} title="Albums" />
       );
     case "favorites":
       return (
-        <>
-          <AlbumsHeader title="Favoris" favoritesOnly />
-          <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly />
-        </>
+        <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly title="Favoris" />
       );
     case "playlists":
       return (
         <>
           <PageHeader title="Playlists" sub="Crée, renomme et lis tes listes." />
-          <Playlists onPlay={actions.playTracks} />
+          <PlaylistsPage onPlay={actions.playTracks} />
         </>
       );
     case "search":
@@ -192,20 +186,19 @@ function GridSkeleton({ count = 12 }: { count?: number }): JSX.Element {
 
 // --- Pages (mapping temporaire vers les anciennes vues) ----------------------------------------
 
-function AlbumsHeader({ title, favoritesOnly = false }: { title: string; favoritesOnly?: boolean }): JSX.Element {
-  const loading = useLibrary((s) => s.loading);
-  const count = useLibrary((s) => s.albums.length);
-  const favCount = usePlayer((s) => s.favoriteIds.size);
-  const sub = loading ? null : favoritesOnly ? `${favCount} titres favoris` : `${count} albums`;
-  return <PageHeader title={title} sub={sub} />;
-}
-
 function AlbumsSection({
   scrollRef,
   actions,
   favoritesOnly,
   heading,
-}: Omit<PageProps, "route"> & { favoritesOnly: boolean; heading?: string }): JSX.Element {
+  title,
+}: Omit<PageProps, "route"> & {
+  favoritesOnly: boolean;
+  /** Titre de section (h2) — utilisé sur l'accueil, sous l'en-tête de page. */
+  heading?: string;
+  /** Titre de PAGE : l'en-tête porte alors le compte (filtré) des albums affichés. */
+  title?: string;
+}): JSX.Element {
   const albums = useLibrary((s) => s.albums);
   const loading = useLibrary((s) => s.loading);
   const favoriteIds = usePlayer((s) => s.favoriteIds);
@@ -232,33 +225,47 @@ function AlbumsSection({
     [setSortFilter, favoritesOnly],
   );
 
+  // Le compte vit dans l'en-tête de page (pas de doublon à droite des filtres).
   return (
-    <section className="section">
-      <div className="section-head">
-        {heading && <h2>{heading}</h2>}
-        <SortFilterBar value={value} onChange={onChange} />
-        <span className="count num">{loading ? "chargement…" : `${shown.length} albums`}</span>
-      </div>
-      {loading && albums.length === 0 ? (
-        <GridSkeleton />
-      ) : favoritesOnly && shown.length === 0 ? (
-        <EmptyState
-          icon={Heart}
-          title="Aucun favori"
-          text="Touche le cœur d'un titre pendant la lecture pour le retrouver ici."
-        />
-      ) : (
-        <LibraryGrid
-          albums={shown}
-          scrollRef={scrollRef}
-          playingAlbumId={currentAlbumId}
-          onPlay={actions.playAlbum}
-          onPlayNext={actions.albumPlayNext}
-          onAddToQueue={actions.albumAddToQueue}
-          onAddToPlaylist={actions.albumAddToPlaylist}
-        />
-      )}
-    </section>
+    <>
+      {title && <PageHeader title={title} sub={loading ? null : `${shown.length} albums`} />}
+      <section className="section">
+        <div className="section-head">
+          {heading && <h2>{heading}</h2>}
+          <SortFilterBar value={value} onChange={onChange} />
+        </div>
+        {loading && albums.length === 0 ? (
+          <GridSkeleton />
+        ) : favoritesOnly && shown.length === 0 ? (
+          <EmptyState
+            icon={Heart}
+            title="Aucun favori"
+            text="Touche le cœur d'un titre pendant la lecture pour le retrouver ici."
+          />
+        ) : (
+          <LibraryGrid
+            albums={shown}
+            scrollRef={scrollRef}
+            playingAlbumId={currentAlbumId}
+            onPlay={actions.playAlbum}
+            onPlayNext={actions.albumPlayNext}
+            onAddToQueue={actions.albumAddToQueue}
+            onAddToPlaylist={actions.albumAddToPlaylist}
+          />
+        )}
+      </section>
+    </>
+  );
+}
+
+/** Ancienne vue Playlists + demande de création venue de la barre latérale (bouton +). */
+function PlaylistsPage({ onPlay }: { onPlay: RouteViewActions["playTracks"] }): JSX.Element {
+  const createRequested = useUi((s) => s.playlistCreateRequested);
+  const consume = useCallback((): void => {
+    uiStore.getState().consumePlaylistCreate();
+  }, []);
+  return (
+    <Playlists onPlay={onPlay} createFocusRequested={createRequested} onCreateFocused={consume} />
   );
 }
 

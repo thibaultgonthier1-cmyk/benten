@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { uiStore, useUi } from "../state/ui";
 import { libraryStore, useLibrary } from "../state/library";
@@ -12,15 +12,30 @@ export interface TopBarProps {
 }
 
 /**
- * Barre du haut : précédent / suivant (désactivés selon l'historique), champ de recherche (le focus
- * ouvre la page Recherche ; la frappe alimente la recherche anti-rebondée du store bibliothèque)
- * et emplacement d'actions.
+ * Barre du haut : précédent / suivant (désactivés selon l'historique), champ de recherche (un clic
+ * ou une saisie ouvre la page Recherche ; la frappe alimente la recherche anti-rebondée du store
+ * bibliothèque) et emplacement d'actions.
+ *
+ * Pas de navigation sur `focus` : quand la fenêtre reprend le focus avec le champ encore focalisé,
+ * le navigateur rejoue `focus` et l'on sauterait en silence vers la Recherche.
  */
 export function TopBar({ scrolled = false, actions }: TopBarProps): JSX.Element {
   const canBack = useUi((s) => s.past.length > 0);
   const canForward = useUi((s) => s.future.length > 0);
   const query = useLibrary((s) => s.query);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Quitter la page Recherche vide le terme : le champ ne garde pas un texte périmé au-dessus d'une
+  // grille non filtrée.
+  useEffect(
+    () =>
+      uiStore.subscribe((next, prev) => {
+        if (prev.route.name === "search" && next.route.name !== "search") {
+          libraryStore.getState().setQuery("");
+        }
+      }),
+    [],
+  );
 
   const openSearch = (): void => {
     const ui = uiStore.getState();
@@ -59,7 +74,7 @@ export function TopBar({ scrolled = false, actions }: TopBarProps): JSX.Element 
           aria-label="Recherche"
           spellCheck={false}
           autoComplete="off"
-          onFocus={openSearch}
+          onPointerDown={openSearch}
           onChange={(e) => {
             libraryStore.getState().setQuery(e.target.value);
             openSearch();
@@ -68,6 +83,8 @@ export function TopBar({ scrolled = false, actions }: TopBarProps): JSX.Element 
             if (e.key === "Escape") {
               libraryStore.getState().setQuery("");
               inputRef.current?.blur();
+            } else if (e.key === "Enter" || e.key === "ArrowDown") {
+              openSearch();
             }
           }}
         />

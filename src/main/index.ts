@@ -27,6 +27,9 @@ function createWindow(): void {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    // Plancher de mise en page : la barre latérale de 248 px n'écrase jamais le contenu.
+    minWidth: 960,
+    minHeight: 620,
     show: false,
     title: "Benten",
     webPreferences: {
