@@ -3,7 +3,8 @@
  *
  * Pipeline : pixels RGBA (typiquement 32×32 échantillonnés sur canvas) → filtrage des pixels
  * presque noirs / presque blancs / transparents → quantification 4 bits par canal (4096 boîtes)
- * → dominante (boîte la plus peuplée) + vive (boîte maximisant saturation × population).
+ * → dominante (boîte la plus peuplée) + vive (boîte maximisant chroma × population, hors boîtes
+ * quasi noires / quasi blanches).
  * Chaque couleur renvoyée est la MOYENNE des pixels de sa boîte (plus fidèle que le centre).
  */
 
@@ -24,23 +25,33 @@ const LUMA_MAX = 245;
 const ALPHA_MIN = 128;
 /** Contraste WCAG minimal visé sur `#000` (texte normal, niveau AA). */
 const MIN_CONTRAST = 4.5;
-/** Saturation HSL en dessous de laquelle la couleur vive est jugée « trop grise ». */
-export const GREY_SATURATION = 0.18;
+/** Chroma (max − min, 0..255) sous laquelle une couleur est jugée « trop grise » pour l'accent. */
+export const GREY_CHROMA = Math.round(0.12 * 255);
+/** Bornes de luminosité HSL des boîtes candidates à la couleur vive (hors quasi-noir / quasi-blanc). */
+const VIBRANT_L_MIN = 0.15;
+const VIBRANT_L_MAX = 0.85;
+/** Luminosité HSL maximale d'un accent : une teinte pâle reste une teinte, pas un blanc cassé. */
+export const ACCENT_L_MAX = 0.75;
 
 const luma = (r: number, g: number, b: number) => 0.299 * r + 0.587 * g + 0.114 * b;
 
-/** Saturation HSL (0..1) d'une couleur 0..255. */
-export function saturation([r, g, b]: RGB): number {
-  const max = Math.max(r, g, b) / 255;
-  const min = Math.min(r, g, b) / 255;
-  const d = max - min;
-  if (d === 0) return 0;
-  const l = (max + min) / 2;
-  return d / (1 - Math.abs(2 * l - 1));
+/**
+ * Chroma (0..255) = max − min. Contrairement à la saturation HSL, elle n'est pas gonflée près du
+ * noir ni près du blanc (un marine `(20,30,80)` ou une crème `(249,243,226)` ont une S HSL élevée
+ * mais une chroma faible) : c'est la bonne mesure de « vivacité » perçue.
+ */
+export function chroma([r, g, b]: RGB): number {
+  return Math.max(r, g, b) - Math.min(r, g, b);
 }
+
+/** Luminosité HSL (0..1). */
+const hslLightness = ([r, g, b]: RGB) => (Math.max(r, g, b) + Math.min(r, g, b)) / 510;
 
 /**
  * Palette dominante + vive d'une image RGBA `width×height`.
+ * - dominante : boîte la plus peuplée ;
+ * - vive : boîte maximisant chroma × population, parmi celles de luminosité HSL dans
+ *   [0.15, 0.85] (repli : la dominante si aucune boîte n'y entre).
  * Déterministe : à pixels égaux, résultat égal (égalités départagées par l'index de boîte).
  */
 export function extractPalette(rgba: Uint8ClampedArray, width: number, height: number): CoverPalette {
@@ -86,14 +97,18 @@ export function extractPalette(rgba: Uint8ClampedArray, width: number, height: n
       domCount = c;
       domBox = box;
     }
-    const score = saturation(mean(box)) * c;
+    const m = mean(box);
+    const l = hslLightness(m);
+    if (l < VIBRANT_L_MIN || l > VIBRANT_L_MAX) continue;
+    const score = chroma(m) * c;
     if (score > vibScore) {
       vibScore = score;
       vibBox = box;
     }
   }
 
-  return { dominant: mean(domBox), vibrant: mean(vibBox) };
+  const dominant = mean(domBox);
+  return { dominant, vibrant: vibBox < 0 ? dominant : mean(vibBox) };
 }
 
 /* ---------------------------------------- HSL ---------------------------------------- */
@@ -177,12 +192,30 @@ export function readableOnBlack(rgb: RGB): RGB {
 }
 
 /**
- * Règle d'accent (couleur d'UI posée sur le fond noir) :
- * `readableOnBlack(vibrant)`, SAUF si la vive est trop grise (saturation HSL < 0.18), auquel cas
- * `readableOnBlack(dominant)`. Le résultat a toujours un contraste ≥ 4.5:1 sur `#000`.
+ * Met une couleur en forme d'accent sur noir : `readableOnBlack` (plancher 4.5:1), puis luminosité
+ * HSL bornée à ≤ 0.75 (teinte et saturation conservées) pour qu'un ton pâle garde sa couleur.
+ * Si la borne faisait repasser sous 4.5:1 (impossible en pratique : à L = 0.75 le pire cas, le
+ * bleu pur, est ≈ 6.4:1), le plancher l'emporte.
+ */
+export function toAccent(rgb: RGB): RGB {
+  const readable = readableOnBlack(rgb);
+  const [h, s, l] = rgbToHsl(readable);
+  if (l <= ACCENT_L_MAX) return readable;
+  const bounded = hslToRgb(h, s, ACCENT_L_MAX);
+  return contrastOnBlack(bounded) >= MIN_CONTRAST ? bounded : readableOnBlack(bounded);
+}
+
+/**
+ * Règle d'accent (couleur d'UI posée sur le fond noir), en chroma (max − min) :
+ * 1. la vive si sa chroma ≥ 0.12 × 255 ;
+ * 2. sinon la dominante si sa chroma ≥ 0.12 × 255 ;
+ * 3. sinon (pochette grise / N&B) le magenta Benten `FALLBACK_RGB`.
+ * Puis `toAccent` : contraste ≥ 4.5:1 sur `#000` ET luminosité HSL ≤ 0.75.
  */
 export function pickAccent({ dominant, vibrant }: CoverPalette): RGB {
-  return readableOnBlack(saturation(vibrant) < GREY_SATURATION ? dominant : vibrant);
+  const base =
+    chroma(vibrant) >= GREY_CHROMA ? vibrant : chroma(dominant) >= GREY_CHROMA ? dominant : FALLBACK_RGB;
+  return toAccent(base);
 }
 
 /** `rgb(r, g, b)` ou, avec `alpha`, `rgba(r, g, b, a)`. */
