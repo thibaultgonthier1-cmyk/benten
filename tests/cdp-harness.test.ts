@@ -23,6 +23,17 @@ describe("cdp-smoke parseArgs", () => {
     expect(args.port).toBe(9222);
     expect(args.timeout).toBe(20000);
     expect(args.expr).toBeUndefined();
+    expect(args.screenshot).toBeUndefined();
+  });
+
+  it("parse --screenshot <file.png>", () => {
+    expect(parseArgs(["--screenshot", "a.png"]).screenshot).toBe("a.png");
+    expect(parseArgs(["--expr", "x", "--screenshot", "design/screens/t1.png"])).toEqual({
+      port: 9222,
+      timeout: 20000,
+      expr: "x",
+      screenshot: "design/screens/t1.png",
+    });
   });
 });
 

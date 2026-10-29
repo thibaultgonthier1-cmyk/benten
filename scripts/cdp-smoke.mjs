@@ -4,13 +4,18 @@
 // vérifications « réelles » des tâches suivantes pour prouver le comportement du vrai renderer.
 //
 // Usage : node scripts/cdp-smoke.mjs --port 9222 --timeout 20000 --expr "<IIFE async {ok}>"
+//         [--screenshot design/screens/x.png]
+// `--screenshot` capture la page (PNG) après l'expression et ajoute `screenshot` (chemin absolu)
+// à la sortie JSON ; sans `--expr`, la sortie est `{ok:true, screenshot}`.
 
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /**
  * Analyse les arguments CLI. Port par défaut 9222, timeout par défaut 20000 ms.
  * @param {string[]} argv
- * @returns {{ port: number, timeout: number, expr?: string }}
+ * @returns {{ port: number, timeout: number, expr?: string, screenshot?: string }}
  */
 export function parseArgs(argv) {
   const args = { port: 9222, timeout: 20000 };
@@ -19,6 +24,7 @@ export function parseArgs(argv) {
     if (a === "--port") args.port = Number(argv[++i]);
     else if (a === "--timeout") args.timeout = Number(argv[++i]);
     else if (a === "--expr") args.expr = argv[++i];
+    else if (a === "--screenshot") args.screenshot = argv[++i];
   }
   return args;
 }
@@ -54,21 +60,15 @@ function pickPageTarget(targets) {
 }
 
 /**
- * Évalue une expression via `Runtime.evaluate` sur une connexion CDP neuve, puis la ferme.
- * `awaitPromise` attend les IIFE async ; `returnByValue` renvoie une valeur sérialisée.
+ * Envoie UNE commande CDP (`method`, `params`) sur une connexion neuve, résout avec son `result`
+ * brut, puis ferme la connexion. Rejette sur erreur protocole, fermeture prématurée ou délai.
  */
-function evaluate(wsUrl, expression, timeout) {
+function cdpCall(wsUrl, method, params, timeout) {
   const ws = new WebSocket(wsUrl);
   const id = 1;
   const result = new Promise((resolve, reject) => {
     ws.addEventListener("open", () => {
-      ws.send(
-        JSON.stringify({
-          id,
-          method: "Runtime.evaluate",
-          params: { expression, awaitPromise: true, returnByValue: true },
-        }),
-      );
+      ws.send(JSON.stringify({ id, method, params }));
     });
     ws.addEventListener("message", (ev) => {
       let msg;
@@ -78,13 +78,8 @@ function evaluate(wsUrl, expression, timeout) {
         return;
       }
       if (msg.id !== id) return;
-      if (msg.error) {
-        reject(new Error(msg.error.message ?? "CDP error"));
-      } else if (msg.result?.exceptionDetails) {
-        reject(new Error(msg.result.exceptionDetails.text ?? "evaluation exception"));
-      } else {
-        resolve(msg.result?.result?.value);
-      }
+      if (msg.error) reject(new Error(msg.error.message ?? "CDP error"));
+      else resolve(msg.result);
     });
     ws.addEventListener("error", (ev) =>
       reject(new Error(ev?.error?.message ?? ev?.message ?? "websocket error")),
@@ -100,10 +95,42 @@ function evaluate(wsUrl, expression, timeout) {
   });
 }
 
+/**
+ * Évalue une expression via `Runtime.evaluate`. `awaitPromise` attend les IIFE async ;
+ * `returnByValue` renvoie une valeur sérialisée.
+ */
+async function evaluate(wsUrl, expression, timeout) {
+  const result = await cdpCall(
+    wsUrl,
+    "Runtime.evaluate",
+    { expression, awaitPromise: true, returnByValue: true },
+    timeout,
+  );
+  if (result?.exceptionDetails) {
+    throw new Error(result.exceptionDetails.text ?? "evaluation exception");
+  }
+  return result?.result?.value;
+}
+
+/**
+ * Capture la page via `Page.captureScreenshot` (PNG) et l'écrit dans `file` (dossiers créés au
+ * besoin). Renvoie le chemin absolu écrit.
+ */
+async function captureScreenshot(wsUrl, file, timeout) {
+  const result = await cdpCall(wsUrl, "Page.captureScreenshot", { format: "png" }, timeout);
+  if (typeof result?.data !== "string" || result.data.length === 0) {
+    throw new Error("Page.captureScreenshot returned no data");
+  }
+  const out = resolvePath(file);
+  await mkdir(dirname(out), { recursive: true });
+  await writeFile(out, Buffer.from(result.data, "base64"));
+  return out;
+}
+
 async function main() {
-  const { port, timeout, expr } = parseArgs(process.argv.slice(2));
-  if (!expr) {
-    console.log(JSON.stringify({ ok: false, error: "missing --expr" }));
+  const { port, timeout, expr, screenshot } = parseArgs(process.argv.slice(2));
+  if (!expr && !screenshot) {
+    console.log(JSON.stringify({ ok: false, error: "missing --expr or --screenshot" }));
     process.exit(1);
     return;
   }
@@ -137,8 +164,19 @@ async function main() {
       await sleep(250);
     }
 
-    // 3) Évaluer l'expression demandée et décider du code de sortie sur `ok`.
-    const value = await evaluate(wsUrl, expr, Math.max(1000, deadline - Date.now()));
+    // 3) Évaluer l'expression demandée (si fournie) ; sans `--expr`, seul le cliché décide.
+    let value = { ok: true };
+    if (expr) value = await evaluate(wsUrl, expr, Math.max(1000, deadline - Date.now()));
+
+    // 4) Capture d'écran éventuelle, prise APRÈS l'expression (même en échec : aide au diagnostic).
+    if (screenshot) {
+      const path = await captureScreenshot(wsUrl, screenshot, Math.max(1000, deadline - Date.now()));
+      value =
+        value !== null && typeof value === "object" && !Array.isArray(value)
+          ? { ...value, screenshot: path }
+          : { ok: false, value, screenshot: path };
+    }
+
     console.log(JSON.stringify(value));
     process.exit(value && value.ok === true ? 0 : 1);
   } catch (err) {

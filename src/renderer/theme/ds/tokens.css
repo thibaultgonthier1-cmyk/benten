@@ -1,0 +1,69 @@
+/* ============================================================
+   BENTEN — Design system Phase 3 : tokens
+   Fond noir pur ; toute la couleur vit sur le contenu. Accent magenta mat.
+   « Matière » douce : léger dégradé, reflet interne, ombre douce — jamais de 3D.
+   Chargé AVANT l'ancien theme/tokens.css (qui reste la source des composants existants
+   jusqu'à leur migration) ; les noms ci-dessous ne le recouvrent pas, sauf --line (même valeur).
+   ============================================================ */
+
+:root {
+  /* Couleur — fond et surfaces neutres (aucune teinte : la couleur est sur le contenu) */
+  --bg: #000;
+  --surface-1: #0b0b0d;
+  --surface-2: #131316;
+  --surface-3: #1c1c20;
+  --line: rgba(236, 233, 224, 0.1);
+  --line-strong: rgba(236, 233, 224, 0.18);
+  --text: #ece9e4;
+  --text-dim: #9b96a6;
+  --text-faint: #67626f;
+
+  /* Accent de marque — magenta MAT */
+  --accent: #e73c82;
+  --accent-press: #c22e6b;
+  --accent-soft: rgba(231, 60, 130, 0.14);
+  --accent-ring: rgba(231, 60, 130, 0.45);
+
+  /* Matière : dégradé discret du bouton primaire + reflet interne */
+  --grad-btn: linear-gradient(180deg, #ee5592 0%, #e73c82 55%, #d93578 100%);
+  --grad-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  --highlight-inner: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  /* Ombres douces (sur noir : profondeur suggérée, jamais de relief) */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 20px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 6px 16px rgba(0, 0, 0, 0.5), 0 18px 44px rgba(0, 0, 0, 0.5);
+
+  /* Rayons */
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --radius-xl: 24px;
+
+  /* Espacements (échelle 4 px) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Typographie embarquée (@fontsource, hors-ligne) */
+  --font-display: "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  --font-ui: "Zen Kaku Gothic New", "Helvetica Neue", Arial, system-ui, sans-serif;
+
+  /* Plans d'empilement */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-nav: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-menu: 60;
+  --z-toast: 70;
+  --z-intro: 100;
+
+  color-scheme: dark;
+}
