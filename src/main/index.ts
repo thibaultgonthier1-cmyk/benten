@@ -1,9 +1,10 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, powerMonitor } from "electron";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme } from "./artprotocol";
-import { registerIpc } from "./ipc";
+import { registerDiagnosticsIpc, registerIpc } from "./ipc";
+import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
 import { openDb } from "./library/db";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
@@ -22,6 +23,9 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 if (process.env["ELECTRON_RENDERER_URL"]) {
   app.commandLine.appendSwitch("remote-debugging-port", "9222");
 }
+
+/** Journal audio (cree a `whenReady`, une fois `userData` connu). */
+let journal: JournalWriter | null = null;
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -42,6 +46,9 @@ function createWindow(): void {
   });
 
   win.on("ready-to-show", () => win.show());
+  // Journal audio : fenetre bloquee / debloquee (thread principal du renderer).
+  const j = journal;
+  if (j) watchWindowJournal(win, (e) => j.log(e));
 
   if (process.env["ELECTRON_RENDERER_URL"]) {
     void win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
@@ -89,6 +96,20 @@ app.whenReady().then(() => {
   };
 
   registerIpc(db, { onSourcesChanged: startWatcher });
+
+  // ── Journal audio (diagnostic des micro-coupures) ──────────────────────────────────────────
+  // `userData/logs/audio-journal.log` (+ un seul ancien `.1.log` apres 1 Mo). Le Renderer y
+  // ajoute ses entrees via `diagnostics:append` ; le Main y consigne lui-meme les evenements
+  // processus (service audio Chromium, renderer, fenetre, veille/reprise).
+  const j = createJournalWriter(join(app.getPath("userData"), "logs"));
+  journal = j;
+  registerDiagnosticsIpc(j, {
+    appVersion: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+  });
+  attachMainJournal({ app, powerMonitor, log: (e) => j.log(e) });
+
   createWindow();
   // Demarre la veille sur les sources deja persistees (apres la creation de la fenetre).
   startWatcher();

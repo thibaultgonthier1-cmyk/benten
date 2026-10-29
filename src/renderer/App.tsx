@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./theme/tokens.css";
 import { AudioEngine, qualitySampleRate } from "./audio/engine";
 import { NativeDecoder } from "./audio/decoder";
+import { AUDIO_LATENCY_HINT, createAudioContext } from "./audio/context";
+import { createDiagnosticsSink, startAudioDiagnostics } from "./audio/diagnostics";
 import { bindEngine, playerStore, usePlayer, type PlayerState } from "./state/player";
 import { createControls } from "./components/controls";
 import {
@@ -52,7 +54,8 @@ export function App(): JSX.Element {
   // UN SEUL moteur (AudioContext reel + NativeDecoder), cree une fois.
   const engineRef = useRef<AudioEngine>();
   if (!engineRef.current) {
-    const ctx = new AudioContext();
+    // `latencyHint: "playback"` (tampon de sortie plus robuste) : voir `createAudioContext`.
+    const ctx = createAudioContext();
     engineRef.current = new AudioEngine(ctx, new NativeDecoder(ctx));
   }
   const engine = engineRef.current!;
@@ -97,12 +100,8 @@ export function App(): JSX.Element {
     const rebuildForQuality = async (mode: QualityMode): Promise<void> => {
       const oldCtx = engine.getContext();
       const rate = qualitySampleRate(mode, oldCtx.sampleRate);
-      let newCtx: AudioContext;
-      try {
-        newCtx = new AudioContext({ sampleRate: rate });
-      } catch {
-        newCtx = new AudioContext(); // frequence refusee par la plateforme : repli au defaut
-      }
+      // "playback" + frequence du mode ; frequence refusee par la plateforme : repli au defaut.
+      const newCtx = createAudioContext(rate);
       await engine.rebuildContext(newCtx, new NativeDecoder(newCtx));
       if (oldCtx !== newCtx) {
         void oldCtx.close?.(); // un seul contexte vivant : l'ancien est ferme (pas de fuite)
@@ -121,6 +120,22 @@ export function App(): JSX.Element {
         persist: { serializeState, restoreState },
       };
     }
+    // Journal audio (diagnostic des micro-coupures, actif en PRODUCTION) : OBSERVE seulement le
+    // contexte courant (getter : la reconstruction de qualite le remplace) et les transitions du
+    // moteur ; n'appelle aucun mutateur, ne cree aucun noeud audio, ses erreurs restent chez lui.
+    // Les entrees partent par lots vers le Main (au plus toutes les 2 s, immediatement sur glitch).
+    const diagSink = createDiagnosticsSink({
+      send: (entries) => window.benten?.diagnostics?.append(entries),
+    });
+    const diagnostics = startAudioDiagnostics({
+      getContext: () => engine.getContext(),
+      engine,
+      append: diagSink.append,
+      latencyHint: AUDIO_LATENCY_HINT,
+      mediaDevices: typeof navigator !== "undefined" ? (navigator.mediaDevices ?? null) : null,
+      win: window,
+      doc: document,
+    });
     let raf = 0;
     // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
     // ~15 Hz (66 ms) via une porte pure pilotee par le timestamp rAF : PRELOAD_LEAD_SEC = 10 s dans
@@ -192,6 +207,8 @@ export function App(): JSX.Element {
 
     return () => {
       cancelAnimationFrame(raf);
+      diagnostics.stop();
+      diagSink.stop();
       unbind();
       unsubscribeSave();
       if (saveTimer) clearTimeout(saveTimer);
