@@ -21,7 +21,8 @@ const PALETTES: readonly Palette[] = [
   ["#241316", "#120809", "#d6442f"],
   ["#2a1a10", "#140b07", "#e0773f"],
   ["#161a2e", "#0a0c17", "#c9c2e0"],
-  ["#2e1622", "#160a11", "#e773a0"],
+  // Ex-rose (#e773a0) retiré avec le magenta : laque rouge sombre + or clair (DA « Biwa & Or »).
+  ["#2a1210", "#150807", "#f0d38a"],
 ];
 
 /** Hash entier simple et stable (djb2) sur une chaine. */

@@ -1,5 +1,5 @@
 /**
- * Mark Benten : torii affiné (kasagi aux extrémités relevées) devant un soleil magenta — le dessin
+ * Mark Benten : torii affiné (kasagi aux extrémités relevées) devant un soleil d'or — le dessin
  * validé de l'intro v2, simplifié pour les petites tailles. Purement vectoriel, sans texte.
  */
 export interface BentenMarkProps {
@@ -22,7 +22,7 @@ export function BentenMark({ size = 32, title, className }: BentenMarkProps): JS
       fill="none"
     >
       {/* Soleil */}
-      <circle cx="24" cy="23.5" r="15" fill="var(--accent, #e73c82)" />
+      <circle cx="24" cy="23.5" r="15" fill="var(--gold, #d4aa50)" />
       <g stroke="#f4f4f6" strokeLinecap="round">
         {/* Kasagi : poutre haute, extrémités relevées */}
         <path d="M5 12.2 Q24 15.8 43 12.2" strokeWidth="3.2" />

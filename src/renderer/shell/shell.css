@@ -148,14 +148,14 @@
   color: var(--accent);
 }
 
-/* Indicateur actif partagé (layoutId) : teinte magenta douce + trait d'accent à gauche. */
+/* Indicateur actif partagé (layoutId) : teinte d'or douce + trait d'accent à gauche. */
 .sb-active {
   position: absolute;
   inset: 0;
   z-index: -1;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(231, 60, 130, 0.17), rgba(231, 60, 130, 0.05));
-  box-shadow: inset 0 0 0 1px rgba(231, 60, 130, 0.12);
+  background: linear-gradient(90deg, rgba(212, 170, 80, 0.17), rgba(212, 170, 80, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(212, 170, 80, 0.12);
 }
 .sb-active::before {
   content: "";
@@ -635,7 +635,7 @@
   box-shadow:
     var(--highlight-inner),
     0 1px 2px rgba(0, 0, 0, 0.5),
-    0 6px 18px rgba(231, 60, 130, 0.22);
+    0 6px 18px rgba(212, 170, 80, 0.22);
 }
 .shell-scroll .btn:hover:not(:disabled) {
   background: var(--grad-btn);

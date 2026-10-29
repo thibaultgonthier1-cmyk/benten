@@ -1,6 +1,7 @@
 /* ============================================================
    BENTEN — Design system Phase 3 : tokens
-   Fond noir pur ; toute la couleur vit sur le contenu. Accent magenta mat.
+   Fond noir pur ; toute la couleur vit sur le contenu. DA « Biwa & Or » : or pour
+   l'interactif et l'état, rouge laque en touche rare (favori actif, danger).
    « Matière » douce : léger dégradé, reflet interne, ombre douce — jamais de 3D.
    Chargé AVANT l'ancien theme/tokens.css (qui reste la source des composants existants
    jusqu'à leur migration) ; les noms ci-dessous ne le recouvrent pas, sauf --line (même valeur).
@@ -18,16 +19,24 @@
   --text-dim: #9b96a6;
   --text-faint: #67626f;
 
-  /* Accent de marque — magenta MAT */
-  --accent: #e73c82;
-  --accent-press: #c22e6b;
-  --accent-soft: rgba(231, 60, 130, 0.14);
-  --accent-ring: rgba(231, 60, 130, 0.45);
-  /* Contenu posé sur un aplat d'accent (icône du bouton lecture, texte du primaire). */
-  --on-accent: #fff;
+  /* DA « Biwa & Or » — or (interactif, état, focus), rouge laque (touches rares), ivoire */
+  --gold: #d4aa50;
+  --gold-light: #f0d38a;
+  --gold-deep: #8a6420;
+  --lacquer-red: #b8281b;
+  --lacquer-red-deep: #8e1e14;
+  --ivory: #f3efe8;
 
-  /* Matière : dégradé discret du bouton primaire + reflet interne */
-  --grad-btn: linear-gradient(180deg, #ee5592 0%, #e73c82 55%, #d93578 100%);
+  /* Accent de marque — l'or */
+  --accent: var(--gold);
+  --accent-press: #b8913f;
+  --accent-soft: rgba(212, 170, 80, 0.14);
+  --accent-ring: rgba(212, 170, 80, 0.45);
+  /* Contenu posé sur un aplat d'or (icône du bouton lecture, texte du primaire) : jamais de blanc. */
+  --on-accent: #1a1206;
+
+  /* Matière : dégradé discret du bouton primaire (feuille d'or) + reflet interne */
+  --grad-btn: linear-gradient(180deg, #f0d38a 0%, #d4aa50 55%, #b8862f 100%);
   --grad-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
   --highlight-inner: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 

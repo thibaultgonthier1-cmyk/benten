@@ -6,7 +6,7 @@ import { jumpWithOrigin } from "../runtime/transportJournal";
 
 /**
  * Panneau « File d'attente » (DA Benten, feuille modale focus-trapped — meme ossature que la feuille
- * qualite). Montre la file : pistes PASSEES grisees, piste COURANTE surlignee (magenta), pistes A
+ * qualite). Montre la file : pistes PASSEES grisees, piste COURANTE surlignee (or), pistes A
  * VENIR. Actions par ligne : jouer (clic sur la ligne -> `jumpTo`, saut anti-clic), retirer (✕),
  * monter / descendre. Les mutations futures passent par le store, qui pilote le moteur SANS couper
  * la lecture courante (`updateQueue({keepCurrent:true})`).

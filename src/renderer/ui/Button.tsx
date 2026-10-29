@@ -8,7 +8,7 @@ import "./ui.css";
 export type ButtonVariant = "primary" | "ghost" | "subtle";
 
 export interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children"> {
-  /** `primary` : dégradé magenta + reflet + ombre ; `ghost` : surface neutre ; `subtle` : texte. */
+  /** `primary` : dégradé or + reflet + ombre ; `ghost` : surface neutre ; `subtle` : texte. */
   variant?: ButtonVariant;
   /** Icône lucide optionnelle, placée avant le libellé. */
   icon?: LucideIcon;

@@ -67,15 +67,15 @@ describe("extractPalette", () => {
     expect(near(dominant, [30, 60, 210], 16)).toBe(true);
   });
 
-  it("image toute noire -> repli magenta", () => {
+  it("image toute noire -> repli or", () => {
     const px = image(32, 32, () => [3, 3, 3]);
     expect(extractPalette(px, 32, 32)).toEqual({ dominant: FALLBACK_RGB, vibrant: FALLBACK_RGB });
-    expect(FALLBACK_RGB).toEqual([231, 60, 130]);
+    expect(FALLBACK_RGB).toEqual([212, 170, 80]);
   });
 
-  it("image toute blanche (ignorée aussi) -> repli magenta", () => {
+  it("image toute blanche (ignorée aussi) -> repli or", () => {
     const px = image(8, 8, () => [252, 252, 252]);
-    expect(extractPalette(px, 8, 8).dominant).toEqual([231, 60, 130]);
+    expect(extractPalette(px, 8, 8).dominant).toEqual([212, 170, 80]);
   });
 
   it("régression : 60 % marine / 25 % bleu / 15 % presque blanc -> vive = le bleu (chroma)", () => {
@@ -137,7 +137,7 @@ describe("readableOnBlack", () => {
   });
 
   it("laisse inchangée une couleur déjà lisible", () => {
-    expect(readableOnBlack([231, 60, 130])).toEqual([231, 60, 130]);
+    expect(readableOnBlack([212, 170, 80])).toEqual([212, 170, 80]);
   });
 
   it("couvre les cas extrêmes (noir pur, rouge sombre)", () => {
@@ -167,7 +167,7 @@ describe("pickAccent", () => {
     expect(wcagContrastOnBlack(acc)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("vive ET dominante grises -> repli magenta Benten", () => {
+  it("vive ET dominante grises -> repli or Benten", () => {
     expect(pickAccent({ dominant: [120, 118, 122], vibrant: [200, 196, 190] })).toEqual(FALLBACK_RGB);
     expect(pickAccent({ dominant: [40, 40, 40], vibrant: [60, 70, 65] })).toEqual(FALLBACK_RGB);
   });

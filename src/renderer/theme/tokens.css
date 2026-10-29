@@ -1,13 +1,14 @@
 /* ============================================================
    BENTEN — tokens & look, portes depuis design/benten-prototype.html
-   Monde visuel : encre sumi-e, un seul theme sombre, accent magenta MAT.
+   Monde visuel : encre sumi-e, un seul theme sombre. Accent : l'or de la DA « Biwa & Or »
+   (--accent, --gold*, --lacquer-red* : definis dans theme/ds/tokens.css, jamais redefinis ici).
    NE PAS reinventer : palette, typo, rayons et motion viennent du prototype.
    ============================================================ */
 
 /* Polices : empaquetées hors-ligne via @fontsource, chargées par theme/ds/base.css (Phase 3). */
 
 :root {
-  /* Couleur — encre de nuit + accent magenta mat */
+  /* Couleur — encre de nuit (l'accent or vient de theme/ds/tokens.css) */
   --ink: #0b0b11;
   --ink-2: #121019;
   --ink-3: #1b1823;
@@ -15,10 +16,6 @@
   --paper: #ece9e4;
   --sumi: #9b96a6;
   --sumi-dim: #67626f;
-  --magenta: #e73c82; /* accent MAT, aplat, jamais de degrade brillant */
-  --magenta-press: #c22e6b;
-  --magenta-soft: rgba(231, 60, 130, 0.14);
-  --gold: #c9a24b;
   --vermillion: #d6442f;
 
   /* Type */
@@ -88,7 +85,7 @@ body {
   height: 44vmax;
   right: -16vmax;
   top: 18vmax;
-  background: radial-gradient(circle, var(--magenta), transparent 66%);
+  background: radial-gradient(circle, var(--accent), transparent 66%);
   opacity: 0.2;
   animation: drift2 41s ease-in-out infinite;
 }
@@ -182,8 +179,8 @@ body {
   display: grid;
   place-items: center;
   border-radius: 10px;
-  background: var(--magenta);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-family: var(--display);
   font-weight: 700;
   font-size: 20px;
@@ -242,10 +239,10 @@ body {
 }
 .nav-item.active {
   color: var(--paper);
-  background: var(--magenta-soft);
+  background: var(--accent-soft);
 }
 .nav-item.active svg {
-  stroke: var(--magenta);
+  stroke: var(--accent);
 }
 .nav-item .kanji {
   margin-left: auto;
@@ -457,7 +454,7 @@ body {
 }
 .qbadge.lossless {
   color: var(--gold);
-  border-color: rgba(201, 162, 75, 0.4);
+  border-color: rgba(212, 170, 80, 0.4);
 }
 .qpill {
   background: var(--ink-3);
@@ -473,7 +470,7 @@ body {
 }
 .qpill.lossless {
   color: var(--gold);
-  border-color: rgba(201, 162, 75, 0.4);
+  border-color: rgba(212, 170, 80, 0.4);
 }
 
 /* --- Mini-lecteur --- */
@@ -516,7 +513,7 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 .mp-open:focus-visible {
-  outline: 2px solid var(--magenta);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 .mp-art {
@@ -586,10 +583,14 @@ body {
   cursor: default;
 }
 .ic.on {
-  color: var(--magenta);
+  color: var(--accent);
+}
+/* Favori actif : rouge laque (touche rare de la DA), pas l'or. */
+.ic.fav.on {
+  color: var(--lacquer-red);
 }
 /* Bouton repeat : le petit « 1 » du mode « une piste », ancre en bas a droite de l'icone (aplat
-   magenta mat, DA-consistant). `position:relative` sur le bouton porte le badge. */
+   d'or, contenu en --on-accent). `position:relative` sur le bouton porte le badge. */
 .ic.rep {
   position: relative;
 }
@@ -601,8 +602,8 @@ body {
   height: 11px;
   padding: 0 1px;
   border-radius: 6px;
-  background: var(--magenta);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 8px;
   line-height: 11px;
   font-weight: 700;
@@ -613,8 +614,8 @@ body {
   width: 46px;
   height: 46px;
   border-radius: 50%;
-  background: var(--magenta);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   display: grid;
   place-items: center;
   border: none;
@@ -625,16 +626,16 @@ body {
     background 0.2s;
 }
 .play-btn:hover {
-  background: #f04d8f;
+  background: var(--gold-light);
 }
 .play-btn:active {
   transform: scale(0.92);
-  background: var(--magenta-press);
+  background: var(--accent-press);
 }
 .play-btn svg {
   width: 20px;
   height: 20px;
-  fill: #fff;
+  fill: var(--on-accent);
 }
 .mp-right {
   display: flex;
@@ -661,7 +662,7 @@ body {
   position: absolute;
   inset: 0;
   width: var(--p, 0%);
-  background: var(--magenta);
+  background: var(--accent);
   border-radius: 2px;
 }
 
@@ -748,7 +749,7 @@ body {
   inset: -5%;
   border-radius: 50%;
   border: 1px solid rgba(236, 233, 224, 0.12);
-  background: conic-gradient(from 0deg, transparent, rgba(231, 60, 130, 0.18), transparent 55%);
+  background: conic-gradient(from 0deg, transparent, rgba(212, 170, 80, 0.18), transparent 55%);
   animation: spin 14s linear infinite;
   animation-play-state: paused;
 }
@@ -845,7 +846,7 @@ body {
   top: 0;
   bottom: 0;
   width: var(--p, 0%);
-  background: var(--magenta);
+  background: var(--accent);
   border-radius: 3px;
 }
 .scrub .bar .thumb {
@@ -913,8 +914,8 @@ body {
   display: grid;
   place-items: center;
   border-radius: 18px;
-  background: var(--magenta);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-family: var(--display);
   font-weight: 700;
   font-size: 34px;
@@ -951,8 +952,8 @@ body {
   border-color: var(--sumi-dim);
 }
 .btn {
-  background: var(--magenta);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   border: none;
   border-radius: 10px;
   padding: 12px 20px;
@@ -964,7 +965,7 @@ body {
   transition: background 0.2s;
 }
 .btn:hover {
-  background: #f04d8f;
+  background: var(--gold-light);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -1042,7 +1043,7 @@ body {
   stroke: none;
 }
 .pl-btn:focus-visible {
-  outline: 2px solid var(--magenta);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -1122,9 +1123,9 @@ body {
   border-color: var(--sumi-dim);
 }
 .foot-btn.active {
-  color: var(--magenta);
-  border-color: var(--magenta-soft);
-  background: var(--magenta-soft);
+  color: var(--accent);
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
 }
 
 /* ============================ FEUILLE QUALITÉ ============================ */
@@ -1228,18 +1229,18 @@ body {
   place-items: center;
 }
 .qopt.sel {
-  border-color: var(--magenta);
-  background: var(--magenta-soft);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .qopt.sel .r {
-  border-color: var(--magenta);
+  border-color: var(--accent);
 }
 .qopt.sel .r::after {
   content: "";
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--magenta);
+  background: var(--accent);
 }
 .qopt .txt {
   flex: 1;
@@ -1316,7 +1317,7 @@ button.qopt {
   cursor: pointer;
 }
 button.qopt:focus-visible {
-  outline: 2px solid var(--magenta);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 /* Selecteur de sortie. */
@@ -1345,7 +1346,7 @@ button.qopt:focus-visible {
   cursor: pointer;
 }
 .qsel select:focus-visible {
-  outline: 2px solid var(--magenta);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 .qsel select:disabled {
@@ -1376,11 +1377,11 @@ button.qopt:focus-visible {
 .qvol input[type="range"] {
   flex: 1;
   min-width: 0;
-  accent-color: var(--magenta);
+  accent-color: var(--accent);
   cursor: pointer;
 }
 .qvol input[type="range"]:focus-visible {
-  outline: 2px solid var(--magenta);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 .qvol-val {
@@ -1422,7 +1423,7 @@ button.qopt:focus-visible {
   opacity: 0.5;
 }
 .q-item.current {
-  background: var(--magenta-soft);
+  background: var(--accent-soft);
 }
 .q-play {
   flex: 1;
@@ -1447,10 +1448,10 @@ button.qopt:focus-visible {
   font-size: 12px;
 }
 .q-item.current .q-no {
-  color: var(--magenta);
+  color: var(--accent);
 }
 .q-item.current .q-title {
-  color: var(--magenta);
+  color: var(--accent);
   font-weight: 600;
 }
 .q-art {
@@ -1491,7 +1492,7 @@ button.qopt:focus-visible {
   font-size: 12px;
 }
 .q-play:focus-visible {
-  outline: 2px solid var(--magenta);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 6px;
 }

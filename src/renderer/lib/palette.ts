@@ -15,8 +15,8 @@ export interface CoverPalette {
   vibrant: RGB;
 }
 
-/** Repli quand aucun pixel exploitable ne reste : l'accent magenta de Benten (#e73c82). */
-export const FALLBACK_RGB: RGB = [231, 60, 130];
+/** Repli quand aucun pixel exploitable ne reste : l'or de Benten (`--gold`, #d4aa50). */
+export const FALLBACK_RGB: RGB = [212, 170, 80];
 
 /** Seuils de luma (Rec. 601, 0..255) en dessous / au-dessus desquels un pixel est ignoré. */
 const LUMA_MIN = 18;
@@ -209,7 +209,7 @@ export function toAccent(rgb: RGB): RGB {
  * Règle d'accent (couleur d'UI posée sur le fond noir), en chroma (max − min) :
  * 1. la vive si sa chroma ≥ 0.12 × 255 ;
  * 2. sinon la dominante si sa chroma ≥ 0.12 × 255 ;
- * 3. sinon (pochette grise / N&B) le magenta Benten `FALLBACK_RGB`.
+ * 3. sinon (pochette grise / N&B) l'or Benten `FALLBACK_RGB`.
  * Puis `toAccent` : contraste ≥ 4.5:1 sur `#000` ET luminosité HSL ≤ 0.75.
  */
 export function pickAccent({ dominant, vibrant }: CoverPalette): RGB {

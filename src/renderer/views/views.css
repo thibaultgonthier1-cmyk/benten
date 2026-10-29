@@ -63,7 +63,7 @@
   background: var(--accent-soft);
   box-shadow:
     var(--highlight-inner),
-    inset 0 0 0 1px rgba(231, 60, 130, 0.55);
+    inset 0 0 0 1px rgba(212, 170, 80, 0.55);
 }
 
 /* ---------- Grille virtualisée ---------- */
@@ -229,7 +229,7 @@
   min-width: 132px;
 }
 .album-actions__fav.is-on {
-  color: var(--accent);
+  color: var(--lacquer-red);
 }
 .album-actions__fav.is-on svg {
   fill: currentColor;
@@ -267,11 +267,11 @@
   padding: 0 0 0 1px;
   border: 0;
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--grad-btn);
   box-shadow:
     var(--highlight-inner),
-    0 4px 14px rgba(231, 60, 130, 0.35);
+    0 4px 14px rgba(212, 170, 80, 0.35);
   cursor: pointer;
   transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1);
 }
@@ -612,7 +612,7 @@
 .version-toggle.is-open {
   color: var(--text);
   background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px rgba(231, 60, 130, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(212, 170, 80, 0.45);
 }
 .version-toggle__chev {
   transition: transform var(--tv-dur, 0.25s) var(--tv-ease);
@@ -639,7 +639,7 @@
 }
 .track-row.is-playing .version-tag {
   color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(231, 60, 130, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(212, 170, 80, 0.45);
 }
 
 /* Squelette de chargement. */
