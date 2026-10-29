@@ -487,7 +487,7 @@ describe("repository", () => {
   });
 
   it("migrates by user_version and is reopenable", () => {
-    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    expect(db.pragma("user_version", { simple: true })).toBe(3);
     upsertTracks(db, records());
     const path = db.name;
     db.close();

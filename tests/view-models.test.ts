@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  albumAddedAt,
   albumAddedKey,
   albumIsFavorite,
   albumSummary,
@@ -39,6 +40,7 @@ const track = (id: number, over: Partial<TrackRow> = {}): TrackRow =>
     artKey: null,
     mtimeMs: null,
     sizeBytes: null,
+    addedAtMs: null,
     ...over,
   }) as TrackRow;
 
@@ -133,6 +135,17 @@ describe("arrangeAlbums", () => {
     expect(r.map((x) => x.id)).toEqual([11, 10, 12]);
   });
 
+  it("« Ajouté » = plus petite date de création (addedAtMs) de l'album d'abord ; repli sur l'id", () => {
+    const x = album(20, "x", "A", [track(1, { addedAtMs: 500 }), track(2, { addedAtMs: 900 })]);
+    const y = album(21, "y", "A", [track(3, { addedAtMs: 700 })]);
+    const z = album(22, "z", "A", [track(9, { addedAtMs: null })]);
+    expect(albumAddedAt(x)).toBe(500);
+    expect(albumAddedAt(z)).toBeNull();
+    // Plus récent d'abord (y : 700 > x : 500) ; sans date en dernier.
+    const r = arrangeAlbums([x, z, y], { sort: "added", losslessOnly: false, favoritesOnly: false }, none);
+    expect(r.map((a) => a.id)).toEqual([21, 20, 22]);
+  });
+
   it("tri Titre / Artiste insensible à la casse, sans muter l'entrée", () => {
     const before = all.slice();
     expect(
@@ -213,6 +226,19 @@ describe("sortTracks", () => {
     expect(sortTracks(input, "added", "asc").map((x) => x.id)).toEqual([2, 5, 9]);
     expect(sortTracks(input, "added", "desc").map((x) => x.id)).toEqual([9, 5, 2]);
     expect(input).toEqual(before);
+  });
+
+  it("« added » trie par addedAtMs (date de création du fichier), absents en dernier, puis id", () => {
+    const input = [
+      t(1, "a", { addedAtMs: 300 }),
+      t(2, "b", { addedAtMs: null }),
+      t(3, "c", { addedAtMs: 100 }),
+      t(4, "d", { addedAtMs: 100 }),
+      t(5, "e", { addedAtMs: 200 }),
+    ];
+    expect(sortTracks(input, "added", "asc").map((x) => x.id)).toEqual([3, 4, 5, 1, 2]);
+    // Décroissant : plus récent d'abord, égalités par id décroissant, absents toujours en dernier.
+    expect(sortTracks(input, "added", "desc").map((x) => x.id)).toEqual([1, 5, 4, 3, 2]);
   });
 
   it("« title » / asc : insensible à la casse et aux accents (eau, Éclat, Zèbre)", () => {

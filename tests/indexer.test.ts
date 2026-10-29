@@ -159,6 +159,32 @@ describe("indexLibrary", () => {
     expect(getTrackStat(db, rows[0]!.path)?.mtimeMs).toBe(2000);
   });
 
+  // Date d'ajout = création du fichier (vrai ordre d'ajout), conservée aux ré-indexations.
+  it("added_at_ms = birthtime à l'insertion (repli mtime si 0), jamais réécrit ensuite", async () => {
+    const lib = join(FIX, "library");
+    const meta = async (path: string): Promise<TrackInput> => ({
+      path, title: "t", artist: "a", album: "b", albumArtist: null, trackNo: null, discNo: null,
+      durationSec: 1, format: "FLAC", sampleRate: 44100, bitDepth: 16, playable: true,
+      artKey: null, mtimeMs: null, sizeBytes: null,
+    });
+    const getArt = async () => null;
+    let birth = 5_000;
+    // Une piste (« Pardon ») sans birthtime : repli sur mtime.
+    const stat = async (p: string) => ({ mtimeMs: 9_000, size: 1, birthtimeMs: p.includes("Pardon") ? 0 : birth });
+
+    await indexLibrary(db, [lib], undefined, { readMetadata: meta, getArt, stat });
+    const rows = getAllTracks(db, { limit: 100, offset: 0 });
+    expect(rows).toHaveLength(6);
+    for (const r of rows) expect(r.addedAtMs).toBe(r.path.includes("Pardon") ? 9_000 : 5_000);
+
+    // Ré-indexation (re-tag, fichier recopié…) : la date d'ajout ne bouge pas.
+    birth = 7_777;
+    await indexLibrary(db, [lib], undefined, { readMetadata: meta, getArt, stat });
+    for (const r of getAllTracks(db, { limit: 100, offset: 0 })) {
+      expect(r.addedAtMs).toBe(r.path.includes("Pardon") ? 9_000 : 5_000);
+    }
+  });
+
   it("une erreur d'ecriture DB en milieu de passe : added reflete uniquement les lots ecrits", async () => {
     db.exec(`CREATE TRIGGER boom BEFORE INSERT ON tracks WHEN NEW.title = 'Pardon'
              BEGIN SELECT RAISE(ABORT, 'busy'); END`);

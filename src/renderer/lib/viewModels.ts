@@ -128,6 +128,19 @@ export function albumAddedKey(album: Album): number {
   return min;
 }
 
+/**
+ * Date d'ajout réelle d'un album : la plus ancienne date de création (`addedAtMs`) de ses pistes,
+ * `null` si aucune n'est connue (repli : `albumAddedKey`, l'ordre d'indexation).
+ */
+export function albumAddedAt(album: Album): number | null {
+  let min: number | null = null;
+  for (const t of album.tracks) {
+    const at = t.addedAtMs;
+    if (at != null && (min === null || at < min)) min = at;
+  }
+  return min;
+}
+
 /** Un album est favori dès qu'une de ses pistes l'est (même règle que le menu contextuel). */
 export function albumIsFavorite(album: Album, favoriteIds: ReadonlySet<number>): boolean {
   return album.tracks.some((t) => favoriteIds.has(t.id));
@@ -142,7 +155,8 @@ const byText = (a: string, b: string): number => a.localeCompare(b, undefined, {
 
 /**
  * Filtre puis trie les albums (pure : l'entrée n'est pas modifiée). Titre / Artiste croissants,
- * « Ajouté » du plus récent au plus ancien. Départage stable par titre puis id.
+ * « Ajouté » du plus récent au plus ancien (date de création des fichiers, `albumAddedAt`, puis
+ * ordre d'indexation). Départage stable par titre puis id.
  */
 export function arrangeAlbums(
   albums: readonly Album[],
@@ -153,8 +167,14 @@ export function arrangeAlbums(
     (a) =>
       (!arr.losslessOnly || albumIsLossless(a)) && (!arr.favoritesOnly || albumIsFavorite(a, favoriteIds)),
   );
-  const keyed = shown.map((album) => ({ album, added: albumAddedKey(album) }));
+  const keyed = shown.map((album) => ({ album, at: albumAddedAt(album), added: albumAddedKey(album) }));
   keyed.sort((x, y) => {
+    if (arr.sort === "added" && x.at !== y.at) {
+      // Date de création la plus récente d'abord ; un album sans date connue après les autres.
+      if (x.at === null) return 1;
+      if (y.at === null) return -1;
+      return y.at - x.at;
+    }
     if (arr.sort === "added" && x.added !== y.added) {
       // Plus récent (plus grand id) d'abord ; un album vide (+∞) toujours en dernier.
       if (x.added === Infinity) return 1;
@@ -212,12 +232,23 @@ function primaryCompare(key: TrackSortKey, a: TrackRow, b: TrackRow): number {
 }
 
 /**
- * Trie les titres (pure : l'entrée n'est pas modifiée). `"added"` trie par `id` (les ids sont
- * attribués à l'indexation : ordre d'ajout). Textes comparés en français, insensibles à la casse
+ * Trie les titres (pure : l'entrée n'est pas modifiée). `"added"` trie par `addedAtMs` (date de
+ * création du fichier : l'ordre d'ajout réel), inconnues en dernier, puis par `id` (ordre
+ * d'indexation). Textes comparés en français, insensibles à la casse
  * et aux accents. Égalité → départage stable par `id` croissant, quel que soit le sens.
  */
 export function sortTracks(tracks: readonly TrackRow[], key: TrackSortKey, dir: SortDir): TrackRow[] {
   const sign = dir === "desc" ? -1 : 1;
+  if (key === "added") {
+    // Date de création du fichier (vrai ordre d'ajout), dates inconnues toujours en dernier ;
+    // égalité (ou aucune date) → l'id, ordre d'indexation, dans le même sens.
+    return tracks.slice().sort((a, b) => {
+      const na = a.addedAtMs == null;
+      const nb = b.addedAtMs == null;
+      if (na !== nb) return na ? 1 : -1;
+      return sign * ((a.addedAtMs ?? 0) - (b.addedAtMs ?? 0) || a.id - b.id);
+    });
+  }
   return tracks.slice().sort((a, b) => sign * primaryCompare(key, a, b) || a.id - b.id);
 }
 

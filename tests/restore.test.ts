@@ -28,6 +28,7 @@ const track = (id: number): TrackRow => ({
   artKey: null,
   mtimeMs: null,
   sizeBytes: null,
+  addedAtMs: null,
 });
 
 const saved = (over: Record<string, unknown> = {}): string =>

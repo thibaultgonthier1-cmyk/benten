@@ -28,6 +28,7 @@ const track = (id: number, albumId: number, over: Partial<TrackRow> = {}): Track
   artKey: null,
   mtimeMs: null,
   sizeBytes: null,
+  addedAtMs: null,
   ...over,
 });
 

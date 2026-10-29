@@ -67,10 +67,18 @@ export interface TrackRow {
   mtimeMs: number | null;
   /** Taille du fichier en octets (indexation incrémentale) ; `null` si inconnue. */
   sizeBytes: number | null;
+  /**
+   * Date d'ajout (ms epoch) = création du fichier (birthtime, repli mtime), figée à la première
+   * indexation : l'ordre d'ajout réel de la bibliothèque. `null` si inconnue.
+   */
+  addedAtMs: number | null;
 }
 
-/** Piste à insérer / mettre à jour (clé naturelle : `path`). */
-export type TrackInput = Omit<TrackRow, "id" | "albumId">;
+/**
+ * Piste à insérer / mettre à jour (clé naturelle : `path`). `addedAtMs` est facultatif : il n'est
+ * pris qu'à l'insertion (ou pour compléter une valeur NULL), jamais pour réécrire une date connue.
+ */
+export type TrackInput = Omit<TrackRow, "id" | "albumId" | "addedAtMs"> & { addedAtMs?: number | null };
 
 export interface AlbumRow {
   id: number;

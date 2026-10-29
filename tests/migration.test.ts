@@ -106,13 +106,13 @@ describe("migration v2", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("(a) upgrades a v1 database to v2 without losing data", () => {
+  it("(a) upgrades a v1 database to the latest version without losing data", () => {
     const path = join(dir, "v1.db");
     seedV1(path);
 
     const db = openDb(path);
     try {
-      expect(db.pragma("user_version", { simple: true })).toBe(2);
+      expect(db.pragma("user_version", { simple: true })).toBe(3);
 
       // Les données v1 survivent.
       expect(count(db, "SELECT COUNT(*) AS c FROM tracks")).toBe(3);
@@ -142,10 +142,10 @@ describe("migration v2", () => {
     }
   });
 
-  it("(b) a fresh database opens directly at v2", () => {
+  it("(b) a fresh database opens directly at the latest version (v3)", () => {
     const db = openDb(join(dir, "fresh.db"));
     try {
-      expect(db.pragma("user_version", { simple: true })).toBe(2);
+      expect(db.pragma("user_version", { simple: true })).toBe(3);
     } finally {
       db.close();
     }
@@ -200,6 +200,22 @@ describe("migration v2", () => {
 
       db.prepare("DELETE FROM tracks WHERE id = 1").run();
       expect(count(db, "SELECT COUNT(*) AS c FROM favorites")).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("(f) v3 adds a nullable tracks.added_at_ms (NULL on existing rows) and its sort index", () => {
+    const path = join(dir, "v3.db");
+    seedV1(path);
+
+    const db = openDb(path);
+    try {
+      expect(colNames(db, "tracks")).toContain("added_at_ms");
+      expect(count(db, "SELECT COUNT(*) AS c FROM tracks WHERE added_at_ms IS NULL")).toBe(3);
+      expect(count(db, "SELECT COUNT(*) AS c FROM tracks")).toBe(3);
+      const idx = db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_tracks_added_at'").get();
+      expect(idx).toBeDefined();
     } finally {
       db.close();
     }

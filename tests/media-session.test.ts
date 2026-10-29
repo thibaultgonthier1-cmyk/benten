@@ -41,6 +41,7 @@ const track = (id: number, title: string, extra: Partial<TrackRow> = {}): TrackR
   artKey: "abc/def",
   mtimeMs: null,
   sizeBytes: null,
+  addedAtMs: null,
   ...extra,
 });
 

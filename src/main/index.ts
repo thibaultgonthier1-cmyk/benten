@@ -1,9 +1,11 @@
 import { app, BrowserWindow } from "electron";
+import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme } from "./artprotocol";
 import { registerIpc } from "./ipc";
+import { backfillAddedAt } from "./library/addedAt";
 import { openDb } from "./library/db";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
@@ -93,6 +95,16 @@ app.whenReady().then(() => {
 
   registerIpc(db, { onSourcesChanged: startWatcher });
   createWindow();
+
+  // Rattrapage unique de la date d'ajout (pistes indexées avant la v3) : stats en parallèle, une
+  // seule transaction ; la vue Titres se recharge si des dates ont été complétées. Best-effort.
+  void backfillAddedAt(db, (path) => fs.stat(path))
+    .then((n) => {
+      if (n > 0) broadcastLibraryChanged();
+    })
+    .catch(() => {
+      /* la date reste NULL : retentée au prochain démarrage. */
+    });
   // Demarre la veille sur les sources deja persistees (apres la creation de la fenetre).
   startWatcher();
 
