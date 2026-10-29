@@ -1,6 +1,6 @@
 import type React from "react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import { Clock3, Disc3, Ellipsis, Heart, Pause, Play, Shuffle } from "lucide-react";
 import type { TrackRow } from "../../shared/types";
 import type { Album } from "../lib/library";
@@ -20,6 +20,7 @@ import { TrackRowItem } from "../ui/TrackRowItem";
 import { useMotion } from "../ui/useMotion";
 import { quoted, toast } from "../ui/toastStore";
 import { EmptyState } from "./common";
+import { HeroCompactBar, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
 import { anchorBelow, anchorFromEvent, useViewMenus } from "./menus";
 import "./views.css";
 
@@ -48,9 +49,6 @@ export function AlbumView({ id, scrollRef, actions }: AlbumViewProps): JSX.Eleme
   return <AlbumPage key={album.id} album={album} scrollRef={scrollRef} actions={actions} />;
 }
 
-/** Défilement (px) sur lequel la teinte de la barre du haut s'éteint. */
-const TINT_FADE_PX = 220;
-
 function AlbumPage({
   album,
   scrollRef,
@@ -75,62 +73,15 @@ function AlbumPage({
   // Tabulation itinérante : un seul arrêt de tabulation pour toute la liste (dernière ligne
   // focalisée, sinon la sélection, le titre en cours ou la première ligne) ; ↑/↓ circulent.
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
-  const [compact, setCompact] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
 
   const groups = useMemo(() => discGroups(album.tracks), [album.tracks]);
   const indexOf = useMemo(() => new Map(album.tracks.map((t, i) => [t.id, i])), [album.tracks]);
   const multiDisc = groups.length > 1;
 
-  // La couleur de l'en-tête passe sous la barre du haut (aucune arête nette) : la page publie sa
-  // teinte sur `.shell-main` (`--top-tint`, `data-tint`) et l'éteint en défilant (opacité
-  // `--top-tint-o`, mise à jour au plus une fois par frame) ; tout est retiré en quittant la page.
-  const tint = resolved?.vibrant ?? null;
-  const tintOwner = useId();
-  useEffect(() => {
-    const scroller = scrollRef.current;
-    const main = scroller?.parentElement;
-    if (!scroller || !main || !tint) return;
-    main.style.setProperty("--top-tint", tint);
-    // Jeton de propriété : la page sortante (démontée APRÈS l'entrée de la suivante, mode
-    // popLayout) ne retire pas la teinte posée par un autre album.
-    main.dataset.tint = tintOwner;
-    let raf = 0;
-    const update = (): void => {
-      raf = 0;
-      main.style.setProperty("--top-tint-o", Math.max(0, 1 - scroller.scrollTop / TINT_FADE_PX).toFixed(3));
-    };
-    const onScroll = (): void => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    update();
-    scroller.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      scroller.removeEventListener("scroll", onScroll);
-      cancelAnimationFrame(raf);
-      if (main.dataset.tint !== tintOwner) return;
-      delete main.dataset.tint;
-      main.style.removeProperty("--top-tint");
-      main.style.removeProperty("--top-tint-o");
-    };
-  }, [tint, tintOwner, scrollRef]);
-
-  // Barre compacte : visible dès que la rangée de boutons passe sous la barre du haut.
-  useEffect(() => {
-    const root = scrollRef.current;
-    const target = actionsRef.current;
-    if (!root || !target) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry) return;
-        const above = entry.boundingClientRect.bottom < (entry.rootBounds?.top ?? 0) + 72;
-        setCompact(!entry.isIntersecting && above);
-      },
-      { root, rootMargin: "-72px 0px 0px 0px", threshold: 0 },
-    );
-    io.observe(target);
-    return () => io.disconnect();
-  }, [scrollRef]);
+  // Teinte sous la barre du haut (cf. `useTopTint`) ; barre compacte au défilement.
+  useTopTint(scrollRef, resolved?.vibrant ?? null);
+  const compact = useCompactOnScroll(scrollRef, actionsRef);
 
   // « Lecture » d'en-tête : lecture DANS L'ORDRE (le mélange est coupé, comme Apple Music) ;
   // « Aléatoire » l'active.
@@ -173,21 +124,23 @@ function AlbumPage({
     });
   };
 
-  const enter = (i: number) =>
-    m.enabled
-      ? {
-          initial: { opacity: 0, y: 10 },
-          animate: { opacity: 1, y: 0 },
-          transition: { duration: m.d(dur.slow), ease: ease.out, delay: m.d(0.08 + i * 0.05) },
-        }
-      : {};
+  const enter = useHeroEnter();
 
   const heroStyle = resolved ? ({ "--hero": resolved.vibrant } as React.CSSProperties) : undefined;
   const empty = album.tracks.length === 0;
 
   return (
     <div className="album-view" style={heroStyle}>
-      <CompactBar album={album} visible={compact} playing={isPlaying} onPlay={playPause} />
+      <HeroCompactBar
+        visible={compact}
+        playing={isPlaying}
+        onPlay={playPause}
+        disabled={album.tracks.length === 0}
+        title={album.title}
+        sub={album.artist || undefined}
+        artKey={album.artKey}
+        seed={seed}
+      />
 
       <section className="album-hero" aria-label={`Album ${album.title}`}>
         {resolved && <div key={resolved.vibrant} className="album-hero__bg" aria-hidden="true" />}
@@ -285,57 +238,6 @@ function AlbumPage({
           ))}
         </div>
       </motion.div>
-    </div>
-  );
-}
-
-/** Barre compacte collée en haut au défilement : vignette, titre, lecture. */
-function CompactBar({
-  album,
-  visible,
-  playing,
-  onPlay,
-}: {
-  album: Album;
-  visible: boolean;
-  playing: boolean;
-  onPlay(): void;
-}): JSX.Element {
-  const m = useMotion();
-  return (
-    <div className="album-compact-anchor">
-      <AnimatePresence>
-        {visible && (
-          <motion.div
-            className="album-compact"
-            initial={m.enabled ? { opacity: 0, y: -8 } : false}
-            animate={{ opacity: 1, y: 0 }}
-            exit={m.enabled ? { opacity: 0, y: -8 } : { opacity: 0 }}
-            transition={{ duration: m.d(dur.base), ease: ease.out }}
-          >
-            <button
-              type="button"
-              className="album-compact__play"
-              aria-label={playing ? "Pause" : `Lire ${album.title}`}
-              onClick={onPlay}
-              disabled={album.tracks.length === 0}
-            >
-              {playing ? (
-                <Pause size={18} strokeWidth={0} fill="currentColor" aria-hidden />
-              ) : (
-                <Play size={18} strokeWidth={0} fill="currentColor" aria-hidden />
-              )}
-            </button>
-            <span className="album-compact__thumb">
-              <CoverArt artKey={album.artKey} seed={`${album.id}:${album.title}`} />
-            </span>
-            <span className="album-compact__title" title={album.title}>
-              {album.title}
-            </span>
-            {album.artist && <span className="album-compact__artist">{album.artist}</span>}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

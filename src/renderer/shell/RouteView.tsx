@@ -19,6 +19,8 @@ import { Button } from "../ui/Button";
 import { useMotion } from "../ui/useMotion";
 import { AlbumsView } from "../views/AlbumsView";
 import { AlbumView } from "../views/AlbumView";
+import { ArtistsView } from "../views/ArtistsView";
+import { ArtistView } from "../views/ArtistView";
 import { TracksView } from "../views/TracksView";
 import { EmptyState, PageHeader } from "../views/common";
 import { anchorFromEvent, useViewMenus } from "../views/menus";
@@ -61,8 +63,8 @@ interface PageProps {
  * de la page album (titre, boutons, liste) joue sa propre entrée.
  *
  * Routes : home (grille d'albums, ou accueil/scan si la bibliothèque est vide — jusqu'à la
- * Tâche 11), tracks (tous les titres), albums, favorites (même grille filtrée), album, playlists
- * (ancienne vue), search ;
+ * Tâche 11), tracks (tous les titres), albums, favorites (même grille filtrée), album, artists
+ * (grille d'artistes), artist, playlists (ancienne vue), search ;
  * les autres → état vide neutre « En construction ».
  */
 export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
@@ -108,7 +110,8 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
     }),
     [t],
   );
-  const initial = nav.shared || route.name === "album" ? { opacity: 1, y: 0 } : t.initial;
+  // Les pages à en-tête teinté (album, artiste) jouent leur propre entrée (pas de fondu global).
+  const initial = nav.shared || route.name === "album" || route.name === "artist" ? { opacity: 1, y: 0 } : t.initial;
 
   return (
     <AnimatePresence mode="popLayout" initial={false} custom={nav.instant}>
@@ -135,12 +138,18 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
 const INSTANT_EXIT = { opacity: 0, transition: { duration: 0 } };
 
 /** Pages qui affichent des tuiles d'album (source / cible de la pochette partagée). */
-const GRID_ROUTES: ReadonlySet<Route["name"]> = new Set(["home", "albums", "favorites", "search"]);
+const GRID_ROUTES: ReadonlySet<Route["name"]> = new Set(["home", "albums", "favorites", "search", "artist"]);
 
-/** Navigation grille → album (ou retour album → grille) : la pochette voyage. */
+/**
+ * Navigation grille → album (ou retour album → grille) : la pochette voyage ; grille Artistes →
+ * page artiste (et retour) : l'avatar voyage.
+ */
 function isSharedPair(from: Route, to: Route): boolean {
   return (
-    (GRID_ROUTES.has(from.name) && to.name === "album") || (from.name === "album" && GRID_ROUTES.has(to.name))
+    (GRID_ROUTES.has(from.name) && to.name === "album") ||
+    (from.name === "album" && GRID_ROUTES.has(to.name)) ||
+    (from.name === "artists" && to.name === "artist") ||
+    (from.name === "artist" && to.name === "artists")
   );
 }
 
@@ -156,6 +165,10 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
       return <AlbumsView scrollRef={scrollRef} actions={actions} variant="favorites" />;
     case "album":
       return <AlbumView id={route.id} scrollRef={scrollRef} actions={actions} />;
+    case "artists":
+      return <ArtistsView scrollRef={scrollRef} actions={actions} />;
+    case "artist":
+      return <ArtistView name={route.artist} scrollRef={scrollRef} actions={actions} />;
     case "playlists":
       return (
         <>
@@ -172,10 +185,6 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
 
 function titleOf(route: Route): string {
   switch (route.name) {
-    case "artists":
-      return "Artistes";
-    case "artist":
-      return route.artist;
     case "playlist":
       return "Playlist";
     case "downloads":

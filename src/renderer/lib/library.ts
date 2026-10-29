@@ -34,7 +34,9 @@ export function groupTracksToAlbums(tracks: readonly TrackRow[]): Album[] {
     albums.push({
       id,
       title: first.album,
-      artist: first.artist,
+      // Artiste d'album (tag `albumartist`, ex. « Various Artists ») — c'est lui qui regroupe
+      // l'album côté base ; à défaut, l'artiste de la piste.
+      artist: first.albumArtist?.trim() || first.artist,
       artKey: withArt?.artKey ?? null,
       tracks: group,
     });

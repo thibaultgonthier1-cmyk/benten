@@ -508,6 +508,157 @@ export function versionRows(groups: readonly VersionGroup[], expanded: ReadonlyS
   return rows;
 }
 
+/* ---------------------------------------- Artistes ---------------------------------------- */
+
+/** Clé d'artiste (regroupement, route) : nom sans espaces de bord, en minuscules (fr). */
+export function artistKey(name: string): string {
+  return name.trim().toLocaleLowerCase("fr");
+}
+
+export interface ArtistGroup {
+  /** Première graphie rencontrée de l'artiste d'album. */
+  name: string;
+  /** Ses albums, dans l'ordre d'entrée. */
+  albums: Album[];
+  /** Nombre total de titres de ses albums. */
+  trackCount: number;
+  /** Première pochette disponible (avatar rond), `null` sinon. */
+  artKey: string | null;
+}
+
+/**
+ * Regroupe les albums par artiste d'album, insensible à la casse (`artistKey`). Une compilation
+ * (« Various Artists ») est un artiste comme un autre. Les albums sans artiste sont ignorés. Tri
+ * alphabétique français (casse et accents ignorés). Pure : l'entrée n'est pas modifiée.
+ */
+export function groupArtists(albums: readonly Album[]): ArtistGroup[] {
+  const byKey = new Map<string, ArtistGroup>();
+  for (const album of albums) {
+    const key = artistKey(album.artist);
+    if (!key) continue;
+    let g = byKey.get(key);
+    if (!g) {
+      g = { name: album.artist.trim(), albums: [], trackCount: 0, artKey: null };
+      byKey.set(key, g);
+    }
+    g.albums.push(album);
+    g.trackCount += album.tracks.length;
+    g.artKey ??= album.artKey;
+  }
+  return [...byKey.values()].sort((a, b) => frText(a.name, b.name));
+}
+
+/** Séparateurs de crédits : « , » « & » « feat. » « ft. » « featuring » « x » (mots entiers). */
+const CREDIT_SPLIT = /\s*,\s*|\s*&\s*|\s+(?:feat\.?|ft\.?|featuring)\s+|\s+x\s+/i;
+
+/** Noms crédités d'un champ artiste (« A feat. B & C » → a, b, c), normalisés (casse, accents). */
+export function creditedArtists(artist: string): string[] {
+  return artist
+    .split(CREDIT_SPLIT)
+    .map(normalizeText)
+    .filter((n) => n.length > 0);
+}
+
+/** Le champ artiste crédite `n` (nom normalisé) : nom complet, artiste principal ou invité. */
+function credits(artist: string, n: string): boolean {
+  return normalizeText(artist) === n || primaryArtist(artist) === n || creditedArtists(artist).includes(n);
+}
+
+/**
+ * Titres qui créditent l'artiste `name` : artiste principal, invité (« feat. », « & », « x »…) ou
+ * nom complet (une collaboration « bxkq & AVARU » a sa propre page). Casse et accents ignorés ;
+ * l'ordre d'entrée est conservé.
+ */
+export function artistCredits(tracks: readonly TrackRow[], name: string): TrackRow[] {
+  const n = normalizeText(name);
+  if (!n) return [];
+  return tracks.filter((t) => credits(t.artist, n));
+}
+
+export interface ArtistPageModel {
+  name: string;
+  /** Ses albums (artiste d'album), du plus récemment ajouté au plus ancien. */
+  albums: Album[];
+  /** Albums d'autres artistes où il est crédité sur au moins un titre. */
+  appearsOn: Album[];
+  /** Tous ses titres (ses albums + ses crédits ailleurs), par date d'ajout croissante. */
+  tracks: TrackRow[];
+  /** Pochette de l'avatar : celle de `groupArtists` (même tuile ↔ en-tête), sinon une apparition. */
+  artKey: string | null;
+}
+
+const NO_FAVORITES: ReadonlySet<number> = new Set();
+const BY_ADDED: AlbumArrangement = { sort: "added", losslessOnly: false, favoritesOnly: false };
+
+/** Contenu de la page d'un artiste (`name` : nom de la route, casse indifférente). Pure. */
+export function artistPage(albums: readonly Album[], name: string): ArtistPageModel {
+  const key = artistKey(name);
+  const own: Album[] = [];
+  const appears: Album[] = [];
+  const credited: TrackRow[] = [];
+  const n = normalizeText(name);
+  for (const album of albums) {
+    if (key && artistKey(album.artist) === key) {
+      own.push(album);
+      continue;
+    }
+    const hits = n ? album.tracks.filter((t) => credits(t.artist, n)) : [];
+    if (hits.length > 0) {
+      appears.push(album);
+      credited.push(...hits);
+    }
+  }
+  const seen = new Set<number>();
+  const all: TrackRow[] = [];
+  for (const t of [...own.flatMap((a) => a.tracks), ...credited]) {
+    if (seen.has(t.id)) continue;
+    seen.add(t.id);
+    all.push(t);
+  }
+  const artKey = own.find((a) => a.artKey)?.artKey ?? appears.find((a) => a.artKey)?.artKey ?? null;
+  return {
+    name: own[0]?.artist.trim() || name.trim(),
+    albums: arrangeAlbums(own, BY_ADDED, NO_FAVORITES),
+    appearsOn: arrangeAlbums(appears, BY_ADDED, NO_FAVORITES),
+    tracks: sortTracks(all, "added", "asc"),
+    artKey,
+  };
+}
+
+/** Rail alphabétique de la grille Artistes : « # » (chiffres, symboles, autres écritures) puis A–Z. */
+export const ALPHABET: readonly string[] = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+
+/** Lettre d'index d'un nom : sa première lettre sans accent (A–Z), sinon « # ». */
+export function artistInitial(name: string): string {
+  const c = normalizeText(name).charAt(0).toUpperCase();
+  return c >= "A" && c <= "Z" ? c : "#";
+}
+
+/** Premier index de chaque lettre dans une liste de noms déjà triée. */
+export function letterIndex(names: readonly string[]): Map<string, number> {
+  const idx = new Map<string, number>();
+  names.forEach((name, i) => {
+    const l = artistInitial(name);
+    if (!idx.has(l)) idx.set(l, i);
+  });
+  return idx;
+}
+
+/**
+ * File « Lecture » d'un artiste : ses titres dans l'ordre donné ; versions regroupées → un titre
+ * par morceau (l'original, pas trois « Slowed » d'affilée).
+ */
+export function artistQueue(tracks: readonly TrackRow[], grouped: boolean): TrackRow[] {
+  return grouped ? groupVersions(tracks).map((g) => g.lead) : tracks.slice();
+}
+
+/** Même liste de titres (mêmes ids, même ordre) — la file en cours est-elle celle-ci ? */
+export function sameTrackList(a: readonly TrackRow[], b: readonly TrackRow[]): boolean {
+  if (a.length === 0 || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]!.id !== b[i]!.id) return false;
+  return true;
+}
+
 /* ----------------------------------------- Grille ----------------------------------------- */
 
 /**

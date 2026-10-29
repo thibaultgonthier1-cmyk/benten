@@ -4,13 +4,23 @@ import {
   albumAddedKey,
   albumIsFavorite,
   albumSummary,
+  ALPHABET,
+  artistCredits,
+  artistInitial,
+  artistKey,
+  artistPage,
+  artistQueue,
   canResume,
+  creditedArtists,
   arrangeAlbums,
   discGroups,
   formatTotal,
   gridLayout,
   GRID_MAX_COLS,
+  groupArtists,
   groupVersions,
+  letterIndex,
+  sameTrackList,
   selectionAfterClick,
   sortTracks,
   summaryLine,
@@ -213,6 +223,16 @@ describe("groupTracksToAlbums (multi-disques)", () => {
     ];
     const [al] = groupTracksToAlbums(tracks);
     expect(al!.tracks.map((t) => t.id)).toEqual([3, 2, 1, 4]);
+  });
+
+  it("l'artiste de l'album est le tag albumartist (compilation), sinon l'artiste de la piste", () => {
+    const albums = groupTracksToAlbums([
+      track(1, { albumId: 7, artist: "Dadju", albumArtist: "Various Artists" }),
+      track(2, { albumId: 7, artist: "Tiakola", albumArtist: "Various Artists" }),
+      track(3, { albumId: 8, artist: "GIMS", albumArtist: "  " }),
+    ]);
+    expect(albums.find((a) => a.id === 7)!.artist).toBe("Various Artists");
+    expect(albums.find((a) => a.id === 8)!.artist).toBe("GIMS");
   });
 });
 
@@ -500,5 +520,180 @@ describe("versionRows", () => {
     expect(rows[1]!.tag).toBe("Slowed");
     expect(rows[1]!.groupId).toBe(1);
     expect(rows[0]!.groupId).toBe(1);
+  });
+});
+
+/* ----------------------------------- Tâche 8 : artistes ----------------------------------- */
+
+describe("groupArtists", () => {
+  it("regroupe par artiste d'album insensible à la casse ; compilation à part ; tri fr ; 1re pochette", () => {
+    const ridsa1: Album = { ...album(1, "Vagabond", "Ridsa", [track(1), track(2)]), artKey: null };
+    const ridsa2: Album = { ...album(2, "Libre", "ridsa", [track(3)]), artKey: "art-libre" };
+    const comp: Album = {
+      ...album(3, "Été 2024", "Various Artists", [track(4), track(5), track(6)]),
+      artKey: "art-comp",
+    };
+    const groups = groupArtists([comp, ridsa1, ridsa2]);
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => [g.name, g.trackCount])).toEqual([
+      ["Ridsa", 3],
+      ["Various Artists", 3],
+    ]);
+    expect(groups[0]!.albums.map((a) => a.id)).toEqual([1, 2]);
+    expect(groups[0]!.artKey).toBe("art-libre");
+    expect(groups[1]!.artKey).toBe("art-comp");
+  });
+
+  it("ignore les albums sans artiste et ne modifie pas l'entrée", () => {
+    const input = [album(1, "X", "  ", [track(1)]), album(2, "Y", "Zed", [track(2)])];
+    const copy = input.slice();
+    expect(groupArtists(input).map((g) => g.name)).toEqual(["Zed"]);
+    expect(input).toEqual(copy);
+  });
+
+  it("artistKey : trim + minuscules (fr)", () => {
+    expect(artistKey("  RIDSA ")).toBe("ridsa");
+    expect(artistKey("Ridsa")).toBe(artistKey("ridsa"));
+  });
+});
+
+describe("creditedArtists / artistCredits", () => {
+  it("découpe les crédits sur , & feat. ft. x (normalisés)", () => {
+    expect(creditedArtists("TWXNY, Sxilwix & Innxcence")).toEqual(["twxny", "sxilwix", "innxcence"]);
+    expect(creditedArtists("Dillon Francis & DJ Snake")).toEqual(["dillon francis", "dj snake"]);
+    expect(creditedArtists("Tiakola feat. Ridsa")).toEqual(["tiakola", "ridsa"]);
+    expect(creditedArtists("A ft. B x Ç")).toEqual(["a", "b", "c"]);
+    expect(creditedArtists("Bxkq")).toEqual(["bxkq"]);
+  });
+
+  it("ne coupe pas à l'intérieur d'un mot (x, feat)", () => {
+    expect(creditedArtists("Xxtenaxion")).toEqual(["xxtenaxion"]);
+    expect(creditedArtists("Featurist")).toEqual(["featurist"]);
+  });
+
+  it("trouve les titres crédités : principal, invité, nom complet ; casse et accents ignorés", () => {
+    const tracks = [
+      track(1, { artist: "Ridsa" }),
+      track(2, { artist: "Tiakola feat. RIDSA" }),
+      track(3, { artist: "Rîdsa & Dadju" }),
+      track(4, { artist: "Ridsatown" }),
+      track(5, { artist: "bxkq & AVARU" }),
+      track(6, { artist: "Dadju" }),
+    ];
+    expect(artistCredits(tracks, "ridsa").map((t) => t.id)).toEqual([1, 2, 3]);
+    expect(artistCredits(tracks, "BXKQ & avaru").map((t) => t.id)).toEqual([5]);
+    expect(artistCredits(tracks, "AVARU").map((t) => t.id)).toEqual([5]);
+    expect(artistCredits(tracks, "  ")).toEqual([]);
+  });
+});
+
+describe("artistPage", () => {
+  const own1: Album = {
+    ...album(1, "Vagabond", "Ridsa", [
+      track(1, { albumId: 1, artist: "Ridsa", addedAtMs: 300 }),
+      track(2, { albumId: 1, artist: "Ridsa", title: "Libre (Slowed)", addedAtMs: 100 }),
+    ]),
+    artKey: null,
+  };
+  const own2: Album = {
+    ...album(2, "Single", "RIDSA", [track(3, { albumId: 2, artist: "RIDSA", addedAtMs: 200 })]),
+    artKey: "art-single",
+  };
+  const other: Album = {
+    ...album(3, "Mélo", "Tiakola", [
+      track(4, { albumId: 3, artist: "Tiakola" }),
+      track(5, { albumId: 3, artist: "Tiakola feat. Ridsa", addedAtMs: 50 }),
+    ]),
+    artKey: "art-melo",
+  };
+  const unrelated = album(4, "Autre", "Dadju", [track(6, { albumId: 4, artist: "Dadju" })]);
+
+  it("sépare Albums / Apparaît sur, et liste tous les titres par date d'ajout", () => {
+    const page = artistPage([other, own1, unrelated, own2], "ridsa");
+    expect(page.name).toBe("Ridsa");
+    expect(page.albums.map((a) => a.id).sort()).toEqual([1, 2]);
+    expect(page.appearsOn.map((a) => a.id)).toEqual([3]);
+    expect(page.tracks.map((t) => t.id)).toEqual([5, 2, 3, 1]);
+    expect(page.artKey).toBe("art-single");
+  });
+
+  it("artiste seulement invité : pas d'album à lui, pochette de l'apparition", () => {
+    const page = artistPage([other, unrelated], "Ridsa");
+    expect(page.albums).toEqual([]);
+    expect(page.appearsOn.map((a) => a.id)).toEqual([3]);
+    expect(page.tracks.map((t) => t.id)).toEqual([5]);
+    expect(page.artKey).toBe("art-melo");
+    expect(page.name).toBe("Ridsa");
+  });
+
+  it("compilation : tous les titres de l'album, quel que soit l'artiste de la piste", () => {
+    const comp = album(9, "Été", "Various Artists", [
+      track(10, { albumId: 9, artist: "A" }),
+      track(11, { albumId: 9, artist: "B" }),
+    ]);
+    const page = artistPage([comp], "various artists");
+    expect(page.tracks.map((t) => t.id)).toEqual([10, 11]);
+    expect(page.appearsOn).toEqual([]);
+  });
+
+  it("artiste inconnu : page vide", () => {
+    const page = artistPage([own1], "Personne");
+    expect(page.albums).toEqual([]);
+    expect(page.appearsOn).toEqual([]);
+    expect(page.tracks).toEqual([]);
+    expect(page.artKey).toBeNull();
+  });
+});
+
+describe("artistInitial / letterIndex", () => {
+  it("lettre sans accent, « # » hors A–Z", () => {
+    expect(artistInitial("Ridsa")).toBe("R");
+    expect(artistInitial("éric")).toBe("E");
+    expect(artistInitial("2ndmoonx")).toBe("#");
+    expect(artistInitial("$uicideboy$")).toBe("#");
+    expect(artistInitial("  bbno$")).toBe("B");
+    expect(artistInitial("")).toBe("#");
+  });
+
+  it("premier index de chaque lettre (liste déjà triée)", () => {
+    const idx = letterIndex(["2ndmoonx", "Aya", "avaru", "Bxkq", "Été", "Zed"]);
+    expect(idx.get("#")).toBe(0);
+    expect(idx.get("A")).toBe(1);
+    expect(idx.get("B")).toBe(3);
+    expect(idx.get("E")).toBe(4);
+    expect(idx.get("Z")).toBe(5);
+    expect(idx.has("C")).toBe(false);
+  });
+
+  it("l'alphabet du rail : # puis A–Z", () => {
+    expect(ALPHABET).toHaveLength(27);
+    expect(ALPHABET[0]).toBe("#");
+    expect(ALPHABET[1]).toBe("A");
+    expect(ALPHABET[26]).toBe("Z");
+  });
+});
+
+describe("artistQueue", () => {
+  const t = (id: number, title: string, addedAtMs: number) => track(id, { title, addedAtMs });
+  const list = [t(1, "Luz", 10), t(2, "Luz (Slowed)", 20), t(3, "Roja", 30)];
+
+  it("regroupé : un titre par morceau (l'original), dans l'ordre", () => {
+    expect(artistQueue(list, true).map((x) => x.id)).toEqual([1, 3]);
+  });
+
+  it("non regroupé : tous les titres (copie)", () => {
+    const q = artistQueue(list, false);
+    expect(q.map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(q).not.toBe(list);
+  });
+});
+
+describe("sameTrackList", () => {
+  it("vrai seulement pour les mêmes ids dans le même ordre", () => {
+    const a = [track(1), track(2)];
+    expect(sameTrackList(a, [track(1), track(2)])).toBe(true);
+    expect(sameTrackList(a, [track(2), track(1)])).toBe(false);
+    expect(sameTrackList(a, [track(1)])).toBe(false);
+    expect(sameTrackList([], [])).toBe(false);
   });
 });
