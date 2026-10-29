@@ -101,29 +101,29 @@
   padding: 44px var(--page-x) 30px;
   min-height: 316px;
 }
-/* Dégradé de la couleur vive vers le noir (le fond de page reste #000 en dessous). Arrêts
-   nombreux et courbe douce + grain très léger : pas de bandes visibles sur ce fond sombre. */
+/* Dégradé de la couleur vive vers le noir, ÉTEINT à 60 % de sa hauteur (jamais un aplat saturé ;
+   le fond de page reste #000 en dessous). Arrêts nombreux, courbe douce + grain très léger : pas
+   de bandes visibles sur ce fond sombre. */
 .album-hero__bg {
-  /* Teinte de tête : la couleur vive approfondie et ravivée (OKLCH) — une teinte pastel ne
-     tourne pas au gris boueux une fois assombrie ; luminosité bornée pour le texte blanc. */
-  --hero-deep: oklch(from var(--hero) min(l, 0.56) calc(c * 1.45) h);
+  /* Teinte de tête : la couleur vive approfondie (OKLCH) — une teinte pastel ne tourne pas au gris
+     boueux une fois assombrie ; luminosité bornée pour le texte blanc, chroma à peine ravivée. */
+  --hero-deep: oklch(from var(--hero) min(l, 0.5) min(c, 0.17) h);
   position: absolute;
-  inset: 0 0 -240px;
+  inset: 0 0 -120px;
   z-index: -1;
   pointer-events: none;
   background:
     /* Halo derrière la pochette : il s'éteint avant le bord haut, qui reste exactement le premier
        arrêt linéaire (= teinte de la barre du haut, cf. shell.css) — raccord invisible à 64 px. */
-    radial-gradient(50% 45% at 16% 60%, color-mix(in oklch, var(--hero-deep) 36%, transparent) 0%, transparent 100%),
+    radial-gradient(42% 36% at 16% 40%, color-mix(in oklch, var(--hero-deep) 24%, transparent) 0%, transparent 100%),
     linear-gradient(
       180deg,
-      color-mix(in oklch, var(--hero-deep) 82%, #000) 0%,
-      color-mix(in oklch, var(--hero-deep) 70%, #000) 14%,
-      color-mix(in oklch, var(--hero-deep) 54%, #000) 30%,
-      color-mix(in oklch, var(--hero-deep) 36%, #000) 47%,
-      color-mix(in oklch, var(--hero-deep) 19%, #000) 64%,
-      color-mix(in oklch, var(--hero-deep) 7%, #000) 82%,
-      #000 100%
+      color-mix(in oklch, var(--hero-deep) 54%, #000) 0%,
+      color-mix(in oklch, var(--hero-deep) 40%, #000) 15%,
+      color-mix(in oklch, var(--hero-deep) 25%, #000) 30%,
+      color-mix(in oklch, var(--hero-deep) 12%, #000) 44%,
+      color-mix(in oklch, var(--hero-deep) 4%, #000) 54%,
+      #000 60%
     );
   animation: hero-bloom 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }

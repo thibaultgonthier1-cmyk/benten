@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   commandEntry,
   journalCommand,
+  jumpWithOrigin,
   setCommandJournal,
   withOrigin,
 } from "../src/renderer/runtime/transportJournal";
@@ -158,7 +159,7 @@ describe("origine des commandes", () => {
       ["pause", "pause", true],
       ["pause", "stop", true],
       ["next", "nexttrack", false],
-      ["seek", "seekto", false],
+      ["seek", "seekto", true],
     ]);
   });
 
@@ -182,6 +183,37 @@ describe("origine des commandes", () => {
     // Hors session média, les mêmes commandes restent « ui ».
     ui.toggle();
     expect(commands().at(-1)).toMatchObject({ cmd: "toggle", origin: "ui" });
+  });
+
+  it("saut mediaSession sans durée connue : noop:true ; avec durée : noop:false", () => {
+    capture();
+    const store = createPlayerStore();
+    store.setState({ status: "playing" });
+    const ms = new FakeMediaSession();
+    const raw = fakeControls();
+    release = bindMediaSession(store, raw, ms as unknown as MediaSession, { fetchArt: null });
+    ms.fire("seekforward");
+    ms.fire("seekto", { seekTime: 5 });
+    expect(raw.seekFraction).not.toHaveBeenCalled();
+    store.getState().setQueue([track(1)], 0);
+    ms.fire("seekto", { seekTime: 50 });
+    ms.fire("seekbackward");
+    expect(raw.seekFraction).toHaveBeenCalledTimes(2);
+    expect(commands().map((e) => [e["action"], e["noop"]])).toEqual([
+      ["seekforward", true],
+      ["seekto", true],
+      ["seekto", false],
+      ["seekbackward", false],
+    ]);
+  });
+
+  it("saut dans la file (panneau File d'attente) : command « jump », origine ui", () => {
+    capture();
+    const jumpTo = vi.fn();
+    const store = { getState: () => ({ status: "paused", jumpTo }) };
+    jumpWithOrigin(store, 3, "ui");
+    expect(jumpTo).toHaveBeenCalledWith(3);
+    expect(commands()).toEqual([expect.objectContaining({ cmd: "jump", origin: "ui", index: 3, status: "paused" })]);
   });
 
   it("raccourci global « toggle » → command origin shortcut", () => {

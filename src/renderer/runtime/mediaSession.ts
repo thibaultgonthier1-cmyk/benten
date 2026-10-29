@@ -161,12 +161,13 @@ export function bindMediaSession(
     );
   };
 
+  /** Un saut vers `sec` aura-t-il lieu ? (durée inconnue ou cible invalide : non). */
+  const canSeekTo = (sec: number): boolean => durationOf(store.getState()) > 0 && Number.isFinite(sec);
   const seekTo = (sec: number): void => {
-    const dur = durationOf(store.getState());
-    if (dur <= 0 || !Number.isFinite(sec)) return;
-    controls.seekFraction(sec / dur);
+    if (!canSeekTo(sec)) return;
+    controls.seekFraction(sec / durationOf(store.getState()));
   };
-  const seekBy = (delta: number): void => seekTo(store.getState().positionSec + delta);
+  const byTarget = (delta: number): number => store.getState().positionSec + delta;
 
   // Origine des commandes (diagnostic) : CHAQUE invocation système est consignée — même sans
   // effet (« pause » déjà en pause) — avant d'être routée, inchangée, vers `controls`.
@@ -197,18 +198,21 @@ export function bindMediaSession(
       journal("next", "nexttrack", false);
       alreadyJournaled(() => controls.next());
     },
+    // Sauts : `noop` reflète le retour anticipé de `seekTo` (durée inconnue, cible invalide).
     seekto: (d) => {
-      const ok = typeof d.seekTime === "number";
-      journal("seek", "seekto", !ok, ok ? { seekTime: d.seekTime } : {});
-      if (ok) alreadyJournaled(() => seekTo(d.seekTime as number));
+      const target = typeof d.seekTime === "number" ? d.seekTime : NaN;
+      journal("seek", "seekto", !canSeekTo(target), Number.isFinite(target) ? { seekTime: target } : {});
+      alreadyJournaled(() => seekTo(target));
     },
     seekforward: (d) => {
-      journal("seek", "seekforward", false, { offset: d.seekOffset ?? MEDIA_SEEK_STEP_SEC });
-      alreadyJournaled(() => seekBy(d.seekOffset ?? MEDIA_SEEK_STEP_SEC));
+      const offset = d.seekOffset ?? MEDIA_SEEK_STEP_SEC;
+      journal("seek", "seekforward", !canSeekTo(byTarget(offset)), { offset });
+      alreadyJournaled(() => seekTo(byTarget(offset)));
     },
     seekbackward: (d) => {
-      journal("seek", "seekbackward", false, { offset: -(d.seekOffset ?? MEDIA_SEEK_STEP_SEC) });
-      alreadyJournaled(() => seekBy(-(d.seekOffset ?? MEDIA_SEEK_STEP_SEC)));
+      const offset = -(d.seekOffset ?? MEDIA_SEEK_STEP_SEC);
+      journal("seek", "seekbackward", !canSeekTo(byTarget(offset)), { offset });
+      alreadyJournaled(() => seekTo(byTarget(offset)));
     },
   };
 

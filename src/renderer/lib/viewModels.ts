@@ -510,15 +510,152 @@ export function versionRows(groups: readonly VersionGroup[], expanded: ReadonlyS
 
 /* ---------------------------------------- Artistes ---------------------------------------- */
 
-/** Clé d'artiste (regroupement, route) : nom sans espaces de bord, en minuscules (fr). */
+/**
+ * Clé d'artiste (regroupement, route) : nom replié — casse, accents et espaces ignorés —, comme les
+ * crédits : « Beyoncé » et « beyonce » sont le même artiste.
+ */
 export function artistKey(name: string): string {
-  return name.trim().toLocaleLowerCase("fr");
+  return normalizeText(name);
+}
+
+/** Invité : « feat. » / « ft. » / « featuring », collé ou non, éventuellement entre ( ) ou [ ]. */
+const FEAT_SPLIT = /\s*[([]?\s*\b(?:featuring|feat|ft)\b\.?\s*/i;
+/** Liste : « , » « & », et « x » en minuscule seulement (« DJ X », « Lil Nas X » restent entiers). */
+const LIST_SPLIT = /(\s*,\s*|\s*&\s*|\s+x\s+)/;
+/** Crochets de bord laissés par le découpage (« Ridsa) » → « Ridsa »). */
+const stripBrackets = (s: string): string => s.replace(/^[\s([]+|[\s)\]]+$/g, "").trim();
+
+/** Séparateur canonique entre deux crédits d'une liste (recollage d'une suite de crédits). */
+const canonicalSep = (sep: string): string => {
+  const t = sep.trim();
+  return t === "," ? ", " : t === "&" ? " & " : " x ";
+};
+
+/** Une partie « invité » : ses noms (texte d'origine) et les séparateurs qui les relient. */
+interface CreditChunk {
+  names: string[];
+  seps: string[];
+}
+
+/** Découpe un champ artiste : parties « feat. », puis listes « , » « & » « x ». */
+function creditChunks(artist: string): CreditChunk[] {
+  const chunks: CreditChunk[] = [];
+  for (const raw of artist.split(FEAT_SPLIT)) {
+    const pieces = stripBrackets(raw).split(LIST_SPLIT);
+    const names: string[] = [];
+    const seps: string[] = [];
+    pieces.forEach((p, i) => {
+      if (i % 2 === 1) seps.push(p);
+      else names.push(stripBrackets(p));
+    });
+    // Séparateurs autour d'un nom vide (« A, , B ») : retirés avec lui.
+    const kept: CreditChunk = { names: [], seps: [] };
+    names.forEach((n, i) => {
+      if (!n) return;
+      if (kept.names.length > 0) kept.seps.push(seps[i - 1] ?? ",");
+      kept.names.push(n);
+    });
+    if (kept.names.length > 0) chunks.push(kept);
+  }
+  return chunks;
+}
+
+/**
+ * Index de la bibliothèque pour lever l'ambiguïté des noms à séparateurs : `solo` = noms (repliés)
+ * qui apparaissent SEULS comme artiste (d'album ou de titre) quelque part.
+ */
+export interface ArtistIndex {
+  solo: ReadonlySet<string>;
+}
+
+export function buildArtistIndex(albums: readonly Album[]): ArtistIndex {
+  const solo = new Set<string>();
+  const add = (artist: string): void => {
+    const chunks = creditChunks(artist);
+    if (chunks.length === 1 && chunks[0]!.names.length === 1) solo.add(normalizeText(chunks[0]!.names[0]!));
+  };
+  for (const a of albums) {
+    add(a.artist);
+    for (const t of a.tracks) add(t.artist);
+  }
+  return { solo };
+}
+
+/**
+ * Crédits d'une partie, texte d'origine. Avec l'index : une paire « A, The B » / « A & The B »
+ * (suffixe de groupe « The … ») dont AUCUN des deux n'existe seul dans la bibliothèque est UN nom
+ * (« Tyler, The Creator », « Bob Marley & The Wailers ») ; « Doja Cat & The Weeknd » (The Weeknd
+ * existe seul) et tout autre duo (« Marshmello & Bastille ») sont des collaborations.
+ */
+function chunkCredits(chunk: CreditChunk, index?: ArtistIndex): string[] {
+  if (
+    index &&
+    chunk.names.length === 2 &&
+    chunk.seps[0]!.trim() !== "x" &&
+    /^the\s/i.test(chunk.names[1]!) &&
+    !chunk.names.some((n) => index.solo.has(normalizeText(n)))
+  ) {
+    return [chunk.names[0]! + canonicalSep(chunk.seps[0]!) + chunk.names[1]!];
+  }
+  return chunk.names;
+}
+
+/** Noms crédités (texte d'origine) : principal d'abord, puis invités. */
+function creditNames(artist: string, index?: ArtistIndex): string[] {
+  return creditChunks(artist).flatMap((c) => chunkCredits(c, index));
+}
+
+/**
+ * Noms crédités d'un champ artiste, repliés (casse, accents) : « A (feat. B) & C » → a, b, c.
+ * `index` (bibliothèque) garde entiers les noms à séparateurs qui ne sont pas des collaborations.
+ */
+export function creditedArtists(artist: string, index?: ArtistIndex): string[] {
+  return [...new Set(creditNames(artist, index).map(normalizeText).filter((n) => n.length > 0))];
+}
+
+/** Artiste principal (texte d'origine, sans espaces de bord) : le premier crédité. */
+export function primaryCredit(artist: string, index?: ArtistIndex): string {
+  return creditNames(artist, index)[0]?.trim() ?? artist.trim();
+}
+
+/** Suites d'au moins deux crédits consécutifs recollées (« Above & Beyond »), repliées. */
+function creditRuns(artist: string): string[] {
+  const runs: string[] = [];
+  for (const { names, seps } of creditChunks(artist)) {
+    for (let i = 0; i < names.length; i++) {
+      let run = names[i]!;
+      for (let j = i + 1; j < names.length; j++) {
+        run += canonicalSep(seps[j - 1]!) + names[j]!;
+        runs.push(normalizeText(run));
+      }
+    }
+  }
+  return runs;
+}
+
+/** Le champ artiste crédite la clé `key` : nom complet, crédit, ou suite de crédits recollée. */
+function credits(artist: string, key: string, index?: ArtistIndex): boolean {
+  return (
+    normalizeText(artist) === key ||
+    creditedArtists(artist, index).includes(key) ||
+    creditRuns(artist).includes(key)
+  );
+}
+
+/**
+ * Titres qui créditent l'artiste `name` : principal, invité (« feat. », « & », « x »…) ou nom à
+ * séparateurs entier (« Above & Beyond »). Casse et accents ignorés ; ordre d'entrée conservé.
+ */
+export function artistCredits(tracks: readonly TrackRow[], name: string, index?: ArtistIndex): TrackRow[] {
+  const key = artistKey(name);
+  if (!key) return [];
+  return tracks.filter((t) => credits(t.artist, key, index));
 }
 
 export interface ArtistGroup {
-  /** Première graphie rencontrée de l'artiste d'album. */
+  /** Première graphie rencontrée de l'artiste principal. */
   name: string;
-  /** Ses albums, dans l'ordre d'entrée. */
+  /** Ses albums (dont ses collaborations), dans l'ordre d'entrée. */
   albums: Album[];
   /** Nombre total de titres de ses albums. */
   trackCount: number;
@@ -527,18 +664,20 @@ export interface ArtistGroup {
 }
 
 /**
- * Regroupe les albums par artiste d'album, insensible à la casse (`artistKey`). Une compilation
- * (« Various Artists ») est un artiste comme un autre. Les albums sans artiste sont ignorés. Tri
- * alphabétique français (casse et accents ignorés). Pure : l'entrée n'est pas modifiée.
+ * Regroupe les albums par artiste PRINCIPAL de l'artiste d'album (`primaryCredit`, clé repliée :
+ * casse et accents) : un album « A, B & C » rejoint A (décision de revue : pas de tuile par
+ * collaboration). Une compilation (« Various Artists ») est un artiste comme un autre ; les albums
+ * sans artiste sont ignorés. Tri alphabétique français. Pure : l'entrée n'est pas modifiée.
  */
-export function groupArtists(albums: readonly Album[]): ArtistGroup[] {
+export function groupArtists(albums: readonly Album[], index: ArtistIndex = buildArtistIndex(albums)): ArtistGroup[] {
   const byKey = new Map<string, ArtistGroup>();
   for (const album of albums) {
-    const key = artistKey(album.artist);
+    const primary = primaryCredit(album.artist, index);
+    const key = artistKey(primary);
     if (!key) continue;
     let g = byKey.get(key);
     if (!g) {
-      g = { name: album.artist.trim(), albums: [], trackCount: 0, artKey: null };
+      g = { name: primary, albums: [], trackCount: 0, artKey: null };
       byKey.set(key, g);
     }
     g.albums.push(album);
@@ -548,38 +687,11 @@ export function groupArtists(albums: readonly Album[]): ArtistGroup[] {
   return [...byKey.values()].sort((a, b) => frText(a.name, b.name));
 }
 
-/** Séparateurs de crédits : « , » « & » « feat. » « ft. » « featuring » « x » (mots entiers). */
-const CREDIT_SPLIT = /\s*,\s*|\s*&\s*|\s+(?:feat\.?|ft\.?|featuring)\s+|\s+x\s+/i;
-
-/** Noms crédités d'un champ artiste (« A feat. B & C » → a, b, c), normalisés (casse, accents). */
-export function creditedArtists(artist: string): string[] {
-  return artist
-    .split(CREDIT_SPLIT)
-    .map(normalizeText)
-    .filter((n) => n.length > 0);
-}
-
-/** Le champ artiste crédite `n` (nom normalisé) : nom complet, artiste principal ou invité. */
-function credits(artist: string, n: string): boolean {
-  return normalizeText(artist) === n || primaryArtist(artist) === n || creditedArtists(artist).includes(n);
-}
-
-/**
- * Titres qui créditent l'artiste `name` : artiste principal, invité (« feat. », « & », « x »…) ou
- * nom complet (une collaboration « bxkq & AVARU » a sa propre page). Casse et accents ignorés ;
- * l'ordre d'entrée est conservé.
- */
-export function artistCredits(tracks: readonly TrackRow[], name: string): TrackRow[] {
-  const n = normalizeText(name);
-  if (!n) return [];
-  return tracks.filter((t) => credits(t.artist, n));
-}
-
 export interface ArtistPageModel {
   name: string;
-  /** Ses albums (artiste d'album), du plus récemment ajouté au plus ancien. */
+  /** Ses albums (artiste principal, collaborations comprises), du plus récent au plus ancien. */
   albums: Album[];
-  /** Albums d'autres artistes où il est crédité sur au moins un titre. */
+  /** Albums d'autres artistes où il est crédité (artiste d'album ou titres). */
   appearsOn: Album[];
   /** Tous ses titres (ses albums + ses crédits ailleurs), par date d'ajout croissante. */
   tracks: TrackRow[];
@@ -590,19 +702,29 @@ export interface ArtistPageModel {
 const NO_FAVORITES: ReadonlySet<number> = new Set();
 const BY_ADDED: AlbumArrangement = { sort: "added", losslessOnly: false, favoritesOnly: false };
 
-/** Contenu de la page d'un artiste (`name` : nom de la route, casse indifférente). Pure. */
-export function artistPage(albums: readonly Album[], name: string): ArtistPageModel {
-  const key = artistKey(name);
+/**
+ * Contenu de la page d'un artiste. `name` : nom de la route (casse et accents indifférents) ; un nom
+ * de collaboration (« A, B & C », lien d'un album) mène à son artiste principal. Pure.
+ */
+export function artistPage(
+  albums: readonly Album[],
+  name: string,
+  index: ArtistIndex = buildArtistIndex(albums),
+): ArtistPageModel {
+  const primary = primaryCredit(name, index);
+  const key = artistKey(primary);
   const own: Album[] = [];
   const appears: Album[] = [];
   const credited: TrackRow[] = [];
-  const n = normalizeText(name);
   for (const album of albums) {
-    if (key && artistKey(album.artist) === key) {
+    if (!key) break;
+    if (artistKey(primaryCredit(album.artist, index)) === key) {
       own.push(album);
       continue;
     }
-    const hits = n ? album.tracks.filter((t) => credits(t.artist, n)) : [];
+    let hits = album.tracks.filter((t) => credits(t.artist, key, index));
+    // Crédité sur l'artiste d'album (collaboration) sans l'être sur les titres : tout l'album.
+    if (hits.length === 0 && credits(album.artist, key, index)) hits = album.tracks.slice();
     if (hits.length > 0) {
       appears.push(album);
       credited.push(...hits);
@@ -616,8 +738,9 @@ export function artistPage(albums: readonly Album[], name: string): ArtistPageMo
     all.push(t);
   }
   const artKey = own.find((a) => a.artKey)?.artKey ?? appears.find((a) => a.artKey)?.artKey ?? null;
+  const ownName = own[0] ? primaryCredit(own[0].artist, index) : "";
   return {
-    name: own[0]?.artist.trim() || name.trim(),
+    name: ownName || primary,
     albums: arrangeAlbums(own, BY_ADDED, NO_FAVORITES),
     appearsOn: arrangeAlbums(appears, BY_ADDED, NO_FAVORITES),
     tracks: sortTracks(all, "added", "asc"),
@@ -625,7 +748,7 @@ export function artistPage(albums: readonly Album[], name: string): ArtistPageMo
   };
 }
 
-/** Rail alphabétique de la grille Artistes : « # » (chiffres, symboles, autres écritures) puis A–Z. */
+/** Alphabet du rail : « # » (chiffres, symboles, autres écritures) puis A–Z. */
 export const ALPHABET: readonly string[] = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
 
 /** Lettre d'index d'un nom : sa première lettre sans accent (A–Z), sinon « # ». */
@@ -644,6 +767,37 @@ export function letterIndex(names: readonly string[]): Map<string, number> {
   return idx;
 }
 
+export interface RailEntry {
+  label: string;
+  /** Premier artiste de l'entrée ; `null` : aucune (lettre estompée). */
+  index: number | null;
+}
+
+/**
+ * Entrées du rail A–Z pour une liste TRIÉE : « # » là où ces noms se trient vraiment — en tête
+ * (chiffres, symboles : avant A) et/ou en fin (autres écritures : après Z) —, puis A–Z.
+ */
+export function artistRail(names: readonly string[]): RailEntry[] {
+  const idx = letterIndex(names);
+  const firstLetter = names.findIndex((n) => artistInitial(n) !== "#");
+  const leading = names.length > 0 && artistInitial(names[0]!) === "#" ? 0 : null;
+  let trailing: number | null = null;
+  if (firstLetter >= 0) {
+    for (let i = firstLetter; i < names.length; i++) {
+      if (artistInitial(names[i]!) === "#") {
+        trailing = i;
+        break;
+      }
+    }
+  }
+  const rail: RailEntry[] = [];
+  if (leading !== null) rail.push({ label: "#", index: leading });
+  for (const l of ALPHABET.slice(1)) rail.push({ label: l, index: idx.get(l) ?? null });
+  if (trailing !== null) rail.push({ label: "#", index: trailing });
+  if (leading === null && trailing === null) rail.unshift({ label: "#", index: null });
+  return rail;
+}
+
 /**
  * File « Lecture » d'un artiste : ses titres dans l'ordre donné ; versions regroupées → un titre
  * par morceau (l'original, pas trois « Slowed » d'affilée).
@@ -657,6 +811,14 @@ export function sameTrackList(a: readonly TrackRow[], b: readonly TrackRow[]): b
   if (a.length === 0 || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i]!.id !== b[i]!.id) return false;
   return true;
+}
+
+/**
+ * Le bouton lecture d'un artiste affiche « Pause » ssi le lecteur joue SA file — quel que soit
+ * l'album du titre courant (une apparition sur l'album d'un autre compte aussi).
+ */
+export function artistShowsPause(queue: readonly TrackRow[], playing: boolean, list: readonly TrackRow[]): boolean {
+  return playing && sameTrackList(queue, list);
 }
 
 /* ----------------------------------------- Grille ----------------------------------------- */

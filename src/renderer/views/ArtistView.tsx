@@ -30,7 +30,15 @@ import { openMenu } from "../ui/menuStore";
 import { Skeleton } from "../ui/Skeleton";
 import { TrackRowItem } from "../ui/TrackRowItem";
 import { useMotion } from "../ui/useMotion";
-import { addArtistToQueue, artistAlbum, artistLayoutId, playArtist, playArtistNext, shuffleArtist } from "./artistPlay";
+import {
+  addArtistToQueue,
+  artistAlbum,
+  artistLayoutId,
+  libraryIndex,
+  playArtist,
+  playArtistNext,
+  shuffleArtist,
+} from "./artistPlay";
 import { EmptyState } from "./common";
 import { HeroCompactBar, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
 import { anchorBelow, anchorFromEvent, useViewMenus } from "./menus";
@@ -55,14 +63,14 @@ export interface ArtistViewProps {
 export function ArtistView({ name, scrollRef, actions }: ArtistViewProps): JSX.Element {
   const albums = useLibrary((s) => s.albums);
   const loading = useLibrary((s) => s.loading);
-  const page = useMemo(() => artistPage(albums, name), [albums, name]);
+  const page = useMemo(() => artistPage(albums, name, libraryIndex(albums)), [albums, name]);
 
   if (page.albums.length === 0 && page.tracks.length === 0) {
     return loading ? <ArtistSkeleton /> : (
       <EmptyState icon={MicVocal} title="Artiste introuvable" text="Aucun titre de cet artiste dans la bibliothèque." />
     );
   }
-  return <ArtistPageView key={artistKey(name)} page={page} scrollRef={scrollRef} actions={actions} />;
+  return <ArtistPageView key={artistKey(page.name)} page={page} scrollRef={scrollRef} actions={actions} />;
 }
 
 function ArtistPageView({
@@ -223,10 +231,15 @@ function ArtistPageView({
   }, [rows, toggleGroup]);
 
   const ownCount = page.albums.length;
-  const sub = [
-    ownCount > 0 ? `${ownCount} ${ownCount > 1 ? "albums" : "album"}` : null,
-    `${page.tracks.length} ${page.tracks.length > 1 ? "titres" : "titre"}`,
-  ]
+  const files = page.tracks.length;
+  // Versions regroupées : « 13 morceaux · 23 fichiers » (comme la section Titres) — l'en-tête ne
+  // promet jamais 23 titres quand Lecture en jouera 13.
+  const songs = groups ? groups.length : files;
+  const countLine =
+    songs !== files
+      ? `${songs} ${songs > 1 ? "morceaux" : "morceau"} · ${files} fichiers`
+      : `${files} ${files > 1 ? "titres" : "titre"}`;
+  const sub = [ownCount > 0 ? `${ownCount} ${ownCount > 1 ? "albums" : "album"}` : null, countLine]
     .filter(Boolean)
     .join(" · ");
   const heroStyle = resolved ? ({ "--hero": resolved.vibrant } as React.CSSProperties) : undefined;

@@ -5,8 +5,18 @@ import { motion } from "framer-motion";
 import { MicVocal, Pause, Play } from "lucide-react";
 import { setDragTracks } from "../lib/dnd";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
-import { ALPHABET, artistInitial, gridLayout, groupArtists, letterIndex, type ArtistGroup } from "../lib/viewModels";
+import {
+  artistInitial,
+  artistRail,
+  artistShowsPause,
+  gridLayout,
+  groupArtists,
+  letterIndex,
+  type ArtistGroup,
+  type RailEntry,
+} from "../lib/viewModels";
 import { useLibrary } from "../state/library";
+import { useSettings } from "../state/settings";
 import { usePlayer } from "../state/player";
 import { uiStore } from "../state/ui";
 import type { RouteViewActions } from "../shell/RouteView";
@@ -17,7 +27,7 @@ import { Equalizer } from "../ui/Equalizer";
 import { openMenu } from "../ui/menuStore";
 import { Skeleton } from "../ui/Skeleton";
 import { useMotion } from "../ui/useMotion";
-import { artistLayoutId, artistMenuItems, artistQueueOf, isQueue, playArtist } from "./artistPlay";
+import { artistLayoutId, artistMenuItems, artistQueueOf, libraryIndex, playArtist } from "./artistPlay";
 import { EmptyState, PageHeader } from "./common";
 import { anchorFromEvent } from "./menus";
 import "./views.css";
@@ -51,7 +61,7 @@ const RAIL_MIN_H = 240;
 export function ArtistsView({ scrollRef, actions }: ArtistsViewProps): JSX.Element {
   const albums = useLibrary((s) => s.albums);
   const loading = useLibrary((s) => s.loading);
-  const artists = useMemo(() => groupArtists(albums), [albums]);
+  const artists = useMemo(() => groupArtists(albums, libraryIndex(albums)), [albums]);
 
   const sub = loading && albums.length === 0 ? null : `${artists.length} ${artists.length > 1 ? "artistes" : "artiste"}`;
 
@@ -154,8 +164,21 @@ function ArtistGrid({
   }, [rowHeight, virtualizer]);
 
   const rows = virtualizer.getVirtualItems();
-  /** Premier artiste de chaque lettre (rail A–Z, saisie rapide). */
-  const letters = useMemo(() => letterIndex(artists.map((a) => a.name)), [artists]);
+  const names = useMemo(() => artists.map((a) => a.name), [artists]);
+  /** Premier artiste de chaque lettre (saisie rapide) et entrées du rail A–Z. */
+  const letters = useMemo(() => letterIndex(names), [names]);
+  const rail = useMemo(() => artistRail(names), [names]);
+
+  // Tabulation itinérante : UN arrêt de tabulation pour toute la grille (la dernière tuile
+  // focalisée, sinon la première montée) ; les flèches déplacent le focus.
+  const [tabStop, setTabStop] = useState(0);
+  const firstMounted = (rows[0]?.index ?? 0) * cols;
+  const lastMounted = Math.min(artists.length, ((rows.at(-1)?.index ?? 0) + 1) * cols) - 1;
+  const tabIndexStop = tabStop >= firstMounted && tabStop <= lastMounted ? tabStop : firstMounted;
+  const onGridFocus = (e: React.FocusEvent<HTMLDivElement>): void => {
+    const ai = (e.target as HTMLElement).dataset?.ai;
+    if (ai !== undefined) setTabStop(Number(ai));
+  };
 
   // Callbacks STABLES (tuiles mémoïsées) : l'état courant est lu au clic.
   const onPlay = useCallback(
@@ -189,6 +212,8 @@ function ArtistGrid({
   const onGridKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     const tile = (e.target as HTMLElement).closest<HTMLElement>("[data-ai]");
     if (!tile || e.target !== tile || e.altKey || e.ctrlKey || e.metaKey) return;
+    // Maj+flèches / Maj+Début/Fin : raccourcis globaux (avancer / reculer), jamais avalés ici.
+    if (e.shiftKey && (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End")) return;
     const i = Number(tile.dataset.ai);
     const last = artists.length - 1;
     let target: number | null = null;
@@ -209,22 +234,25 @@ function ArtistGrid({
 
   // --- Rail alphabétique ----------------------------------------------------------------------
   const jumpTo = useCallback(
-    (letter: string): void => {
-      const i = letters.get(letter);
-      if (i === undefined) return;
+    (i: number): void => {
       const row = Math.floor(i / cols);
       if (row === 0) scrollRef.current?.scrollTo({ top: 0 });
       else virtualizer.scrollToIndex(row, { align: "start" });
     },
-    [letters, cols, scrollRef, virtualizer],
+    [cols, scrollRef, virtualizer],
   );
-  // Lettre courante : celle de la première rangée visible.
+  // Entrée courante : la dernière dont le premier artiste est au plus sur la première rangée visible
+  // (les index du rail croissent : « # » de tête, A–Z, « # » de fin).
   const firstRow = Math.max(0, Math.floor(((virtualizer.scrollOffset ?? 0) - scrollMargin + 8) / rowHeight));
-  const activeLetter = artistInitial(artists[Math.min(artists.length - 1, firstRow * cols)]?.name ?? "");
+  const firstVisible = Math.min(artists.length - 1, firstRow * cols);
+  let activeEntry = -1;
+  rail.forEach((r, k) => {
+    if (r.index !== null && r.index <= firstVisible) activeEntry = k;
+  });
 
   return (
     <div className="artists-grid-wrap">
-      <AlphaRail scrollRef={scrollRef} letters={letters} active={activeLetter} onJump={jumpTo} />
+      <AlphaRail scrollRef={scrollRef} entries={rail} active={activeEntry} onJump={jumpTo} />
       <div
         ref={wrapperRef}
         className="album-grid artist-grid"
@@ -232,6 +260,7 @@ function ArtistGrid({
         aria-label="Artistes"
         style={{ height: Math.max(0, virtualizer.getTotalSize() - GAP_Y) }}
         onKeyDown={onGridKeyDown}
+        onFocus={onGridFocus}
       >
         {rows.map((row) => {
           const start = row.index * cols;
@@ -252,6 +281,7 @@ function ArtistGrid({
                   <ArtistTile
                     artist={artist}
                     index={start + i}
+                    tabbable={start + i === tabIndexStop}
                     playing={currentAlbumId !== null && artist.albums.some((a) => a.id === currentAlbumId)}
                     onPlay={onPlay}
                     onContextMenu={onContextMenu}
@@ -273,6 +303,8 @@ interface ArtistTileProps {
   artist: ArtistGroup;
   /** Position dans la grille (navigation aux flèches). */
   index: number;
+  /** Seule tuile dans l'ordre de tabulation (tabulation itinérante). */
+  tabbable: boolean;
   /** Un de ses albums contient le titre en cours. */
   playing: boolean;
   onPlay(artist: ArtistGroup): void;
@@ -280,16 +312,15 @@ interface ArtistTileProps {
   enterIndex: number | null;
 }
 
-/** Libellé sous le nom : « 3 albums » ; un seul album → « 12 titres ». */
-export function artistCountLabel(artist: Pick<ArtistGroup, "albums" | "trackCount">): string {
-  const n = artist.albums.length;
-  if (n > 1) return `${n} albums`;
+/** Libellé sous le nom : toujours la même unité, « 12 titres ». */
+export function artistCountLabel(artist: Pick<ArtistGroup, "trackCount">): string {
   return `${artist.trackCount} ${artist.trackCount > 1 ? "titres" : "titre"}`;
 }
 
 const ArtistTile = memo(function ArtistTile({
   artist,
   index,
+  tabbable,
   playing,
   onPlay,
   onContextMenu,
@@ -327,7 +358,7 @@ const ArtistTile = memo(function ArtistTile({
     <div
       className={`artist-tile${playing ? " is-playing" : ""}${enterIndex !== null && m.enabled ? " is-entering" : ""}`}
       style={style}
-      tabIndex={0}
+      tabIndex={tabbable ? 0 : -1}
       role="group"
       data-ai={index}
       aria-label={`${artist.name}, ${count}`}
@@ -360,7 +391,7 @@ const ArtistTile = memo(function ArtistTile({
             <Equalizer />
           </span>
         )}
-        <ArtistPlayButton artist={artist} current={playing} onPlay={onPlay} />
+        <ArtistPlayButton artist={artist} onPlay={onPlay} />
       </div>
       <div className="artist-tile__meta">
         <div className="artist-tile__name" title={artist.name}>
@@ -372,25 +403,26 @@ const ArtistTile = memo(function ArtistTile({
   );
 });
 
-/** Bouton lecture de l'avatar ; « pause » quand la file en cours est celle de l'artiste. */
+/**
+ * Bouton lecture de l'avatar : « Pause » ssi le lecteur joue la file de CET artiste — quel que soit
+ * l'album du titre courant (une apparition compte aussi) ; le clic fait alors pause, sinon lit.
+ */
 function ArtistPlayButton({
   artist,
-  current,
   onPlay,
 }: {
   artist: ArtistGroup;
-  current: boolean;
   onPlay(artist: ArtistGroup): void;
 }): JSX.Element {
-  // Seule une tuile « en cours » s'abonne au statut et à la file.
-  const playing = usePlayer((s) => current && s.status === "playing");
-  const queue = usePlayer((s) => (current ? s.queue : null));
-  // `queue` en dépendance : recalcul quand la file change.
-  const isOwnQueue = useMemo(
-    () => (current && queue ? isQueue(artistQueueOf(artist.name)) : false),
-    [current, queue, artist.name],
+  const playing = usePlayer((s) => s.status === "playing");
+  const queue = usePlayer((s) => s.queue);
+  const albums = useLibrary((s) => s.albums);
+  const grouped = useSettings((s) => s.groupVersions);
+  // Recalcul seulement quand la file, la bibliothèque ou le regroupement changent (pas à chaque frame).
+  const showPause = useMemo(
+    () => playing && queue.length > 0 && artistShowsPause(queue, playing, artistQueueOf(artist.name)),
+    [playing, queue, albums, grouped, artist.name],
   );
-  const showPause = playing && isOwnQueue;
   const Icon = showPause ? Pause : Play;
   return (
     <button
@@ -419,42 +451,44 @@ function ArtistPlayButton({
  */
 function AlphaRail({
   scrollRef,
-  letters,
+  entries,
   active,
   onJump,
 }: {
   scrollRef: React.RefObject<HTMLElement>;
-  letters: ReadonlyMap<string, number>;
-  active: string;
-  onJump(letter: string): void;
+  entries: readonly RailEntry[];
+  /** Rang de l'entrée courante dans `entries` (-1 : aucune). */
+  active: number;
+  onJump(index: number): void;
 }): JSX.Element | null {
   const [height, setHeight] = useState(0);
   const railRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef<string | null>(null);
+  const dragging = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
     if (!scroller) return;
-    const update = (): void => setHeight(Math.min(ALPHABET.length * RAIL_STEP, scroller.clientHeight - 140));
+    const update = (): void => setHeight(Math.min(entries.length * RAIL_STEP, scroller.clientHeight - 140));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(scroller);
     return () => ro.disconnect();
-  }, [scrollRef]);
+  }, [scrollRef, entries.length]);
 
   if (height < RAIL_MIN_H) return null;
 
-  const letterAt = (clientY: number): string | null => {
+  const entryAt = (clientY: number): number | null => {
     const r = railRef.current?.getBoundingClientRect();
-    if (!r) return null;
-    const i = Math.floor(((clientY - r.top) / r.height) * ALPHABET.length);
-    return ALPHABET[Math.max(0, Math.min(ALPHABET.length - 1, i))] ?? null;
+    if (!r || r.height <= 0) return null;
+    const k = Math.floor(((clientY - r.top) / r.height) * entries.length);
+    return Math.max(0, Math.min(entries.length - 1, k));
   };
   const scrub = (clientY: number): void => {
-    const l = letterAt(clientY);
-    if (!l || l === dragging.current) return;
-    dragging.current = l;
-    if (letters.has(l)) onJump(l);
+    const k = entryAt(clientY);
+    if (k === null || k === dragging.current) return;
+    dragging.current = k;
+    const target = entries[k]?.index;
+    if (target !== null && target !== undefined) onJump(target);
   };
 
   return (
@@ -480,20 +514,17 @@ function AlphaRail({
           dragging.current = null;
         }}
       >
-        {ALPHABET.map((l) => {
-          const has = letters.has(l);
-          return (
-            // Hors tabulation : au clavier, taper une lettre dans la grille y saute déjà. Pas de
-            // `disabled` (il avalerait le glisser commencé sur une lettre vide).
-            <span
-              key={l}
-              className={`alpha-rail__l${l === active ? " is-active" : ""}${has ? "" : " is-empty"}`}
-              aria-hidden="true"
-            >
-              {l}
-            </span>
-          );
-        })}
+        {entries.map((entry, k) => (
+          // Hors tabulation : au clavier, taper une lettre dans la grille y saute déjà. Pas de
+          // `disabled` (il avalerait le glisser commencé sur une lettre vide).
+          <span
+            key={`${entry.label}-${k}`}
+            className={`alpha-rail__l${k === active ? " is-active" : ""}${entry.index === null ? " is-empty" : ""}`}
+            aria-hidden="true"
+          >
+            {entry.label}
+          </span>
+        ))}
       </div>
     </div>
   );

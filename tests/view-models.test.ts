@@ -10,6 +10,9 @@ import {
   artistKey,
   artistPage,
   artistQueue,
+  artistRail,
+  artistShowsPause,
+  buildArtistIndex,
   canResume,
   creditedArtists,
   arrangeAlbums,
@@ -695,5 +698,135 @@ describe("sameTrackList", () => {
     expect(sameTrackList(a, [track(2), track(1)])).toBe(false);
     expect(sameTrackList(a, [track(1)])).toBe(false);
     expect(sameTrackList([], [])).toBe(false);
+  });
+});
+
+/* ------------------------------- Tâche 8 : vague de corrections ------------------------------- */
+
+describe("crédits : parenthèses, « feat. » collé, x minuscule, noms à séparateurs", () => {
+  it("« (feat. X) » et « [ft. X] » : découpés, crochets retirés", () => {
+    expect(creditedArtists("Tiakola (feat. Ridsa)")).toEqual(["tiakola", "ridsa"]);
+    expect(creditedArtists("Tiakola [ft. Ridsa]")).toEqual(["tiakola", "ridsa"]);
+    expect(creditedArtists("LiSA feat. Felix of Stray Kids")).toEqual(["lisa", "felix of stray kids"]);
+    expect(creditedArtists("Timbaland featuring Tyssem")).toEqual(["timbaland", "tyssem"]);
+  });
+
+  it("« feat.X » sans espace après le point", () => {
+    expect(creditedArtists("Booba feat.Ninho")).toEqual(["booba", "ninho"]);
+    expect(creditedArtists("Booba FT.Ninho")).toEqual(["booba", "ninho"]);
+  });
+
+  it("« x » ne sépare qu'en minuscule (« DJ X », « Lil Nas X » restent entiers)", () => {
+    expect(creditedArtists("DJ X x Ico")).toEqual(["dj x", "ico"]);
+    expect(creditedArtists("Lil Nas X & Jack Harlow")).toEqual(["lil nas x", "jack harlow"]);
+    expect(creditedArtists("Coldplay X BTS")).toEqual(["coldplay x bts"]);
+  });
+
+  it("un nom à « , » / « & » correspond en entier (suite de crédits recollée)", () => {
+    const tracks = [
+      track(1, { artist: "Above & Beyond feat. Zoë Johnston" }),
+      track(2, { artist: "Tyler, The Creator" }),
+      track(3, { artist: "Tyler" }),
+    ];
+    expect(artistCredits(tracks, "Above & Beyond").map((t) => t.id)).toEqual([1]);
+    expect(artistCredits(tracks, "Zoe Johnston").map((t) => t.id)).toEqual([1]);
+    expect(artistCredits(tracks, "Tyler, The Creator").map((t) => t.id)).toEqual([2]);
+  });
+
+  it("avec l'index de la bibliothèque : « Tyler, The Creator » est UN artiste (pas « Tyler »)", () => {
+    const albums = [
+      album(1, "IGOR", "Tyler, The Creator", [track(1, { albumId: 1, artist: "Tyler, The Creator" })]),
+      album(2, "Solo", "Dadju", [track(2, { albumId: 2, artist: "Dadju" })]),
+    ];
+    const index = buildArtistIndex(albums);
+    expect(creditedArtists("Tyler, The Creator", index)).toEqual(["tyler, the creator"]);
+    expect(artistCredits(albums.flatMap((a) => a.tracks), "Tyler", index)).toEqual([]);
+    expect(groupArtists(albums).map((g) => g.name)).toEqual(["Dadju", "Tyler, The Creator"]);
+    // Une vraie collaboration (une des parties est un artiste solo) reste découpée.
+    expect(creditedArtists("Tyler & Dadju", index)).toEqual(["tyler", "dadju"]);
+    // Duo sans artiste solo mais sans suffixe « The … » : une collaboration, découpée.
+    expect(creditedArtists("Marshmello & Bastille", index)).toEqual(["marshmello", "bastille"]);
+    expect(creditedArtists("Joan Jett & The Blackhearts", index)).toEqual(["joan jett & the blackhearts"]);
+  });
+});
+
+describe("groupArtists : collaborations repliées sur l'artiste principal, accents", () => {
+  const weeknd = album(1, "Starboy", "The Weeknd", [track(1, { albumId: 1, artist: "The Weeknd" })]);
+  const collab = album(2, "You Right", "Doja Cat & The Weeknd", [
+    track(2, { albumId: 2, artist: "Doja Cat & The Weeknd" }),
+  ]);
+  const moon = album(3, "Solo", "2ndMoonx", [track(3, { albumId: 3, artist: "2ndMoonx" })]);
+  const moonCollab = album(4, "Trio", "2ndMoonx, ANMANE & HERMI", [
+    track(4, { albumId: 4, artist: "2ndMoonx, ANMANE & HERMI" }),
+    track(5, { albumId: 4, artist: "2ndMoonx, ANMANE & HERMI" }),
+  ]);
+  const band = album(5, "Legend", "Bob Marley & The Wailers", [
+    track(6, { albumId: 5, artist: "Bob Marley & The Wailers" }),
+  ]);
+  const all = [weeknd, collab, moon, moonCollab, band];
+
+  it("une collaboration n'a pas sa propre tuile : elle rejoint son artiste principal", () => {
+    const groups = groupArtists(all);
+    expect(groups.map((g) => [g.name, g.albums.map((a) => a.id)])).toEqual([
+      ["2ndMoonx", [3, 4]],
+      ["Bob Marley & The Wailers", [5]],
+      ["Doja Cat", [2]],
+      ["The Weeknd", [1]],
+    ]);
+    expect(groups[0]!.trackCount).toBe(3);
+  });
+
+  it("page : l'album collaboratif est dans les Albums du principal, « Apparaît sur » des autres", () => {
+    expect(artistPage(all, "2ndMoonx").albums.map((a) => a.id).sort()).toEqual([3, 4]);
+    const anmane = artistPage(all, "ANMANE");
+    expect(anmane.albums).toEqual([]);
+    expect(anmane.appearsOn.map((a) => a.id)).toEqual([4]);
+    expect(anmane.tracks.map((t) => t.id)).toEqual([4, 5]);
+    expect(artistPage(all, "The Weeknd").appearsOn.map((a) => a.id)).toEqual([2]);
+    // Le lien « artiste » d'un album collaboratif mène à la page de son artiste principal.
+    expect(artistPage(all, "2ndMoonx, ANMANE & HERMI").name).toBe("2ndMoonx");
+  });
+
+  it("clé insensible aux accents : « Beyonce » et « Beyoncé » ensemble", () => {
+    const a = album(10, "A", "Beyoncé", [track(10)]);
+    const b = album(11, "B", "beyonce", [track(11)]);
+    expect(groupArtists([a, b]).map((g) => [g.name, g.albums.length])).toEqual([["Beyoncé", 2]]);
+    expect(artistKey("Beyoncé")).toBe(artistKey("BEYONCE"));
+    expect(artistPage([a, b], "Beyonce").albums).toHaveLength(2);
+  });
+});
+
+describe("artistRail", () => {
+  it("« # » là où ces noms se trient : en tête (chiffres) et/ou en fin (autres écritures)", () => {
+    const rail = artistRail(["2ndMoonx", "Aya", "Bxkq", "Zed", "米津玄師"]);
+    expect(rail[0]).toEqual({ label: "#", index: 0 });
+    expect(rail.at(-1)).toEqual({ label: "#", index: 4 });
+    expect(rail.find((r) => r.label === "A")!.index).toBe(1);
+    expect(rail.find((r) => r.label === "C")!.index).toBeNull();
+    expect(rail).toHaveLength(28);
+  });
+
+  it("sans nom hors A–Z en fin : un seul « # » (en tête)", () => {
+    const rail = artistRail(["*NSYNC", "Aya"]);
+    expect(rail.filter((r) => r.label === "#")).toEqual([{ label: "#", index: 0 }]);
+    expect(rail).toHaveLength(27);
+  });
+
+  it("seulement des noms non latins en fin : « # » en bas", () => {
+    const rail = artistRail(["Aya", "米津玄師"]);
+    expect(rail[0]!.label).toBe("A");
+    expect(rail.at(-1)).toEqual({ label: "#", index: 1 });
+  });
+});
+
+describe("artistShowsPause", () => {
+  it("dépend de la file (même un titre « Apparaît sur »), pas de l'album courant", () => {
+    const own = album(1, "Solo", "Ridsa", [track(1, { albumId: 1, artist: "Ridsa", addedAtMs: 20 })]);
+    const other = album(2, "Mélo", "Tiakola", [track(2, { albumId: 2, artist: "Tiakola feat. Ridsa", addedAtMs: 10 })]);
+    const list = artistQueue(artistPage([own, other], "Ridsa").tracks, true);
+    expect(list.map((t) => t.id)).toEqual([2, 1]); // la file commence par l'apparition
+    expect(artistShowsPause(list, true, list)).toBe(true);
+    expect(artistShowsPause(list, false, list)).toBe(false);
+    expect(artistShowsPause([list[1]!], true, list)).toBe(false);
   });
 });

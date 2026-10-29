@@ -269,7 +269,7 @@
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: color-mix(in oklch, oklch(from var(--top-tint, #000) min(l, 0.56) calc(c * 1.45) h) 82%, #000);
+  background: color-mix(in oklch, oklch(from var(--top-tint, #000) min(l, 0.5) min(c, 0.17) h) 54%, #000);
   opacity: 0;
   transition: opacity 0.45s ease;
 }

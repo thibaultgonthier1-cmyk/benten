@@ -12,7 +12,7 @@ import type { DiagEntry } from "../../shared/diagnostics";
  */
 
 export type CommandOrigin = "ui" | "shortcut" | "media-session" | "system";
-export type TransportCmd = "play" | "pause" | "toggle" | "next" | "prev" | "seek";
+export type TransportCmd = "play" | "pause" | "toggle" | "next" | "prev" | "seek" | "jump";
 
 type Journal = (entry: DiagEntry) => void;
 let active: Journal | null = null;
@@ -41,6 +41,17 @@ export function journalCommand(cmd: TransportCmd, origin: CommandOrigin, extra?:
   } catch {
     /* journal best-effort : jamais d'effet sur la lecture */
   }
+}
+
+/** Saut vers la piste `index` de la file (panneau File d'attente), consigné puis exécuté tel quel. */
+export function jumpWithOrigin(
+  store: { getState(): { status: string; jumpTo(index: number): void } },
+  index: number,
+  origin: CommandOrigin,
+): void {
+  const s = store.getState();
+  journalCommand("jump", origin, { status: s.status, index });
+  s.jumpTo(index);
 }
 
 let quietDepth = 0;
