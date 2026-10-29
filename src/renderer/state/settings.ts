@@ -3,7 +3,8 @@ import { useStore } from "zustand";
 import type { MotionIntensity } from "../theme/ds/motion";
 
 /**
- * Réglages d'interface (Phase 3) : intensité du mouvement et affichage de l'intro au lancement.
+ * Réglages d'interface (Phase 3) : intensité du mouvement, affichage de l'intro au lancement et
+ * regroupement des versions dans la vue Titres.
  *
  * Persistés dans le magasin clé/valeur `app_state` (IPC `window.benten.state`) sous la clé
  * `"settings"`, en JSON. Chaque changement est écrit aussitôt (best-effort, jamais bloquant) ;
@@ -17,16 +18,20 @@ export const SETTINGS_KEY = "settings";
 export interface PersistedSettings {
   motionIntensity: MotionIntensity;
   showIntro: boolean;
+  /** Vue Titres : regroupe les versions d'un même morceau sous l'original (Tâche 7). */
+  groupVersions: boolean;
 }
 
 export const DEFAULT_SETTINGS: Readonly<PersistedSettings> = Object.freeze({
   motionIntensity: "full",
   showIntro: true,
+  groupVersions: true,
 });
 
 export interface SettingsState extends PersistedSettings {
   setMotionIntensity(intensity: MotionIntensity): void;
   setShowIntro(show: boolean): void;
+  setGroupVersions(on: boolean): void;
   /** Lit la clé `"settings"` d'`app_state` et l'applique (no-op hors fenêtre, ne lève jamais). */
   load(): Promise<void>;
 }
@@ -44,7 +49,11 @@ const isIntensity = (v: unknown): v is MotionIntensity =>
 
 /** Sérialise uniquement les champs persistés (ordre de clés stable). */
 export function serializeSettings(s: PersistedSettings): string {
-  return JSON.stringify({ motionIntensity: s.motionIntensity, showIntro: s.showIntro });
+  return JSON.stringify({
+    motionIntensity: s.motionIntensity,
+    showIntro: s.showIntro,
+    groupVersions: s.groupVersions,
+  });
 }
 
 /**
@@ -67,6 +76,9 @@ export function restoreSettings(raw: string): PersistedSettings {
       ? o.motionIntensity
       : DEFAULT_SETTINGS.motionIntensity,
     showIntro: typeof o.showIntro === "boolean" ? o.showIntro : DEFAULT_SETTINGS.showIntro,
+    // Clé absente (réglages d'une version antérieure) ou invalide → défaut (regroupé).
+    groupVersions:
+      typeof o.groupVersions === "boolean" ? o.groupVersions : DEFAULT_SETTINGS.groupVersions,
   };
 }
 
@@ -99,6 +111,10 @@ export function createSettingsStore(
       set({ showIntro: show === true });
     },
 
+    setGroupVersions(on) {
+      set({ groupVersions: on === true });
+    },
+
     async load() {
       const api = getApi();
       if (!api) return;
@@ -121,7 +137,13 @@ export function createSettingsStore(
   // Persistance automatique : chaque changement d'un champ persisté est écrit aussitôt.
   store.subscribe((next, prev) => {
     if (hydrating) return;
-    if (next.motionIntensity === prev.motionIntensity && next.showIntro === prev.showIntro) return;
+    if (
+      next.motionIntensity === prev.motionIntensity &&
+      next.showIntro === prev.showIntro &&
+      next.groupVersions === prev.groupVersions
+    ) {
+      return;
+    }
     const api = getApi();
     if (!api) return;
     try {

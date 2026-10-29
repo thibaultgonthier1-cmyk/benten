@@ -1,5 +1,5 @@
 import type React from "react";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { Heart, Pause, Play } from "lucide-react";
 import type { TrackRow } from "../../shared/types";
 import { formatTime } from "../lib/library";
@@ -19,8 +19,11 @@ export interface TrackRowItemProps {
   selected: boolean;
   /** Lecture (double-clic, Entrée, bouton du survol). Sur le titre courant : bascule lecture/pause. */
   onPlay(track: TrackRow, index: number): void;
-  /** Clic simple : sélection. */
-  onSelect?(track: TrackRow, index: number): void;
+  /**
+   * Clic simple : sélection. L'événement (clic ou clic droit) donne les modificateurs Ctrl / Maj
+   * aux listes à sélection multiple.
+   */
+  onSelect?(track: TrackRow, index: number, e: React.MouseEvent<HTMLElement>): void;
   onContextMenu?(track: TrackRow, e: React.MouseEvent<HTMLElement>): void;
   /** Glissable vers une playlist / la file (défaut : oui). */
   draggable?: boolean;
@@ -35,6 +38,16 @@ export interface TrackRowItemProps {
   tabbable?: boolean;
   /** La ligne reçoit le focus (la liste y déplace son arrêt de tabulation). */
   onFocusRow?(track: TrackRow): void;
+  /** Ids glissés (ex. toute la sélection) ; défaut : ce seul titre. */
+  getDragIds?(track: TrackRow): readonly number[];
+  /** Pastilles / contrôles affichés après le titre (versions, chevron…). */
+  titleAddon?: ReactNode;
+  /** Libellé affiché à la place du titre (sous-ligne de version) ; info-bulle = titre complet. */
+  displayTitle?: string;
+  /** N° masqué (sous-ligne) ; l'équaliseur et le bouton lecture restent. */
+  hideNumber?: boolean;
+  /** Classe supplémentaire sur la ligne. */
+  className?: string;
 }
 
 /** Déplace le focus vers la ligne voisine (`dir` ±1) ou vers la première / dernière (`"first"`/`"last"`). */
@@ -65,6 +78,11 @@ function TrackRowItemImpl({
   number,
   tabbable = true,
   onFocusRow,
+  getDragIds,
+  titleAddon,
+  displayTitle,
+  hideNumber = false,
+  className,
 }: TrackRowItemProps): JSX.Element {
   const favorite = usePlayer((s) => s.favoriteIds.has(track.id));
   const statusPlaying = usePlayer((s) => playing && s.status === "playing");
@@ -92,7 +110,8 @@ function TrackRowItemImpl({
         (showAlbum ? "" : " no-album") +
         (playing ? " is-playing" : "") +
         (selected ? " is-selected" : "") +
-        (unplayable ? " is-unplayable" : "")
+        (unplayable ? " is-unplayable" : "") +
+        (className ? ` ${className}` : "")
       }
       data-track-row=""
       role="listitem"
@@ -102,22 +121,28 @@ function TrackRowItemImpl({
       aria-current={playing ? "true" : undefined}
       data-selected={selected || undefined}
       draggable={draggable}
-      onDragStart={draggable ? (e) => setDragTracks(e.dataTransfer, [track.id]) : undefined}
-      onClick={() => onSelect?.(track, index)}
+      onDragStart={
+        draggable ? (e) => setDragTracks(e.dataTransfer, getDragIds ? getDragIds(track) : [track.id]) : undefined
+      }
+      onClick={(e) => onSelect?.(track, index, e)}
       onDoubleClick={() => onPlay(track, index)}
       onKeyDown={onKeyDown}
       onContextMenu={
         onContextMenu
           ? (e) => {
               e.preventDefault();
-              onSelect?.(track, index);
+              onSelect?.(track, index, e);
               onContextMenu(track, e);
             }
           : undefined
       }
     >
       <div className="track-row__num num">
-        {playing ? <Equalizer className="track-row__eq" /> : <span className="track-row__n">{number ?? index + 1}</span>}
+        {playing ? (
+          <Equalizer className="track-row__eq" />
+        ) : hideNumber ? null : (
+          <span className="track-row__n">{number ?? index + 1}</span>
+        )}
         <button
           type="button"
           tabIndex={-1}
@@ -133,9 +158,18 @@ function TrackRowItemImpl({
           <PlayIcon size={15} strokeWidth={0} fill="currentColor" aria-hidden />
         </button>
       </div>
-      <div className="track-row__title" title={track.title}>
-        {track.title}
-      </div>
+      {titleAddon ? (
+        <div className="track-row__title has-addon">
+          <span className="track-row__title-text" title={track.title}>
+            {displayTitle ?? track.title}
+          </span>
+          {titleAddon}
+        </div>
+      ) : (
+        <div className="track-row__title" title={track.title}>
+          {displayTitle ?? track.title}
+        </div>
+      )}
       <div className="track-row__artist">
         {track.artist ? (
           <button

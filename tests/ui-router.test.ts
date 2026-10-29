@@ -244,3 +244,27 @@ describe("préférences de la grille d'albums", () => {
     expect(s.getState().albumsView).toEqual({ sort: "artist", losslessOnly: true });
   });
 });
+
+describe("vue Titres : tri et groupes dépliés", () => {
+  it("défaut « Ajouté », du plus ancien au plus récent ; même colonne → inverse ; autre → croissant", () => {
+    const s = createUiStore();
+    expect(s.getState().tracksView).toEqual({ sort: "added", dir: "asc" });
+    s.getState().sortTracksBy("added");
+    expect(s.getState().tracksView).toEqual({ sort: "added", dir: "desc" });
+    s.getState().sortTracksBy("duration");
+    expect(s.getState().tracksView).toEqual({ sort: "duration", dir: "asc" });
+    s.getState().navigate({ name: "album", id: 1 });
+    s.getState().back();
+    expect(s.getState().tracksView.sort).toBe("duration");
+  });
+
+  it("toggleTracksExpanded déplie puis replie (nouvel ensemble à chaque fois)", () => {
+    const s = createUiStore();
+    const before = s.getState().tracksExpanded;
+    s.getState().toggleTracksExpanded(42);
+    expect(s.getState().tracksExpanded.has(42)).toBe(true);
+    expect(before.has(42)).toBe(false);
+    s.getState().toggleTracksExpanded(42);
+    expect(s.getState().tracksExpanded.has(42)).toBe(false);
+  });
+});

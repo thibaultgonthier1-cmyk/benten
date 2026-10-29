@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   albumMenuItems,
+  selectionMenuItems,
   trackMenuItems,
   type AlbumMenuActions,
+  type SelectionMenuActions,
   type TrackMenuActions,
 } from "../src/renderer/shell/albumMenu";
 import { toastStore } from "../src/renderer/ui/toastStore";
@@ -171,5 +173,71 @@ describe("trackMenuItems", () => {
     byLabel(sub, "Nuit").onSelect!();
     expect(a.newPlaylist).toHaveBeenCalledWith([t], "t3");
     expect(a.addToPlaylist).toHaveBeenCalledWith(playlists[0], [t]);
+  });
+});
+
+describe("selectionMenuItems (vue Titres)", () => {
+  function sActions() {
+    return {
+      play: vi.fn<(t: TrackRow) => void>(),
+      playTracks: vi.fn<(t: readonly TrackRow[]) => void>(),
+      playNext: vi.fn<(t: readonly TrackRow[]) => void>(),
+      addToQueue: vi.fn<(t: readonly TrackRow[]) => void>(),
+      newPlaylist: vi.fn<(t: readonly TrackRow[], label: string) => void>(),
+      addToPlaylist: vi.fn<(p: { id: number; name: string }, t: readonly TrackRow[]) => void>(),
+      toggleFavorite: vi.fn<(id: number) => void>(),
+      goToAlbum: vi.fn<(albumId: number) => void>(),
+      goToArtist: vi.fn<(artist: string) => void>(),
+    } satisfies SelectionMenuActions;
+  }
+
+  it("un seul titre : menu d'un titre ; « Lire toutes les versions » pour un lead regroupé", () => {
+    const a = sActions();
+    const lead = tr(3);
+    const versions = [tr(5), tr(8)];
+    const items = selectionMenuItems([lead], a, new Set(), playlists, { versions });
+    expect(labels(items).slice(0, 3)).toEqual(["Lire", "Lire toutes les versions", "Lire ensuite"]);
+    byLabel(items, "Lire toutes les versions").onSelect!();
+    expect(a.playTracks).toHaveBeenCalledWith([lead, ...versions]);
+    // Sans versions : exactement le menu d'un titre.
+    expect(labels(selectionMenuItems([lead], a, new Set(), playlists))).not.toContain("Lire toutes les versions");
+  });
+
+  it("plusieurs titres : actions sur toute la sélection, libellés au pluriel", () => {
+    const a = sActions();
+    const sel = [tr(1), tr(2), tr(4)];
+    const items = selectionMenuItems(sel, a, new Set([2]), playlists);
+    expect(labels(items)).toEqual([
+      "Lire",
+      "Lire ensuite",
+      "Ajouter à la file",
+      "—",
+      "Ajouter à une playlist",
+      "Ajouter aux favoris",
+    ]);
+    byLabel(items, "Lire").onSelect!();
+    byLabel(items, "Lire ensuite").onSelect!();
+    byLabel(items, "Ajouter à la file").onSelect!();
+    byLabel(items, "Ajouter aux favoris").onSelect!();
+    expect(a.playTracks).toHaveBeenCalledWith(sel);
+    expect(a.playNext).toHaveBeenCalledWith(sel);
+    expect(a.addToQueue).toHaveBeenCalledWith(sel);
+    // Seuls les titres non favoris sont marqués.
+    expect(a.toggleFavorite.mock.calls.map((c) => c[0])).toEqual([1, 4]);
+    expect(toastMessages()).toEqual([
+      "3 titres seront lus ensuite",
+      "3 titres ajoutés à la file",
+      "3 titres ajoutés aux favoris",
+    ]);
+    const sub = byLabel(items, "Ajouter à une playlist").submenu!;
+    byLabel(sub, "Route").onSelect!();
+    expect(a.addToPlaylist).toHaveBeenCalledWith(playlists[1], sel);
+  });
+
+  it("tous favoris → « Retirer des favoris » les retire tous", () => {
+    const a = sActions();
+    const items = selectionMenuItems([tr(1), tr(2)], a, new Set([1, 2]), playlists);
+    byLabel(items, "Retirer des favoris").onSelect!();
+    expect(a.toggleFavorite.mock.calls.map((c) => c[0])).toEqual([1, 2]);
   });
 });

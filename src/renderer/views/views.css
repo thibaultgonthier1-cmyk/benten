@@ -379,3 +379,308 @@
     animation: none;
   }
 }
+
+/* ============================================================
+   Vue Titres (Tâche 7) : liste virtualisée, en-tête de colonnes collant et triable, versions
+   d'un même morceau repliées sous l'original. Seuls transform/opacity sont animés.
+   ============================================================ */
+.tracks-view {
+  position: relative;
+  --tv-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* En-tête de colonnes : mêmes colonnes que `.track-row`, collé sous la barre du haut. */
+.tracks-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) 40px 56px;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  margin: 0 calc(-1 * var(--page-x));
+  padding: 0 calc(var(--page-x) + 12px) 0 calc(var(--page-x) + 8px);
+  background: var(--bg, #000);
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+/* Fondu sous l'en-tête collant : les lignes y glissent sans arête nette. */
+.tracks-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 14px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent);
+  pointer-events: none;
+}
+.tracks-head__col {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.tracks-head__label {
+  display: inline-flex;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tracks-head__col:hover,
+.tracks-head__col.is-active {
+  color: var(--text);
+}
+.tracks-head__col:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.tracks-head__num {
+  justify-content: center;
+  gap: 3px;
+  letter-spacing: 0;
+}
+.tracks-head__dur {
+  justify-content: flex-start;
+  flex-direction: row-reverse;
+}
+
+/* Flèche de tri : apparaît sur la colonne active, pivote d'un demi-tour au changement de sens. */
+.sort-arrow {
+  flex: none;
+  opacity: 0;
+  transform: translateY(3px) scale(0.7);
+  transition:
+    opacity 0.18s ease,
+    transform 0.32s var(--tv-ease);
+}
+.tracks-head__col:hover .sort-arrow {
+  opacity: 0.4;
+  transform: none;
+}
+.tracks-head__col.is-active .sort-arrow {
+  opacity: 1;
+  color: var(--accent);
+  transform: none;
+}
+.tracks-head__col.is-active.is-desc .sort-arrow {
+  transform: rotate(180deg);
+}
+.sort-chip .sort-arrow {
+  opacity: 1;
+  transform: none;
+}
+.sort-chip.is-desc .sort-arrow {
+  transform: rotate(180deg);
+}
+
+/* Liste virtualisée : chaque ligne est positionnée en translateY dans un conteneur de la hauteur
+   totale. Pendant un dépli / repli (et seulement alors), les lignes glissent vers leur place. */
+.tracks-list {
+  position: relative;
+  margin-top: 4px;
+  user-select: none;
+}
+.tracks-vrow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 1;
+}
+.tracks-list.is-animating .tracks-vrow {
+  transition: transform var(--tv-dur) var(--tv-ease);
+}
+/* Version dépliée : entre en fondu en descendant de sous son lead (cascade brève). */
+.tracks-vrow.is-entering .tracks-vrow__in {
+  animation: version-in var(--tv-dur) var(--tv-ease) both;
+  animation-delay: calc(min(var(--sub, 1), 6) * 22ms);
+}
+@keyframes version-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Version repliée : s'efface en remontant sous son lead, sous les lignes qui remontent. */
+.tracks-vrow.is-leaving {
+  z-index: 0;
+  pointer-events: none;
+}
+.tracks-vrow.is-leaving .tracks-vrow__in {
+  opacity: 0;
+  transition: opacity calc(var(--tv-dur) * 0.6) ease;
+}
+
+/* Sous-ligne de version : plus basse, indentée, reliée au lead par un filet d'arborescence
+   (sur la ligne : la cellule du titre rogne son contenu). Colonne du titre : 8 + 40 + 12 px. */
+.track-row.is-version {
+  position: relative;
+  height: 46px;
+  font-size: 13px;
+}
+.track-row.is-version .track-row__title {
+  padding-left: 24px;
+  color: var(--text-dim);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+.track-row.is-version::before,
+.track-row.is-version::after {
+  content: "";
+  position: absolute;
+  left: 68px;
+  pointer-events: none;
+}
+.track-row.is-version::before {
+  top: -10px;
+  height: 33px;
+  width: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom-left-radius: 7px;
+}
+.track-row.is-version::after {
+  top: 23px;
+  bottom: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+}
+.track-row.is-version-last::after {
+  display: none;
+}
+.track-row.is-version.is-playing .track-row__title {
+  color: var(--accent);
+}
+
+/* Titre + pastilles : le titre se tronque, les pastilles restent entières. */
+.track-row__title.has-addon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.track-row__title-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* « +2 versions ⌄ » : pastille douce, l'accent quand le groupe est ouvert. */
+.version-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px 0 9px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+.version-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+.version-toggle.is-open {
+  color: var(--text);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(231, 60, 130, 0.45);
+}
+.version-toggle__chev {
+  transition: transform var(--tv-dur, 0.25s) var(--tv-ease);
+}
+.version-toggle.is-open .version-toggle__chev {
+  transform: rotate(180deg);
+}
+/* Tag de version (« Super Slowed ») : discret, au trait. */
+.version-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 72%;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.track-row.is-playing .version-tag {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(231, 60, 130, 0.45);
+}
+
+/* Squelette de chargement. */
+.tracks-skel {
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+}
+.tracks-skel__row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) 56px;
+  align-items: center;
+  justify-items: start;
+  gap: 12px;
+  height: 52px;
+  padding: 0 12px 0 8px;
+}
+.tracks-skel__row > :first-child {
+  justify-self: center;
+}
+.tracks-skel__row > :last-child {
+  justify-self: end;
+}
+
+/* Mouvement réduit : aucune transition ni animation (le dépli est instantané). */
+:root[data-motion="reduced"] .sort-arrow,
+:root[data-motion="reduced"] .version-toggle__chev,
+:root[data-motion="reduced"] .tracks-list.is-animating .tracks-vrow,
+:root[data-motion="reduced"] .tracks-vrow.is-leaving .tracks-vrow__in {
+  transition: none;
+}
+:root[data-motion="reduced"] .tracks-vrow.is-entering .tracks-vrow__in {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sort-arrow,
+  .version-toggle__chev,
+  .tracks-list.is-animating .tracks-vrow,
+  .tracks-vrow.is-leaving .tracks-vrow__in {
+    transition: none;
+  }
+  .tracks-vrow.is-entering .tracks-vrow__in {
+    animation: none;
+  }
+}

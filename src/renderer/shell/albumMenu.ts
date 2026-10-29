@@ -201,3 +201,86 @@ export function trackMenuItems(
   });
   return items;
 }
+
+/** Actions du menu d'une sélection de titres (vue Titres). */
+export interface SelectionMenuActions extends TrackMenuActions {
+  /** Lit exactement ces titres, dans cet ordre (sélection multiple, toutes les versions). */
+  playTracks(tracks: readonly TrackRow[]): void;
+}
+
+/**
+ * Menu contextuel de la sélection de la vue Titres. Un seul titre : le menu d'un titre (+ « Lire
+ * toutes les versions » quand c'est un morceau regroupé dont `opts.versions` liste les versions).
+ * Plusieurs : Lire, Lire ensuite, Ajouter à la file, Ajouter à une playlist ▸, favori — sur toute
+ * la sélection, dans l'ordre affiché. Favori : « Retirer » si tous le sont, sinon « Ajouter » marque
+ * ceux qui ne le sont pas.
+ */
+export function selectionMenuItems(
+  tracks: readonly TrackRow[],
+  actions: SelectionMenuActions,
+  favoriteIds: ReadonlySet<number>,
+  playlists: readonly PlaylistTarget[] = [],
+  opts: { versions?: readonly TrackRow[] } = {},
+): MenuItem[] {
+  if (tracks.length === 1) {
+    const lead = tracks[0]!;
+    const items = trackMenuItems(lead, actions, favoriteIds, playlists);
+    const versions = opts.versions ?? [];
+    if (versions.length > 0) {
+      items.splice(1, 0, {
+        label: "Lire toutes les versions",
+        icon: ListMusic,
+        onSelect: () => actions.playTracks([lead, ...versions]),
+      });
+    }
+    return items;
+  }
+
+  const n = tracks.length;
+  const all = tracks.slice();
+  const allFav = all.every((t) => favoriteIds.has(t.id));
+  return [
+    { label: "Lire", icon: Play, disabled: n === 0, onSelect: () => actions.playTracks(all) },
+    {
+      label: "Lire ensuite",
+      icon: ListStart,
+      disabled: n === 0,
+      onSelect: () => {
+        actions.playNext(all);
+        toast(`${n} titres seront lus ensuite`, { icon: ListStart });
+      },
+    },
+    {
+      label: "Ajouter à la file",
+      icon: ListEnd,
+      disabled: n === 0,
+      onSelect: () => {
+        actions.addToQueue(all);
+        toast(`${n} titres ajoutés à la file`, { icon: ListEnd });
+      },
+    },
+    "separator",
+    {
+      label: "Ajouter à une playlist",
+      icon: ListPlus,
+      disabled: n === 0,
+      submenu: playlistSubmenu(
+        () => actions.newPlaylist(all, `${n} titres`),
+        (p) => actions.addToPlaylist(p, all),
+        playlists,
+      ),
+    },
+    {
+      label: allFav ? "Retirer des favoris" : "Ajouter aux favoris",
+      icon: allFav ? HeartOff : Heart,
+      disabled: n === 0,
+      onSelect: () => {
+        const targets = allFav ? all : all.filter((t) => !favoriteIds.has(t.id));
+        for (const t of targets) actions.toggleFavorite(t.id);
+        toast(allFav ? `${n} titres retirés des favoris` : `${n} titres ajoutés aux favoris`, {
+          icon: allFav ? HeartOff : Heart,
+        });
+      },
+    },
+  ];
+}

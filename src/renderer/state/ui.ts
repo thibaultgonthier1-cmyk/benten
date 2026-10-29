@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
-import type { AlbumSort } from "../lib/viewModels";
+import type { AlbumSort, SortDir, TrackSortKey } from "../lib/viewModels";
 
 /**
  * Store UI (Phase 3, Tâche 3) : routeur maison — route courante + historique précédent/suivant —
@@ -46,6 +46,15 @@ export interface AlbumsViewPrefs {
 
 export const DEFAULT_ALBUMS_VIEW: AlbumsViewPrefs = { sort: "added", losslessOnly: false };
 
+/** Tri de la vue Titres, conservé entre les pages pendant la session. */
+export interface TracksViewPrefs {
+  sort: TrackSortKey;
+  dir: SortDir;
+}
+
+/** Défaut : « Ajouté », du plus ancien au plus récent (ordre de la playlist Apple de l'utilisateur). */
+export const DEFAULT_TRACKS_VIEW: TracksViewPrefs = { sort: "added", dir: "asc" };
+
 /** Nombre max d'entrées conservées dans `past` (les plus anciennes sont abandonnées). */
 export const HISTORY_LIMIT = 100;
 
@@ -62,6 +71,9 @@ export interface UiState {
   playlistCreateRequested: boolean;
   /** Tri / filtre de la grille d'albums (le filtre Favoris, lui, est porté par la route). */
   albumsView: AlbumsViewPrefs;
+  tracksView: TracksViewPrefs;
+  /** Vue Titres regroupée : ids des leads dont les versions sont dépliées (mémoire de session). */
+  tracksExpanded: ReadonlySet<number>;
   /** Pousse la route courante dans `past`, vide `future` ; ignore une route identique. */
   navigate(route: Route): void;
   back(): void;
@@ -75,6 +87,13 @@ export interface UiState {
   /** Vrai (une seule fois) si une création était demandée ; remet la demande à zéro. */
   consumePlaylistCreate(): boolean;
   setAlbumsView(patch: Partial<AlbumsViewPrefs>): void;
+  /**
+   * Clic sur un en-tête de colonne : même colonne → inverse le sens ; autre colonne → tri
+   * croissant sur celle-ci.
+   */
+  sortTracksBy(key: TrackSortKey): void;
+  /** Déplie / replie les versions du groupe dont `leadId` est le lead. */
+  toggleTracksExpanded(leadId: number): void;
 }
 
 /** Égalité de routes : même nom ET mêmes paramètres. */
@@ -136,6 +155,8 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
     shortcutsHelpOpen: false,
     playlistCreateRequested: false,
     albumsView: DEFAULT_ALBUMS_VIEW,
+    tracksView: DEFAULT_TRACKS_VIEW,
+    tracksExpanded: new Set<number>(),
 
     navigate(route) {
       const { route: current, past } = get();
@@ -188,6 +209,18 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
 
     setAlbumsView(patch) {
       set({ albumsView: { ...get().albumsView, ...patch } });
+    },
+
+    sortTracksBy(key) {
+      const { sort, dir } = get().tracksView;
+      set({ tracksView: sort === key ? { sort, dir: dir === "asc" ? "desc" : "asc" } : { sort: key, dir: "asc" } });
+    },
+
+    toggleTracksExpanded(leadId) {
+      const next = new Set(get().tracksExpanded);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      set({ tracksExpanded: next });
     },
   }));
 }

@@ -19,6 +19,7 @@ import { Button } from "../ui/Button";
 import { useMotion } from "../ui/useMotion";
 import { AlbumsView } from "../views/AlbumsView";
 import { AlbumView } from "../views/AlbumView";
+import { TracksView } from "../views/TracksView";
 import { EmptyState, PageHeader } from "../views/common";
 import { anchorFromEvent, useViewMenus } from "../views/menus";
 
@@ -60,7 +61,8 @@ interface PageProps {
  * de la page album (titre, boutons, liste) joue sa propre entrée.
  *
  * Routes : home (grille d'albums, ou accueil/scan si la bibliothèque est vide — jusqu'à la
- * Tâche 11), albums, favorites (même grille filtrée), album, playlists (ancienne vue), search ;
+ * Tâche 11), tracks (tous les titres), albums, favorites (même grille filtrée), album, playlists
+ * (ancienne vue), search ;
  * les autres → état vide neutre « En construction ».
  */
 export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
@@ -146,6 +148,8 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
   switch (route.name) {
     case "home":
       return <HomePage scrollRef={scrollRef} actions={actions} />;
+    case "tracks":
+      return <TracksView scrollRef={scrollRef} actions={actions} />;
     case "albums":
       return <AlbumsView scrollRef={scrollRef} actions={actions} variant="albums" />;
     case "favorites":
@@ -168,8 +172,6 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
 
 function titleOf(route: Route): string {
   switch (route.name) {
-    case "tracks":
-      return "Titres";
     case "artists":
       return "Artistes";
     case "artist":

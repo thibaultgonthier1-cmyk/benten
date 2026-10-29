@@ -6,9 +6,11 @@ import type { TrackRow } from "../../shared/types";
 import type { RouteViewActions } from "../shell/RouteView";
 import {
   albumMenuItems,
+  selectionMenuItems,
   trackMenuItems,
   type AlbumMenuActions,
   type PlaylistTarget,
+  type SelectionMenuActions,
   type TrackMenuActions,
 } from "../shell/albumMenu";
 import { openMenu } from "../ui/menuStore";
@@ -76,6 +78,18 @@ export interface ViewMenus {
     play: (track: TrackRow) => void,
     opts?: { hideAlbumLink?: boolean },
   ): Promise<void>;
+  /**
+   * Menu d'une sélection de titres (vue Titres) : `play` lit un titre dans son contexte (la liste
+   * affichée), `playTracks` lit exactement des titres donnés ; `versions` ajoute « Lire toutes les
+   * versions » à un morceau regroupé.
+   */
+  openSelectionMenu(
+    tracks: readonly TrackRow[],
+    anchor: MenuAnchor,
+    play: (track: TrackRow) => void,
+    playTracks: (tracks: readonly TrackRow[]) => void,
+    opts?: { versions?: readonly TrackRow[] },
+  ): Promise<void>;
 }
 
 /**
@@ -113,6 +127,22 @@ export function useViewMenus(actions: RouteViewActions): ViewMenus {
         };
         const playlists = await listPlaylists();
         const items = trackMenuItems(track, trackActions, playerStore.getState().favoriteIds, playlists, opts);
+        openMenu(anchor.x, anchor.y, items, { focusFirst: anchor.focusFirst });
+      },
+      async openSelectionMenu(tracks, anchor, play, playTracks, opts) {
+        const selActions: SelectionMenuActions = {
+          play,
+          playTracks,
+          playNext: (t) => playerStore.getState().playNext(t),
+          addToQueue: (t) => playerStore.getState().addToQueue(t),
+          newPlaylist: (t, label) => actions.openPlaylistSheet(t.map((x) => x.id), label),
+          addToPlaylist: (p, t) => void addTracksToPlaylist(p, t),
+          toggleFavorite: (id) => playerStore.getState().toggleFavorite(id),
+          goToAlbum: (albumId) => uiStore.getState().navigate({ name: "album", id: albumId }),
+          goToArtist: (artist) => uiStore.getState().navigate({ name: "artist", artist }),
+        };
+        const playlists = await listPlaylists();
+        const items = selectionMenuItems(tracks, selActions, playerStore.getState().favoriteIds, playlists, opts);
         openMenu(anchor.x, anchor.y, items, { focusFirst: anchor.focusFirst });
       },
     };
