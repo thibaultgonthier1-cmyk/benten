@@ -10,6 +10,7 @@ import { libraryStore, useLibrary } from "../state/library";
 import { pageTransition } from "../theme/ds/motion";
 import type { Album } from "../lib/library";
 import { BentenMark } from "../ui/BentenMark";
+import { DownloadsView } from "../views/DownloadsView";
 import { fxHostMounted, requestFx } from "../ui/FxOverlay";
 import { Button } from "../ui/Button";
 import { useMotion, useMotionLevel } from "../ui/useMotion";
@@ -184,6 +185,8 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
       return <PlaylistsView actions={actions} />;
     case "playlist":
       return <PlaylistView id={route.id} scrollRef={scrollRef} actions={actions} />;
+    case "downloads":
+      return <DownloadsView />;
     case "search":
       return <SearchView q={route.q} actions={actions} />;
     default:
@@ -289,5 +292,6 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
 
 

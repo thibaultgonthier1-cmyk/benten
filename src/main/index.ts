@@ -1,10 +1,12 @@
 import { app, BrowserWindow, dialog, powerMonitor } from "electron";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme } from "./artprotocol";
 import { registerDiagnosticsIpc, registerIpc } from "./ipc";
+import { YoutubeManager } from "./youtube/manager";
+import { ensureYtDlp, readYtDlpVersion } from "./youtube/ytdlp";
 import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
 import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
 import { backfillAddedAt } from "./library/addedAt";
@@ -154,7 +156,42 @@ app.whenReady().then(() => {
     });
   };
 
-  registerIpc(db, { onSourcesChanged: startWatcher });
+  // ── T15 — téléchargeur YouTube → MP3 ────────────────────────────────────────────────────────
+  // Sortie : `Musique\Benten\YouTube`, ajoutée comme source pour que la veille indexe le fichier.
+  // Le binaire `yt-dlp.exe` vit sous `userData/bin` et n'est téléchargé qu'au premier usage, après
+  // vérification de son empreinte. `ffmpeg` : celui du PATH, ou `BENTEN_FFMPEG` s'il est ailleurs.
+  const youtubeDir = join(app.getPath("music"), "Benten", "YouTube");
+  const ytBin = join(userData, "bin", "yt-dlp.exe");
+  const ffmpegPath = process.env.BENTEN_FFMPEG ?? "ffmpeg";
+  const youtubeManager = new YoutubeManager({
+    binaryPath: ytBin,
+    outputDir: youtubeDir,
+    ffmpegPath,
+    onProgress: (job) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(CHANNELS.YOUTUBE_PROGRESS, job);
+    },
+    onDone: async (job) => {
+      if (!job.filePath) return;
+      try {
+        await indexOne(db, job.filePath);
+        broadcastLibraryChanged();
+      } catch (e) {
+        journal?.log({ kind: "process", event: "youtube.index-failed", path: job.filePath, message: String(e) });
+      }
+    },
+  });
+  registerIpc(db, {
+    onSourcesChanged: startWatcher,
+    youtube: {
+      enqueue: (url: unknown) => youtubeManager.enqueue(String(url ?? "")),
+      jobs: () => youtubeManager.jobsList(),
+      status: () => ({ installed: existsSync(ytBin), version: null }),
+      update: async () => {
+        await ensureYtDlp(join(userData, "bin"));
+        return { installed: true, version: await readYtDlpVersion(ytBin) };
+      },
+    },
+  });
 
   const win = createWindow();
   // Sauvegarde de lancement, apres l'affichage de la fenetre (asynchrone, differee) :
@@ -196,3 +233,6 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
+

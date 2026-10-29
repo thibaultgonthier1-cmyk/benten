@@ -77,6 +77,10 @@ describe("registerIpc", () => {
       "sources:remove",
       "state:get",
       "state:set",
+      "youtube:enqueue",
+      "youtube:jobs",
+      "youtube:status",
+      "youtube:update",
     ]);
   });
 
@@ -571,3 +575,4 @@ describe("normalizePage / validateScanPaths", () => {
     expect(validateScanPaths([FIX])).toEqual([FIX]);
   });
 });
+

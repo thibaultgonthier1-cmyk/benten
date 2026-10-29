@@ -51,7 +51,19 @@ const api: BentenApi = {
   // Abonnement au push « library:changed » (Task 14B). On enveloppe un listener qui ignore les
   // arguments IPC (event/payload) et n'expose au Renderer qu'un callback sans argument. La valeur
   // de retour est une fonction de desabonnement (retire le listener).
-  onLibraryChanged: (cb) => {
+  youtube: {
+    enqueue: (url) => invoke(CHANNELS.YOUTUBE_ENQUEUE, url),
+    jobs: () => invoke(CHANNELS.YOUTUBE_JOBS),
+    status: () => invoke(CHANNELS.YOUTUBE_STATUS),
+    update: () => invoke(CHANNELS.YOUTUBE_UPDATE),
+    onProgress: (cb) => {
+      const listener = (_e: unknown, job: Parameters<typeof cb>[0]): void => cb(job);
+      ipcRenderer.on(CHANNELS.YOUTUBE_PROGRESS, listener);
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.YOUTUBE_PROGRESS, listener);
+      };
+    },
+  },  onLibraryChanged: (cb) => {
     const listener = (): void => cb();
     ipcRenderer.on(CHANNELS.LIBRARY_CHANGED, listener);
     return () => {
@@ -61,3 +73,4 @@ const api: BentenApi = {
 };
 
 contextBridge.exposeInMainWorld("benten", api);
+

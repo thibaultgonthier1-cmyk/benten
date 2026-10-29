@@ -331,10 +331,34 @@ export function registerDiagnosticsIpc(writer: JournalWriter, versions: Diagnost
 export interface IpcHooks {
   /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
   onSourcesChanged?: () => void;
+  /** T15 — téléchargeur YouTube. Fourni par le Main, absent dans les tests. */
+  youtube?: {
+    enqueue(url: unknown): unknown;
+    jobs(): unknown;
+    status(): unknown;
+    update(): Promise<unknown>;
+  };
 }
 
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
+  // ── T15 — YouTube → MP3 ──────────────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.YOUTUBE_ENQUEUE, (event, url: unknown) => {
+    assertTrusted(event);
+    return hooks?.youtube?.enqueue(url) ?? null;
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_JOBS, (event) => {
+    assertTrusted(event);
+    return hooks?.youtube?.jobs() ?? [];
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_STATUS, (event) => {
+    assertTrusted(event);
+    return hooks?.youtube?.status() ?? { installed: false, version: null };
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_UPDATE, async (event) => {
+    assertTrusted(event);
+    return (await hooks?.youtube?.update()) ?? { installed: false, version: null };
+  });
   ipcMain.handle(CHANNELS.PING, (event): "pong" => {
     assertTrusted(event);
     return "pong";
@@ -496,3 +520,4 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+

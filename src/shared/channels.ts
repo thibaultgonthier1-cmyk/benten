@@ -27,6 +27,14 @@ export const CHANNELS = {
   DIAGNOSTICS_APPEND: "diagnostics:append",
   /** Push Main -> Renderer (une voie) : la bibliotheque a change (veille de dossiers, Task 14B). */
   LIBRARY_CHANGED: "library:changed",
+  /** T15 — téléchargeur YouTube → MP3. */
+  YOUTUBE_ENQUEUE: "youtube:enqueue",
+  YOUTUBE_JOBS: "youtube:jobs",
+  YOUTUBE_STATUS: "youtube:status",
+  YOUTUBE_UPDATE: "youtube:update",
+  /** Push Main -> Renderer : un travail a changé d'état. */
+  YOUTUBE_PROGRESS: "youtube:progress",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+

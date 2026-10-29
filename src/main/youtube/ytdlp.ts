@@ -3,6 +3,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
+import { validateYoutubeUrl } from "../../shared/youtube";
+
+export { validateYoutubeUrl };
 
 /**
  * Cœur du téléchargeur YouTube → MP3 : tout ce qui décide sans effet de bord réseau.
@@ -15,54 +18,10 @@ import { execFile } from "node:child_process";
 
 export type JobState = "queued" | "downloading" | "converting" | "done" | "error";
 
-const HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
-const SHORT_HOST = "youtu.be";
-const ID = /^[A-Za-z0-9_-]{11}$/;
 const RELEASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
 const BINARY = "yt-dlp.exe";
 const SUMS = "SHA2-256SUMS";
 
-/**
- * Accepte **uniquement** un lien YouTube https valide et renvoie sa forme canonique
- * `https://www.youtube.com/watch?v=<id>`. Tout le reste — autre hôte, `http:`, `file:`, identifiant
- * court, espace, point-virgule, présence de `--` — renvoie `null`.
- *
- * Le `--` est refusé volontairement : c'est ainsi qu'on injecterait un argument dans yt-dlp.
- */
-export function validateYoutubeUrl(raw: string): string | null {
-  const text = String(raw ?? "").trim();
-  if (!text) return null;
-  if (/\s/.test(text) || text.includes(";") || text.includes("--")) return null;
-  let url: URL;
-  try {
-    url = new URL(text);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:") return null;
-  if (url.username || url.password) return null;
-
-  const host = url.hostname.toLowerCase();
-  if (host === SHORT_HOST) {
-    const id = url.pathname.replace(/^\/+/, "").split("/")[0] ?? "";
-    return ID.test(id) ? canonical(id) : null;
-  }
-  if (!HOSTS.has(host)) return null;
-
-  if (url.pathname === "/watch") {
-    const id = url.searchParams.get("v") ?? "";
-    return ID.test(id) ? canonical(id) : null;
-  }
-  const shorts = url.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})\/?$/);
-  if (shorts) return canonical(shorts[1]!);
-  return null;
-}
-
-function canonical(id: string): string {
-  return `https://www.youtube.com/watch?v=${id}`;
-}
-
-/** Arguments yt-dlp, dans l'ordre exact attendu par le plan. */
 export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath: string): string[] {
   return [
     "-x",
@@ -155,5 +114,7 @@ export async function readYtDlpVersion(
 export async function readSumsFile(path: string): Promise<string> {
   return readFile(path, "utf8");
 }
+
+
 
 

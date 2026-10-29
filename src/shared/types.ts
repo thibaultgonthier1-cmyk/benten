@@ -149,6 +149,24 @@ export interface AudioDeviceInfo {
 export type QualityMode = "max" | "balanced" | "economy";
 
 /** API exposée au Renderer sous `window.benten` (contextBridge). */
+/** T15 — vue d'un travail de téléchargement YouTube côté Renderer. */
+export interface YoutubeJobView {
+  id: string;
+  url: string;
+  playlistId: number | null;
+  state: "queued" | "downloading" | "converting" | "done" | "error";
+  percent: number;
+  stage: "queue" | "download" | "convert";
+  error: string | null;
+  filePath: string | null;
+  addedAt: number;
+}
+
+/** T15 — état du binaire yt-dlp. */
+export interface YoutubeStatusView {
+  installed: boolean;
+  version: string | null;
+}
 export interface BentenApi {
   ping(): Promise<"pong">;
   library: {
@@ -227,6 +245,13 @@ export interface BentenApi {
    * fonction de désabonnement.
    */
   onLibraryChanged(cb: () => void): () => void;
+  youtube: {
+    enqueue(url: string): Promise<YoutubeJobView | null>;
+    jobs(): Promise<YoutubeJobView[]>;
+    status(): Promise<YoutubeStatusView>;
+    update(): Promise<YoutubeStatusView>;
+    onProgress(cb: (job: YoutubeJobView) => void): () => void;
+  };
 }
 
 declare global {
@@ -234,3 +259,4 @@ declare global {
     benten: BentenApi;
   }
 }
+
