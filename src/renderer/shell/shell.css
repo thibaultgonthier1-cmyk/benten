@@ -124,7 +124,7 @@
   opacity: 0;
 }
 .sb-item:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 .sb-icon {
@@ -296,7 +296,7 @@
   opacity: 1;
 }
 .sb-pl-invite:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 .sb-pl-invite__icon {
@@ -355,7 +355,7 @@
   font-size: 11.5px;
 }
 .sb-pl-error:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 :root[data-motion="reduced"] .sb-pl-item::before,

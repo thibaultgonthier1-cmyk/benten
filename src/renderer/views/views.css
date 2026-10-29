@@ -51,7 +51,7 @@
   color: var(--text);
 }
 .view-chip:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .view-chip__chev {
@@ -204,7 +204,7 @@
   text-underline-offset: 3px;
 }
 .album-hero__artist:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
   border-radius: 4px;
 }
@@ -229,7 +229,7 @@
   min-width: 132px;
 }
 .album-actions__fav.is-on {
-  color: var(--lacquer-red);
+  color: var(--favorite);
 }
 .album-actions__fav.is-on svg {
   fill: currentColor;
@@ -282,7 +282,7 @@
   transform: scale(0.94);
 }
 .album-compact__play:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .album-compact__thumb {
@@ -445,7 +445,7 @@
   color: var(--text);
 }
 .tracks-head__col:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 6px;
 }

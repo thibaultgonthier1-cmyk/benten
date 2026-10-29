@@ -77,7 +77,7 @@
 .artist-tile:focus-visible .artist-tile__art {
   box-shadow:
     0 0 0 2px var(--bg),
-    0 0 0 4px var(--accent-ring),
+    0 0 0 4px var(--focus-ring),
     0 12px 30px rgba(0, 0, 0, 0.55);
 }
 

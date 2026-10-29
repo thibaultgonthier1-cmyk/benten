@@ -85,7 +85,7 @@
 .plg-new:focus-visible .plg-new__art {
   box-shadow:
     inset 0 0 0 1px var(--line),
-    0 0 0 2px var(--accent-ring);
+    0 0 0 2px var(--focus-ring);
 }
 
 .pl-tile__count {
@@ -235,7 +235,7 @@
   background: rgba(255, 255, 255, 0.05);
 }
 .plv-title__btn:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .plv-title__pen {

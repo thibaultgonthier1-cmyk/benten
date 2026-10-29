@@ -117,6 +117,67 @@ describe("brand tokens — Biwa & Or", () => {
     expect(FALLBACK_RGB).toEqual([212, 170, 80]);
   });
 
+  /* ---- WCAG 1.4.11 (non-texte ≥ 3:1) et 1.4.3 (texte ≥ 4.5:1) ---- */
+
+  it("(e) --focus-ring est de l'or plein, ≥ 3:1 sur #000", () => {
+    const vars = cssVars(dsTokens);
+    const ring = resolve(vars, "--focus-ring");
+    expect(ring.toLowerCase()).toBe("#d4aa50");
+    expect(contrast(ring, "#000")).toBeGreaterThanOrEqual(3);
+  });
+
+  it("(e') toute règle :focus / :focus-visible utilise --focus-ring, jamais --accent-ring ni un or translucide", () => {
+    const offenders: string[] = [];
+    let focusRules = 0;
+    for (const file of walk(RENDERER).filter((f) => f.endsWith(".css"))) {
+      const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const sel = m[1]!.trim();
+        const body = m[2]!;
+        if (!/:focus(-visible)?\b/.test(sel)) continue;
+        if (!/(outline|box-shadow)\s*:/.test(body)) continue;
+        if (/^\s*outline\s*:\s*none\s*;\s*$/.test(body)) continue;
+        focusRules++;
+        if (/accent-ring|rgba\(212,\s*170,\s*80/.test(body)) offenders.push(`${relative(ROOT, file)} ${sel}`);
+      }
+    }
+    expect(focusRules).toBeGreaterThan(10);
+    expect(offenders).toEqual([]);
+  });
+
+  it("(f) --favorite (cœur actif) ≥ 3:1 sur #000, distinct du rouge laque d'aplat", () => {
+    const vars = cssVars(dsTokens);
+    const fav = resolve(vars, "--favorite");
+    expect(contrast(fav, "#000")).toBeGreaterThanOrEqual(3);
+    expect(vars.get("--lacquer-red")).toBe("#b8281b");
+    const css = walk(RENDERER)
+      .filter((f) => f.endsWith(".css"))
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n");
+    for (const sel of [".track-row__heart.is-on", ".album-actions__fav.is-on", ".ic.fav.on"]) {
+      const esc = sel.replace(/\./g, "\\.");
+      const colors = [...css.matchAll(new RegExp(`(?:^|\\n)${esc}\\s*\\{([^}]*)\\}`, "g"))]
+        .map((m) => /(?:^|[;\s])color\s*:\s*([^;]+);/.exec(m[1]!)?.[1]?.trim())
+        .filter((c): c is string => c !== undefined);
+      expect(colors, sel).toEqual(["var(--favorite)"]);
+    }
+  });
+
+  it("(g) --danger-text ≥ 4.5:1 sur la surface du menu (cas le plus clair : élément focalisé)", () => {
+    const vars = cssVars(dsTokens);
+    const danger = resolve(vars, "--danger-text");
+    // .cm-panel : rgba(22,22,26,.86) sur noir, + reflet blanc 5 %, + survol/focus blanc 7.5 %.
+    const over = (base: number[], top: number[], a: number) => base.map((c, i) => c * (1 - a) + top[i]! * a);
+    let s = over([0, 0, 0], [22, 22, 26], 0.86);
+    s = over(s, [255, 255, 255], 0.05);
+    s = over(s, [255, 255, 255], 0.075);
+    const surface = "#" + s.map((c) => Math.round(c).toString(16).padStart(2, "0")).join("");
+    expect(contrast(danger, surface)).toBeGreaterThanOrEqual(4.5);
+    const menu = readFileSync(join(RENDERER, "ui", "interaction.css"), "utf8");
+    expect(menu).not.toMatch(/f26b7a/i);
+    expect(menu).toMatch(/\.cm-item\.is-danger\s*\{[^}]*color\s*:\s*var\(--danger-text\)/);
+  });
+
   it("(d) une règle à aplat d'or ne pose jamais de blanc dessus", () => {
     const offenders: string[] = [];
     for (const file of walk(RENDERER).filter((f) => f.endsWith(".css"))) {

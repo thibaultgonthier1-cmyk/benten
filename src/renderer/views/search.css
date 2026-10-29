@@ -96,7 +96,7 @@
   box-shadow:
     var(--highlight-inner),
     inset 0 0 0 1px var(--line),
-    0 0 0 2px var(--accent-ring);
+    0 0 0 2px var(--focus-ring);
 }
 .search-card__art {
   position: relative;
@@ -207,7 +207,7 @@
   color: var(--text);
 }
 .search-more:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
 }
 .search-more svg {
   transition: transform 0.25s ease;

@@ -49,7 +49,7 @@
   opacity: 1;
 }
 .ui-btn:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .ui-btn:disabled {
@@ -122,7 +122,7 @@
   opacity: 1;
 }
 .ui-icon-btn:focus-visible {
-  outline: 2px solid var(--accent-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .ui-icon-btn:disabled {

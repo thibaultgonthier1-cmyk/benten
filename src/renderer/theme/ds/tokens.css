@@ -31,7 +31,14 @@
   --accent: var(--gold);
   --accent-press: #b8913f;
   --accent-soft: rgba(212, 170, 80, 0.14);
+  /* Halo doux (lueurs, survols) : jamais comme indicateur de focus (trop faible sur noir). */
   --accent-ring: rgba(212, 170, 80, 0.45);
+  /* Anneau de focus : or PLEIN, ≥ 3:1 sur #000 (WCAG 1.4.11). */
+  --focus-ring: var(--gold);
+  /* Favori actif (cœur) : rouge laque éclairci, ≥ 3:1 sur #000 ; --lacquer-red reste aux aplats. */
+  --favorite: #d9442f;
+  /* Texte « danger » (menus) : vermillon clair, ≥ 4.5:1 sur la surface du menu (WCAG 1.4.3). */
+  --danger-text: #f07a60;
   /* Contenu posé sur un aplat d'or (icône du bouton lecture, texte du primaire) : jamais de blanc. */
   --on-accent: #1a1206;
 

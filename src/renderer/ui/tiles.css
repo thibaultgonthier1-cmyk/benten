@@ -180,7 +180,7 @@
 .album-tile:focus-visible .album-tile__art {
   box-shadow:
     0 0 0 2px var(--bg),
-    0 0 0 4px var(--accent-ring),
+    0 0 0 4px var(--focus-ring),
     0 10px 28px rgba(0, 0, 0, 0.55);
 }
 
@@ -336,7 +336,7 @@
   background: rgba(255, 255, 255, 0.075);
 }
 .track-row:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--accent-ring);
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
 }
 .track-row.is-unplayable {
   opacity: 0.45;
@@ -461,7 +461,7 @@
   transform: scale(0.86);
 }
 .track-row__heart.is-on {
-  color: var(--lacquer-red);
+  color: var(--favorite);
 }
 .track-row__dur {
   color: var(--text-dim);

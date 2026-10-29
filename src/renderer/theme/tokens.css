@@ -513,7 +513,7 @@ body {
   background: rgba(255, 255, 255, 0.04);
 }
 .mp-open:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .mp-art {
@@ -585,9 +585,9 @@ body {
 .ic.on {
   color: var(--accent);
 }
-/* Favori actif : rouge laque (touche rare de la DA), pas l'or. */
+/* Favori actif : rouge laque éclairci (--favorite, ≥ 3:1), pas l'or. */
 .ic.fav.on {
-  color: var(--lacquer-red);
+  color: var(--favorite);
 }
 /* Bouton repeat : le petit « 1 » du mode « une piste », ancre en bas a droite de l'icone (aplat
    d'or, contenu en --on-accent). `position:relative` sur le bouton porte le badge. */
@@ -1043,7 +1043,7 @@ body {
   stroke: none;
 }
 .pl-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -1317,7 +1317,7 @@ button.qopt {
   cursor: pointer;
 }
 button.qopt:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 /* Selecteur de sortie. */
@@ -1346,7 +1346,7 @@ button.qopt:focus-visible {
   cursor: pointer;
 }
 .qsel select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .qsel select:disabled {
@@ -1381,7 +1381,7 @@ button.qopt:focus-visible {
   cursor: pointer;
 }
 .qvol input[type="range"]:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
 }
 .qvol-val {
@@ -1492,7 +1492,7 @@ button.qopt:focus-visible {
   font-size: 12px;
 }
 .q-play:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 6px;
 }
