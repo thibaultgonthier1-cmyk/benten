@@ -32,11 +32,8 @@ const fakeActions = (): RouteViewActions & Record<string, ReturnType<typeof vi.f
     playAlbumInOrder: vi.fn(),
     shuffleAlbum: vi.fn(),
     togglePlay: vi.fn(),
-    playTracks: vi.fn(),
     albumPlayNext: vi.fn(),
     albumAddToQueue: vi.fn(),
-    albumAddToPlaylist: vi.fn(),
-    openPlaylistSheet: vi.fn(),
   }) as unknown as RouteViewActions & Record<string, ReturnType<typeof vi.fn>>;
 
 const list = [track(1), track(2), track(3)];

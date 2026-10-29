@@ -5,9 +5,9 @@
  * Aucune dépendance React ni DOM : tout est testé en node.
  */
 
-import type { TrackRow } from "../../shared/types";
+import type { PlaylistRow, TrackRow } from "../../shared/types";
 import type { PlaybackStatus } from "../audio/engine";
-import { describeQuality, type Album } from "./library";
+import { describeQuality, groupTracksToAlbums, type Album } from "./library";
 
 /* ------------------------------------- Résumé d'album ------------------------------------- */
 
@@ -843,4 +843,222 @@ export function gridLayout(
   if (!(width > 0)) return { cols: 1, cardW: min };
   const cols = Math.max(1, Math.min(maxCols, Math.floor((width + gap) / (min + gap))));
   return { cols, cardW: Math.floor((width - gap * (cols - 1)) / cols) };
+}
+
+/* ------------------------------------ Playlists (Tâche 9) ------------------------------------ */
+
+/** Mosaïque d'une playlist : jusqu'à 4 `artKey` DISTINCTS, dans l'ordre des titres. */
+export function mosaicArtKeys(tracks: readonly TrackRow[]): string[] {
+  const keys: string[] = [];
+  for (const t of tracks) {
+    if (t.artKey && !keys.includes(t.artKey)) {
+      keys.push(t.artKey);
+      if (keys.length === 4) break;
+    }
+  }
+  return keys;
+}
+
+/** Ligne d'en-tête d'une playlist : « 12 titres · 42 min » ; « Aucun titre » si vide. */
+export function playlistSummary(tracks: readonly TrackRow[]): string {
+  if (tracks.length === 0) return "Aucun titre";
+  const total = tracks.reduce((sum, t) => sum + safeDuration(t), 0);
+  return `${tracks.length} ${tracks.length > 1 ? "titres" : "titre"} · ${formatTotal(total)}`;
+}
+
+/**
+ * Clés React stables des lignes d'une playlist (un titre peut y figurer plusieurs fois) :
+ * `id#n` pour la n-ième occurrence. Un réordonnancement garde la clé de chaque ligne.
+ */
+export function playlistEntryKeys(tracks: readonly TrackRow[]): string[] {
+  const seen = new Map<number, number>();
+  return tracks.map((t) => {
+    const n = seen.get(t.id) ?? 0;
+    seen.set(t.id, n + 1);
+    return `${t.id}#${n}`;
+  });
+}
+
+/** Copie de `list` où l'élément `from` est déplacé en `to` (bornes invalides : copie inchangée). */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+  const out = list.slice();
+  if (from === to || from < 0 || to < 0 || from >= out.length || to >= out.length) return out;
+  const [moved] = out.splice(from, 1);
+  out.splice(to, 0, moved!);
+  return out;
+}
+
+/**
+ * Index d'arrivée (sémantique `playlists.reorder(from, to)` : retirer puis insérer) d'une ligne
+ * `from` déposée avant (`after=false`) ou après (`after=true`) la ligne survolée `over`.
+ */
+export function dropIndex(from: number, over: number, after: boolean): number {
+  const gap = after ? over + 1 : over;
+  return gap > from ? gap - 1 : gap;
+}
+
+/** Sépare les titres à ajouter de ceux déjà dans la playlist (ordre conservé, sans répétition). */
+export function partitionNewTracks(
+  existing: Iterable<number>,
+  ids: readonly number[],
+): { fresh: number[]; dupes: number[] } {
+  const have = new Set(existing);
+  const fresh: number[] = [];
+  const dupes: number[] = [];
+  const seen = new Set<number>();
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    (have.has(id) ? dupes : fresh).push(id);
+  }
+  return { fresh, dupes };
+}
+
+/** Playlists par date de création croissante (ordre d'ajout, comme le reste de la bibliothèque). */
+export function playlistsByCreation(rows: readonly PlaylistRow[]): PlaylistRow[] {
+  return rows.slice().sort((a, b) => a.createdAt - b.createdAt || a.id - b.id);
+}
+
+/** `base` s'il est libre (casse et accents ignorés), sinon « base 2 », « base 3 »… */
+export function uniquePlaylistName(base: string, existing: readonly string[]): string {
+  const taken = new Set(existing.map(normalizeText));
+  if (!taken.has(normalizeText(base))) return base;
+  for (let n = 2; ; n++) {
+    const name = `${base} ${n}`;
+    if (!taken.has(normalizeText(name))) return name;
+  }
+}
+
+/** Nombre de rangs au-delà duquel la cascade d'entrée n'attend plus (liste longue). */
+export const STAGGER_CAP = 16;
+
+/** Délai de cascade (ms) du rang `i` : `step` ms par rang, plafonné à `cap` rangs. */
+export function staggerMs(i: number, step = 20, cap = STAGGER_CAP): number {
+  return Math.min(Math.max(0, i), cap) * step;
+}
+
+/* ------------------------------------ Recherche (Tâche 9) ------------------------------------ */
+
+export type SearchTopKind = "track" | "album" | "artist";
+
+export interface SearchSections {
+  /** Meilleur résultat (grande carte) : id de titre / d'album (texte) ou nom d'artiste. */
+  top: { kind: SearchTopKind; id: string } | null;
+  tracks: TrackRow[];
+  albums: Album[];
+  artists: string[];
+  playlists: PlaylistRow[];
+}
+
+/** Rang d'un texte pour le terme replié `q` : exact 0, préfixe 1, contient 2, sinon 3. */
+function textRank(text: string, q: string): number {
+  const n = normalizeText(text);
+  if (n === q) return 0;
+  if (n.startsWith(q)) return 1;
+  return n.includes(q) ? 2 : 3;
+}
+
+/** Tri stable par rang croissant (l'ordre d'entrée départage). */
+function byRank<T>(items: readonly T[], rank: (item: T) => number): T[] {
+  return items
+    .map((item, i) => ({ item, i, r: rank(item) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.item);
+}
+
+/**
+ * Sections de la page Recherche à partir des titres renvoyés par `library:search` et des
+ * playlists. Comparaisons repliées (casse, accents). Titres classés : titre exact, nom sans
+ * suffixe de version exact (« Pardon (Slowed) »), titre qui commence par / contient le terme,
+ * puis correspondance par artiste, puis par album. Albums : ceux dont le titre ou l'artiste
+ * correspond, dans l'ordre des titres. Artistes : noms crédités (feat., &…) qui correspondent,
+ * sans doublon. Meilleur résultat : correspondance exacte titre > artiste > album, puis préfixe
+ * (même ordre), sinon le premier titre. Pure.
+ */
+export function buildSearchSections(
+  query: string,
+  tracks: readonly TrackRow[],
+  playlists: readonly PlaylistRow[],
+): SearchSections {
+  const q = normalizeText(query);
+  if (!q) return { top: null, tracks: [], albums: [], artists: [], playlists: [] };
+
+  const trackRank = (t: TrackRow): number => {
+    const title = textRank(t.title, q);
+    if (title === 0) return 0;
+    if (versionInfo(t.title).base === q) return 1;
+    if (title < 3) return title + 1; // préfixe 2, contient 3
+    if (textRank(t.artist, q) < 3) return 4;
+    return textRank(t.album, q) < 3 ? 5 : 6;
+  };
+  const rankedTracks = byRank(tracks, trackRank);
+
+  // Albums dans l'ordre de leur premier titre classé, les correspondances par titre d'abord.
+  const firstSeen = new Map<number, number>();
+  rankedTracks.forEach((t, i) => {
+    if (!firstSeen.has(t.albumId)) firstSeen.set(t.albumId, i);
+  });
+  const albumRank = (a: Album): number => {
+    const title = textRank(a.title, q);
+    return title < 3 ? title : textRank(a.artist, q) < 3 ? 3 : 4;
+  };
+  const albums = groupTracksToAlbums(tracks)
+    .filter((a) => albumRank(a) < 4)
+    .sort((a, b) => albumRank(a) - albumRank(b) || (firstSeen.get(a.id) ?? 0) - (firstSeen.get(b.id) ?? 0));
+
+  const names = new Map<string, string>();
+  for (const t of rankedTracks) {
+    for (const field of [t.artist, t.albumArtist ?? ""]) {
+      for (const name of creditNames(field)) {
+        const key = artistKey(name);
+        if (key && key.includes(q) && !names.has(key)) names.set(key, name.trim());
+      }
+    }
+  }
+  const artists = byRank([...names.values()], (n) => textRank(n, q));
+
+  const matchedPlaylists = byRank(
+    playlists.filter((p) => textRank(p.name, q) < 3),
+    (p) => textRank(p.name, q),
+  );
+
+  let top: SearchSections["top"] = null;
+  for (const tier of [0, 1]) {
+    const t = rankedTracks.find((x) => textRank(x.title, q) === tier);
+    if (t) {
+      top = { kind: "track", id: String(t.id) };
+      break;
+    }
+    const artist = artists.find((n) => textRank(n, q) === tier);
+    if (artist) {
+      top = { kind: "artist", id: artist };
+      break;
+    }
+    const album = albums.find((a) => textRank(a.title, q) === tier);
+    if (album) {
+      top = { kind: "album", id: String(album.id) };
+      break;
+    }
+  }
+  if (!top && rankedTracks[0]) top = { kind: "track", id: String(rankedTracks[0].id) };
+
+  return { top, tracks: rankedTracks, albums, artists, playlists: matchedPlaylists };
+}
+
+export type SearchPhase = "idle" | "loading" | "empty" | "results";
+
+/**
+ * Ce que montre la page Recherche : `idle` (terme vide), `results` dès qu'il y a quelque chose à
+ * montrer (même les résultats du terme précédent, pendant la frappe), `empty` SEULEMENT quand la
+ * réponse du terme courant est arrivée sans rien, sinon `loading` (squelettes).
+ */
+export function searchPhase(
+  query: string,
+  state: { searched: boolean; resultsFor: string },
+  hasAny: boolean,
+): SearchPhase {
+  const q = query.trim();
+  if (!q) return "idle";
+  if (hasAny) return "results";
+  return state.searched && state.resultsFor === q ? "empty" : "loading";
 }

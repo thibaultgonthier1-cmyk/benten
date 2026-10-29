@@ -174,6 +174,17 @@ describe("trackMenuItems", () => {
     expect(a.newPlaylist).toHaveBeenCalledWith([t], "t3");
     expect(a.addToPlaylist).toHaveBeenCalledWith(playlists[0], [t]);
   });
+
+  it("entrées supplémentaires (page playlist) : ajoutées en fin, après un séparateur", () => {
+    const a = tActions();
+    const remove = vi.fn();
+    const items = trackMenuItems(t, a, new Set(), playlists, {
+      extra: [{ label: "Retirer de la playlist", danger: true, onSelect: remove }],
+    });
+    expect(labels(items).slice(-3)).toEqual(["Aller à l'artiste", "—", "Retirer de la playlist"]);
+    byLabel(items, "Retirer de la playlist").onSelect!();
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("selectionMenuItems (vue Titres)", () => {

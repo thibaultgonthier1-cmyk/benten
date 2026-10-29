@@ -37,6 +37,8 @@ export interface LibraryState {
    * de « aucun resultat » pendant l'anti-rebond, avant que la premiere reponse ne soit arrivee.
    */
   searched: boolean;
+  /** Terme (nettoyé) auquel correspondent `results` ; `""` quand il n'y en a pas. */
+  resultsFor: string;
 
   /** Charge TOUTES les pistes (pagine) puis les regroupe en albums. */
   reload(): Promise<void>;
@@ -82,6 +84,8 @@ export function createLibraryStore(
 
   // Annule la recherche en attente / en vol (équivalent du cleanup de l'ancien effet `[query]`).
   let cancelSearch: (() => void) | null = null;
+  // Dernière réponse reçue : revenir à ce terme (« Précédent » vers la Recherche) la rend aussitôt.
+  let lastSearch: { q: string; rows: TrackRow[] } | null = null;
 
   return createStore<LibraryState>((set, get) => ({
     tracks: [],
@@ -93,6 +97,7 @@ export function createLibraryStore(
     query: "",
     results: [],
     searched: false,
+    resultsFor: "",
 
     async reload() {
       set({ loading: true });
@@ -154,21 +159,28 @@ export function createLibraryStore(
       cancelSearch = null;
       const q = query.trim();
       if (!q) {
-        set({ query, results: [], searched: false });
+        set({ query, results: [], searched: false, resultsFor: "" });
         return;
       }
-      // Nouveau terme : la recherche n'a pas encore abouti -> on masque la note « aucun resultat »
-      // jusqu'a la reponse (pas de clignotement du vide pendant l'anti-rebond).
-      set({ query, searched: false });
+      if (lastSearch && lastSearch.q === q) {
+        // Terme déjà résolu : résultats rendus tout de suite (aucun squelette), puis rafraîchis.
+        set({ query, results: lastSearch.rows, searched: true, resultsFor: q });
+      } else {
+        // Nouveau terme : la recherche n'a pas encore abouti -> on masque la note « aucun resultat »
+        // jusqu'a la reponse (pas de clignotement du vide pendant l'anti-rebond).
+        set({ query, searched: false });
+      }
       let cancelled = false;
       const id = setTimeout(() => {
         api()
           .library.search({ q, limit: SEARCH_LIMIT })
           .then((rows) => {
-            if (!cancelled) set({ results: rows, searched: true });
+            if (cancelled) return;
+            lastSearch = { q, rows };
+            set({ results: rows, searched: true, resultsFor: q });
           })
           .catch(() => {
-            if (!cancelled) set({ results: [], searched: true });
+            if (!cancelled) set({ results: [], searched: true, resultsFor: q });
           });
       }, SEARCH_DEBOUNCE_MS);
       cancelSearch = () => {

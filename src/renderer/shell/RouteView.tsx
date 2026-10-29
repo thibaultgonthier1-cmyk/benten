@@ -1,19 +1,14 @@
 import type React from "react";
-import { useCallback, useInsertionEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useInsertionEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, type TargetAndTransition } from "framer-motion";
-import { Construction, FolderOpen, Search } from "lucide-react";
+import { Construction, FolderOpen } from "lucide-react";
 import { routeKey, sameRoute, uiStore, useUi, type Route } from "../state/ui";
 import { planScroll, rememberScroll, savedScroll } from "./scrollMemory";
 import { exitIsInstant } from "./routeTransition";
 import { DetachedPresence } from "../ui/DetachedPresence";
 import { libraryStore, useLibrary } from "../state/library";
-import { playerStore } from "../state/player";
 import { pageTransition } from "../theme/ds/motion";
 import type { Album } from "../lib/library";
-import { canResume } from "../lib/viewModels";
-import type { TrackRow } from "../../shared/types";
-import { SearchResults } from "../components/SearchResults";
-import { Playlists } from "../components/Playlists";
 import { BentenMark } from "../ui/BentenMark";
 import { Button } from "../ui/Button";
 import { useMotion } from "../ui/useMotion";
@@ -21,9 +16,11 @@ import { AlbumsView } from "../views/AlbumsView";
 import { AlbumView } from "../views/AlbumView";
 import { ArtistsView } from "../views/ArtistsView";
 import { ArtistView } from "../views/ArtistView";
+import { PlaylistsView } from "../views/PlaylistsView";
+import { PlaylistView } from "../views/PlaylistView";
+import { SearchView } from "../views/SearchView";
 import { TracksView } from "../views/TracksView";
 import { EmptyState, PageHeader } from "../views/common";
-import { anchorFromEvent, useViewMenus } from "../views/menus";
 
 /** Actions de lecture / bibliothèque fournies par l'App (chemins de lecture inchangés). */
 export interface RouteViewActions {
@@ -35,13 +32,8 @@ export interface RouteViewActions {
   shuffleAlbum(album: Album): void;
   /** Lecture / pause de la piste courante. */
   togglePlay(): void;
-  playTracks(tracks: readonly TrackRow[], index?: number): void;
   albumPlayNext(album: Album): void;
   albumAddToQueue(album: Album): void;
-  /** Ouvre la feuille « Ajouter à une playlist » existante pour l'album. */
-  albumAddToPlaylist(album: Album): void;
-  /** Ouvre la même feuille pour des pistes quelconques (menu d'un titre). */
-  openPlaylistSheet(trackIds: readonly number[], label?: string): void;
 }
 
 interface PageProps {
@@ -64,7 +56,7 @@ interface PageProps {
  *
  * Routes : home (grille d'albums, ou accueil/scan si la bibliothèque est vide — jusqu'à la
  * Tâche 11), tracks (tous les titres), albums, favorites (même grille filtrée), album, artists
- * (grille d'artistes), artist, playlists (ancienne vue), search ;
+ * (grille d'artistes), artist, playlists (grille), playlist (page), search ;
  * les autres → état vide neutre « En construction ».
  */
 export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
@@ -110,8 +102,11 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
     }),
     [t],
   );
-  // Les pages à en-tête teinté (album, artiste) jouent leur propre entrée (pas de fondu global).
-  const initial = nav.shared || route.name === "album" || route.name === "artist" ? { opacity: 1, y: 0 } : t.initial;
+  // Les pages à en-tête teinté (album, artiste, playlist) jouent leur propre entrée (pas de fondu global).
+  const initial =
+    nav.shared || route.name === "album" || route.name === "artist" || route.name === "playlist"
+      ? { opacity: 1, y: 0 }
+      : t.initial;
 
   return (
     <AnimatePresence mode="popLayout" initial={false} custom={nav.instant}>
@@ -140,16 +135,23 @@ const INSTANT_EXIT = { opacity: 0, transition: { duration: 0 } };
 /** Pages qui affichent des tuiles d'album (source / cible de la pochette partagée). */
 const GRID_ROUTES: ReadonlySet<Route["name"]> = new Set(["home", "albums", "favorites", "search", "artist"]);
 
+/** Pages qui affichent des avatars d'artiste / des mosaïques de playlist (élément partagé). */
+const ARTIST_SOURCES: ReadonlySet<Route["name"]> = new Set(["artists", "search"]);
+const PLAYLIST_SOURCES: ReadonlySet<Route["name"]> = new Set(["playlists", "search"]);
+
 /**
- * Navigation grille → album (ou retour album → grille) : la pochette voyage ; grille Artistes →
- * page artiste (et retour) : l'avatar voyage.
+ * Navigation grille → album (ou retour album → grille) : la pochette voyage ; grille Artistes /
+ * Recherche → page artiste (et retour) : l'avatar voyage ; grille Playlists / Recherche → page
+ * playlist (et retour) : la mosaïque voyage.
  */
 function isSharedPair(from: Route, to: Route): boolean {
   return (
     (GRID_ROUTES.has(from.name) && to.name === "album") ||
     (from.name === "album" && GRID_ROUTES.has(to.name)) ||
-    (from.name === "artists" && to.name === "artist") ||
-    (from.name === "artist" && to.name === "artists")
+    (ARTIST_SOURCES.has(from.name) && to.name === "artist") ||
+    (from.name === "artist" && ARTIST_SOURCES.has(to.name)) ||
+    (PLAYLIST_SOURCES.has(from.name) && to.name === "playlist") ||
+    (from.name === "playlist" && PLAYLIST_SOURCES.has(to.name))
   );
 }
 
@@ -170,14 +172,11 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
     case "artist":
       return <ArtistView name={route.artist} scrollRef={scrollRef} actions={actions} />;
     case "playlists":
-      return (
-        <>
-          <PageHeader title="Playlists" sub="Crée, renomme et lis tes listes." />
-          <PlaylistsPage onPlay={actions.playTracks} />
-        </>
-      );
+      return <PlaylistsView actions={actions} />;
+    case "playlist":
+      return <PlaylistView id={route.id} scrollRef={scrollRef} actions={actions} />;
     case "search":
-      return <SearchPage scrollRef={scrollRef} actions={actions} />;
+      return <SearchView q={route.q} actions={actions} />;
     default:
       return <UnderConstruction title={titleOf(route)} />;
   }
@@ -185,8 +184,6 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
 
 function titleOf(route: Route): string {
   switch (route.name) {
-    case "playlist":
-      return "Playlist";
     case "downloads":
       return "Téléchargements";
     case "settings":
@@ -210,17 +207,6 @@ function UnderConstruction({ title }: { title: string }): JSX.Element {
 }
 
 // --- Pages ---------------------------------------------------------------------------------------
-
-/** Ancienne vue Playlists + demande de création venue de la barre latérale (bouton +). */
-function PlaylistsPage({ onPlay }: { onPlay: RouteViewActions["playTracks"] }): JSX.Element {
-  const createRequested = useUi((s) => s.playlistCreateRequested);
-  const consume = useCallback((): void => {
-    uiStore.getState().consumePlaylistCreate();
-  }, []);
-  return (
-    <Playlists onPlay={onPlay} createFocusRequested={createRequested} onCreateFocused={consume} />
-  );
-}
 
 /**
  * Accueil provisoire (jusqu'à la Tâche 11) : la grille d'albums sous l'en-tête d'accueil, ou
@@ -292,51 +278,5 @@ function Onboarding(): JSX.Element {
         {scanMsg && <div className="scan-note">{scanMsg}</div>}
       </div>
     </section>
-  );
-}
-
-/** Recherche (ancienne vue de résultats, désormais rendue avec la grille d'albums de la Tâche 6). */
-function SearchPage({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
-  const query = useLibrary((s) => s.query);
-  const results = useLibrary((s) => s.results);
-  const searched = useLibrary((s) => s.searched);
-  const menus = useViewMenus(actions);
-  const q = query.trim();
-
-  const onPlay = useCallback(
-    (album: Album): void => {
-      const p = playerStore.getState();
-      if (p.currentTrack?.albumId === album.id && canResume(p.status)) actions.togglePlay();
-      else actions.playAlbumInOrder(album);
-    },
-    [actions],
-  );
-  const onContextMenu = useCallback(
-    (album: Album, e: React.MouseEvent<HTMLElement>): void => {
-      void menus.openAlbumMenu(album, anchorFromEvent(e));
-    },
-    [menus],
-  );
-
-  return (
-    <>
-      <PageHeader title="Recherche" sub={q ? `Résultats pour « ${q} »` : null} />
-      {q ? (
-        <SearchResults
-          tracks={results}
-          query={query}
-          searched={searched}
-          scrollRef={scrollRef}
-          onPlay={onPlay}
-          onContextMenu={onContextMenu}
-        />
-      ) : (
-        <EmptyState
-          icon={Search}
-          title="Que veux-tu écouter ?"
-          text="Tape un titre, un artiste ou un album dans le champ de recherche."
-        />
-      )}
-    </>
   );
 }

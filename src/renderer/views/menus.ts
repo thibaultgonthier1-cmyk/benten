@@ -1,11 +1,12 @@
 import type React from "react";
 import { useMemo } from "react";
-import { CircleAlert, ListPlus } from "lucide-react";
+import { ListPlus } from "lucide-react";
 import type { Album } from "../lib/library";
 import type { TrackRow } from "../../shared/types";
 import type { RouteViewActions } from "../shell/RouteView";
 import {
   albumMenuItems,
+  playlistSubmenu,
   selectionMenuItems,
   trackMenuItems,
   type AlbumMenuActions,
@@ -13,9 +14,10 @@ import {
   type SelectionMenuActions,
   type TrackMenuActions,
 } from "../shell/albumMenu";
-import { openMenu } from "../ui/menuStore";
-import { quoted, toast } from "../ui/toastStore";
+import { openMenu, type MenuItem } from "../ui/menuStore";
 import { playerStore } from "../state/player";
+import { playlistsStore } from "../state/playlists";
+import { addToPlaylist, openNewPlaylist } from "./playlistActions";
 import { uiStore } from "../state/ui";
 
 /** Point d'ouverture d'un menu (coordonnées client) ; `focusFirst` pour une ouverture clavier. */
@@ -42,31 +44,36 @@ export function anchorBelow(e: React.MouseEvent<HTMLElement>): MenuAnchor {
   return { x: r.left, y: r.bottom + 6, focusFirst: e.detail === 0 };
 }
 
-/** Playlists existantes (récentes d'abord) ; liste vide si l'IPC échoue ou est absente. */
+/** Playlists existantes, modifiées récemment d'abord (store des playlists, chargé au besoin). */
 async function listPlaylists(): Promise<PlaylistTarget[]> {
-  try {
-    const rows = (await window.benten?.playlists.list()) ?? [];
-    return rows.map((r) => ({ id: r.id, name: r.name }));
-  } catch {
-    return [];
-  }
+  const store = playlistsStore.getState();
+  if (!store.loaded) await store.refresh();
+  return playlistsStore.getState().rows.map((r) => ({ id: r.id, name: r.name }));
 }
 
-/** Ajoute des pistes à une playlist existante, puis confirme (ou signale l'échec) par un toast. */
-export async function addTracksToPlaylist(playlist: PlaylistTarget, tracks: readonly TrackRow[]): Promise<void> {
-  const name = quoted(playlist.name);
-  try {
-    await window.benten.playlists.add(
-      playlist.id,
-      tracks.map((t) => t.id),
-    );
-    toast(
-      tracks.length > 1 ? `${tracks.length} titres ajoutés à ${name}` : `Ajouté à ${name}`,
-      { icon: ListPlus },
-    );
-  } catch {
-    toast(`Impossible d'ajouter à ${name}`, { icon: CircleAlert });
-  }
+/** Point de départ du vol de la pochette : l'endroit où le menu a été ouvert. */
+const originOf = (anchor: MenuAnchor): { x: number; y: number } => ({ x: anchor.x, y: anchor.y });
+
+/**
+ * Entrée « Ajouter à une playlist ▸ » pour des titres quelconques (menus « ⋯ » des pages) :
+ * « Nouvelle playlist… » puis les playlists existantes.
+ */
+export async function playlistMenuItem(
+  tracks: readonly TrackRow[],
+  anchor: MenuAnchor,
+  opts: { disabled?: boolean } = {},
+): Promise<MenuItem> {
+  const playlists = await listPlaylists();
+  return {
+    label: "Ajouter à une playlist",
+    icon: ListPlus,
+    disabled: opts.disabled ?? tracks.length === 0,
+    submenu: playlistSubmenu(
+      () => openNewPlaylist(tracks, originOf(anchor)),
+      (p) => void addToPlaylist(p, tracks, { origin: originOf(anchor) }),
+      playlists,
+    ),
+  };
 }
 
 export interface ViewMenus {
@@ -76,7 +83,7 @@ export interface ViewMenus {
     track: TrackRow,
     anchor: MenuAnchor,
     play: (track: TrackRow) => void,
-    opts?: { hideAlbumLink?: boolean },
+    opts?: { hideAlbumLink?: boolean; extra?: readonly MenuItem[] },
   ): Promise<void>;
   /**
    * Menu d'une sélection de titres (vue Titres) : `play` lit un titre dans son contexte (la liste
@@ -99,19 +106,19 @@ export interface ViewMenus {
  */
 export function useViewMenus(actions: RouteViewActions): ViewMenus {
   return useMemo<ViewMenus>(() => {
-    const albumActions: AlbumMenuActions = {
+    const albumActions = (anchor: MenuAnchor): AlbumMenuActions => ({
       playAlbum: (album) => actions.playAlbumInOrder(album),
       albumPlayNext: actions.albumPlayNext,
       albumAddToQueue: actions.albumAddToQueue,
-      albumAddToPlaylist: actions.albumAddToPlaylist,
-      addToPlaylist: (p, tracks) => void addTracksToPlaylist(p, tracks),
+      albumAddToPlaylist: (album) => openNewPlaylist(album.tracks, originOf(anchor)),
+      addToPlaylist: (p, tracks) => void addToPlaylist(p, tracks, { origin: originOf(anchor) }),
       toggleFavorite: (id) => playerStore.getState().toggleFavorite(id),
       goToArtist: (artist) => uiStore.getState().navigate({ name: "artist", artist }),
-    };
+    });
     return {
       async openAlbumMenu(album, anchor) {
         const playlists = await listPlaylists();
-        const items = albumMenuItems(album, albumActions, playerStore.getState().favoriteIds, playlists);
+        const items = albumMenuItems(album, albumActions(anchor), playerStore.getState().favoriteIds, playlists);
         openMenu(anchor.x, anchor.y, items, { focusFirst: anchor.focusFirst });
       },
       async openTrackMenu(track, anchor, play, opts) {
@@ -119,8 +126,8 @@ export function useViewMenus(actions: RouteViewActions): ViewMenus {
           play,
           playNext: (tracks) => playerStore.getState().playNext(tracks),
           addToQueue: (tracks) => playerStore.getState().addToQueue(tracks),
-          newPlaylist: (tracks, label) => actions.openPlaylistSheet(tracks.map((t) => t.id), label),
-          addToPlaylist: (p, tracks) => void addTracksToPlaylist(p, tracks),
+          newPlaylist: (tracks) => openNewPlaylist(tracks, originOf(anchor)),
+          addToPlaylist: (p, tracks) => void addToPlaylist(p, tracks, { origin: originOf(anchor) }),
           toggleFavorite: (id) => playerStore.getState().toggleFavorite(id),
           goToAlbum: (albumId) => uiStore.getState().navigate({ name: "album", id: albumId }),
           goToArtist: (artist) => uiStore.getState().navigate({ name: "artist", artist }),
@@ -135,8 +142,8 @@ export function useViewMenus(actions: RouteViewActions): ViewMenus {
           playTracks,
           playNext: (t) => playerStore.getState().playNext(t),
           addToQueue: (t) => playerStore.getState().addToQueue(t),
-          newPlaylist: (t, label) => actions.openPlaylistSheet(t.map((x) => x.id), label),
-          addToPlaylist: (p, t) => void addTracksToPlaylist(p, t),
+          newPlaylist: (t) => openNewPlaylist(t, originOf(anchor)),
+          addToPlaylist: (p, t) => void addToPlaylist(p, t, { origin: originOf(anchor) }),
           toggleFavorite: (id) => playerStore.getState().toggleFavorite(id),
           goToAlbum: (albumId) => uiStore.getState().navigate({ name: "album", id: albumId }),
           goToArtist: (artist) => uiStore.getState().navigate({ name: "artist", artist }),

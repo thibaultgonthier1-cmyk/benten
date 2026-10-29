@@ -32,8 +32,9 @@ import {
   versionRows,
   withoutIds,
 } from "../src/renderer/lib/viewModels";
+import * as VM from "../src/renderer/lib/viewModels";
 import { describeQuality, groupTracksToAlbums, type Album } from "../src/renderer/lib/library";
-import type { TrackRow } from "../src/shared/types";
+import type { PlaylistRow, TrackRow } from "../src/shared/types";
 
 const track = (id: number, over: Partial<TrackRow> = {}): TrackRow =>
   ({
@@ -828,5 +829,166 @@ describe("artistShowsPause", () => {
     expect(artistShowsPause(list, true, list)).toBe(true);
     expect(artistShowsPause(list, false, list)).toBe(false);
     expect(artistShowsPause([list[1]!], true, list)).toBe(false);
+  });
+});
+
+/* ------------------------------ Tâche 9 : playlists + recherche ------------------------------ */
+
+describe("mosaicArtKeys", () => {
+  it("jusqu'à 4 artKey DISTINCTS dans l'ordre, sans null", () => {
+    const keys = ["a", "a", "b", null, "c", "d", "e"];
+    const tracks = keys.map((k, i) => track(i + 1, { artKey: k }));
+    expect(VM.mosaicArtKeys(tracks)).toEqual(["a", "b", "c", "d"]);
+  });
+  it("vide → []", () => {
+    expect(VM.mosaicArtKeys([])).toEqual([]);
+    expect(VM.mosaicArtKeys([track(1), track(2)])).toEqual([]);
+  });
+});
+
+describe("buildSearchSections", () => {
+  const pardon = track(1, { title: "Pardon", artist: "Ridsa", album: "Vagabond", albumId: 10 });
+  const pardonSlowed = track(2, { title: "Pardon (Slowed)", artist: "Ridsa", album: "Vagabond", albumId: 10 });
+  const other = track(3, { title: "Le pardon des anges", artist: "Ico", album: "Ciel", albumId: 11 });
+  const ridsa1 = track(4, { title: "Là c'est sale", artist: "Ridsa", album: "Tranquille", albumId: 12 });
+  const feat = track(5, { title: "Mélo", artist: "Tiakola feat. Ridsa", album: "Mélo", albumId: 13 });
+  const pl = (id: number, name: string): PlaylistRow => ({ id, name, trackCount: 0, createdAt: id, updatedAt: id });
+
+  it("« pardon » → meilleur résultat = le titre « Pardon » (correspondance exacte, avant les autres)", () => {
+    const s = VM.buildSearchSections("pardon", [other, pardonSlowed, pardon], []);
+    expect(s.top).toEqual({ kind: "track", id: "1" });
+    expect(s.tracks.map((t) => t.id)).toEqual([1, 2, 3]);
+  });
+
+  it("« ridsa » → meilleur résultat = l'artiste ; artistes crédités, sans doublon, exact d'abord", () => {
+    const s = VM.buildSearchSections("RIDSA", [feat, ridsa1, pardon], []);
+    expect(s.top).toEqual({ kind: "artist", id: "Ridsa" });
+    expect(s.artists).toEqual(["Ridsa"]);
+  });
+
+  it("artiste trouvé sans accents ni casse ; un album exact l'emporte sur le premier titre", () => {
+    const s = VM.buildSearchSections("melo", [feat], []);
+    // Titre exact « Mélo » d'abord (titre > artiste > album).
+    expect(s.top).toEqual({ kind: "track", id: "5" });
+    const t = VM.buildSearchSections("tranquille", [ridsa1], []);
+    expect(t.top).toEqual({ kind: "album", id: "12" });
+    expect(t.albums.map((a) => a.id)).toEqual([12]);
+  });
+
+  it("albums : seulement ceux dont le titre ou l'artiste correspond", () => {
+    const s = VM.buildSearchSections("vagabond", [pardon, pardonSlowed, other], []);
+    expect(s.albums.map((a) => a.id)).toEqual([10]);
+    expect(s.albums[0]!.tracks).toHaveLength(2);
+  });
+
+  it("aucune correspondance exacte → premier titre (un préfixe d'artiste passe avant)", () => {
+    expect(VM.buildSearchSections("anges", [other], []).top).toEqual({ kind: "track", id: "3" });
+    expect(VM.buildSearchSections("rids", [ridsa1], []).top).toEqual({ kind: "artist", id: "Ridsa" });
+  });
+
+  it("playlists filtrées par nom (insensible aux accents et à la casse)", () => {
+    const rows = [pl(1, "Été 2024"), pl(2, "Sport"), pl(3, "ete calme")];
+    const s = VM.buildSearchSections("ÉTÉ", [], rows);
+    expect(s.playlists.map((p) => p.id)).toEqual([1, 3]);
+    expect(s.top).toBeNull();
+  });
+
+  it("terme vide → tout vide", () => {
+    const s = VM.buildSearchSections("   ", [pardon], [pl(1, "x")]);
+    expect(s).toEqual({ top: null, tracks: [], albums: [], artists: [], playlists: [] });
+  });
+});
+
+describe("playlistSummary", () => {
+  it("« n titres · durée » ; singulier ; vide", () => {
+    expect(VM.playlistSummary([track(1, { durationSec: 1500 }), track(2, { durationSec: 1200 })])).toBe("2 titres · 45 min");
+    expect(VM.playlistSummary([track(1, { durationSec: 200 })])).toBe("1 titre · 3 min");
+    expect(VM.playlistSummary([])).toBe("Aucun titre");
+  });
+});
+
+describe("playlistEntryKeys", () => {
+  it("clé stable par (id, n-ième occurrence) : un réordonnancement garde les clés", () => {
+    const a = track(1);
+    const b = track(2);
+    expect(VM.playlistEntryKeys([a, b, a])).toEqual(["1#0", "2#0", "1#1"]);
+    expect(VM.playlistEntryKeys([b, a, a])).toEqual(["2#0", "1#0", "1#1"]);
+  });
+});
+
+describe("moveItem / dropIndex", () => {
+  it("moveItem déplace sans muter l'entrée", () => {
+    const list = ["a", "b", "c", "d"];
+    expect(VM.moveItem(list, 0, 2)).toEqual(["b", "c", "a", "d"]);
+    expect(VM.moveItem(list, 3, 0)).toEqual(["d", "a", "b", "c"]);
+    expect(VM.moveItem(list, 1, 1)).toEqual(list);
+    expect(VM.moveItem(list, 9, 0)).toEqual(list);
+    expect(list).toEqual(["a", "b", "c", "d"]);
+  });
+  it("dropIndex : index cible de `reorder(from, to)` pour un dépôt avant/après la ligne survolée", () => {
+    // Glisser la 1re ligne APRÈS la 3e → elle devient la 3e (index 2).
+    expect(VM.dropIndex(0, 2, true)).toBe(2);
+    // Glisser la 1re AVANT la 3e → index 1.
+    expect(VM.dropIndex(0, 2, false)).toBe(1);
+    // Vers le haut : la 4e avant la 1re → 0 ; après la 1re → 1.
+    expect(VM.dropIndex(3, 0, false)).toBe(0);
+    expect(VM.dropIndex(3, 0, true)).toBe(1);
+    // Sur elle-même : aucun déplacement.
+    expect(VM.dropIndex(2, 2, false)).toBe(2);
+    expect(VM.dropIndex(2, 2, true)).toBe(2);
+  });
+});
+
+describe("partitionNewTracks", () => {
+  it("sépare les nouveaux titres des doublons, ordre conservé, sans répétition", () => {
+    expect(VM.partitionNewTracks([1, 2], [3, 1, 4, 3])).toEqual({ fresh: [3, 4], dupes: [1] });
+    expect(VM.partitionNewTracks([], [5])).toEqual({ fresh: [5], dupes: [] });
+  });
+});
+
+describe("playlistsByCreation / uniquePlaylistName", () => {
+  it("tri par date de création croissante (date d'ajout), départage par id", () => {
+    const rows: PlaylistRow[] = [
+      { id: 3, name: "c", trackCount: 0, createdAt: 30, updatedAt: 99 },
+      { id: 1, name: "a", trackCount: 0, createdAt: 10, updatedAt: 1 },
+      { id: 2, name: "b", trackCount: 0, createdAt: 10, updatedAt: 50 },
+    ];
+    expect(VM.playlistsByCreation(rows).map((r) => r.id)).toEqual([1, 2, 3]);
+    expect(rows.map((r) => r.id)).toEqual([3, 1, 2]);
+  });
+  it("nom par défaut libre (casse et accents ignorés)", () => {
+    expect(VM.uniquePlaylistName("Nouvelle playlist", [])).toBe("Nouvelle playlist");
+    expect(VM.uniquePlaylistName("Nouvelle playlist", ["nouvelle PLAYLIST", "Nouvelle playlist 2"])).toBe(
+      "Nouvelle playlist 3",
+    );
+  });
+});
+
+describe("staggerMs", () => {
+  it("20 ms par rang, plafonné", () => {
+    expect(VM.staggerMs(0)).toBe(0);
+    expect(VM.staggerMs(3)).toBe(60);
+    expect(VM.staggerMs(500)).toBe(VM.STAGGER_CAP * 20);
+    expect(VM.staggerMs(5, 10, 2)).toBe(20);
+  });
+});
+
+describe("searchPhase", () => {
+  it("terme vide → idle", () => {
+    expect(VM.searchPhase("  ", { searched: false, resultsFor: "" }, false)).toBe("idle");
+  });
+
+  it("« Aucun résultat » seulement une fois la réponse du terme COURANT arrivée", () => {
+    // Anti-rebond en cours, rien à montrer : squelettes, jamais « aucun résultat ».
+    expect(VM.searchPhase("montagem", { searched: false, resultsFor: "" }, false)).toBe("loading");
+    // Réponse d'un AUTRE terme : pas encore conclu.
+    expect(VM.searchPhase("montagem", { searched: true, resultsFor: "montag" }, false)).toBe("loading");
+    // Réponse du terme courant, vide : là seulement.
+    expect(VM.searchPhase(" montagem ", { searched: true, resultsFor: "montagem" }, false)).toBe("empty");
+  });
+
+  it("des résultats (même ceux du terme précédent) restent affichés pendant la frappe", () => {
+    expect(VM.searchPhase("monta", { searched: false, resultsFor: "mont" }, true)).toBe("results");
+    expect(VM.searchPhase("monta", { searched: true, resultsFor: "monta" }, true)).toBe("results");
   });
 });

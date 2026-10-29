@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import "./theme/tokens.css";
 import { playerStore } from "./state/player";
 import { libraryStore } from "./state/library";
 import { startAudioRuntime, type AudioRuntime } from "./runtime/audioRuntime";
 import { restorePlaybackState } from "./runtime/restore";
 import type { Album } from "./lib/library";
-import type { TrackRow } from "../shared/types";
 import { Shell } from "./shell/Shell";
 import type { RouteViewActions } from "./shell/RouteView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
-import { AddToPlaylistSheet } from "./components/AddToPlaylistSheet";
 
 /**
  * Runtime audio de la page : demarre UNE SEULE fois (garde au niveau du module). Sous StrictMode,
@@ -52,12 +50,6 @@ export function App(): JSX.Element {
   // chaque rendu (idempotent) plutot que fige dans un ref : apres un HMR qui remplace le runtime,
   // un ref preserve par Fast Refresh pointerait encore vers l'ancien moteur dispose.
   const { engine, controls } = ensureAudioRuntime();
-
-  // Feuille « Ajouter à une playlist » : pistes a ajouter + libelle (titre d'album).
-  const [plSheet, setPlSheet] = useState<{ open: boolean; trackIds: number[]; label?: string }>({
-    open: false,
-    trackIds: [],
-  });
 
   useEffect(() => {
     const library = libraryStore.getState();
@@ -106,24 +98,6 @@ export function App(): JSX.Element {
 
   const togglePlay = useCallback((): void => controls.toggle(), [controls]);
 
-  // Lecture d'une playlist : on fabrique un album ephemere (id synthetique) a partir de ses pistes
-  // et on reutilise exactement le chemin de file de `playAlbum` (store.setQueue + engine.setQueue).
-  const playTracks = useCallback(
-    (tracks: readonly TrackRow[], index = 0): void => {
-      if (tracks.length === 0) return;
-      const pseudo: Album = {
-        id: -1,
-        title: "Playlist",
-        artist: "",
-        artKey: tracks.find((t) => t.artKey)?.artKey ?? null,
-        tracks,
-      };
-      controls.playAlbum(pseudo, index);
-      playerStore.getState().setNowPlayingOpen(true);
-    },
-    [controls],
-  );
-
   // Actions des menus d'album (clic droit / « ⋯ »). Memoisees : les tuiles (`AlbumTile`) sont
   // `memo`, donc des callbacks stables evitent de re-rendre toute la grille virtualisee.
   const albumPlayNext = useCallback((album: Album): void => {
@@ -132,15 +106,6 @@ export function App(): JSX.Element {
   const albumAddToQueue = useCallback((album: Album): void => {
     playerStore.getState().addToQueue(album.tracks);
   }, []);
-  const albumAddToPlaylist = useCallback((album: Album): void => {
-    setPlSheet({ open: true, trackIds: album.tracks.map((t) => t.id), label: album.title });
-  }, []);
-  const openPlaylistSheet = useCallback((trackIds: readonly number[], label?: string): void => {
-    setPlSheet({ open: true, trackIds: trackIds.slice(), label });
-  }, []);
-  const closePlSheet = useCallback((): void => {
-    setPlSheet((s) => ({ ...s, open: false }));
-  }, []);
 
   const views = useMemo<RouteViewActions>(
     () => ({
@@ -148,13 +113,10 @@ export function App(): JSX.Element {
       playAlbumInOrder,
       shuffleAlbum,
       togglePlay,
-      playTracks,
       albumPlayNext,
       albumAddToQueue,
-      albumAddToPlaylist,
-      openPlaylistSheet,
     }),
-    [playAlbum, playAlbumInOrder, shuffleAlbum, togglePlay, playTracks, albumPlayNext, albumAddToQueue, albumAddToPlaylist, openPlaylistSheet],
+    [playAlbum, playAlbumInOrder, shuffleAlbum, togglePlay, albumPlayNext, albumAddToQueue],
   );
 
   return (
@@ -163,12 +125,6 @@ export function App(): JSX.Element {
 
       <NowPlaying controls={controls} />
       <QueuePanel />
-      <AddToPlaylistSheet
-        open={plSheet.open}
-        onClose={closePlSheet}
-        trackIds={plSheet.trackIds}
-        label={plSheet.label}
-      />
     </>
   );
 }

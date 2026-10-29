@@ -25,7 +25,7 @@ export interface AlbumMenuActions {
   playAlbum(album: Album): void;
   albumPlayNext(album: Album): void;
   albumAddToQueue(album: Album): void;
-  /** « Nouvelle playlist… » : ouvre la feuille « Ajouter à une playlist » existante. */
+  /** « Nouvelle playlist… » : ouvre le dialogue de création (avec les pistes de l'album). */
   albumAddToPlaylist(album: Album): void;
   /** Ajoute les pistes à une playlist existante (l'appelant confirme par un toast). */
   addToPlaylist(playlist: PlaylistTarget, tracks: readonly TrackRow[]): void;
@@ -38,7 +38,7 @@ export interface TrackMenuActions {
   play(track: TrackRow): void;
   playNext(tracks: readonly TrackRow[]): void;
   addToQueue(tracks: readonly TrackRow[]): void;
-  /** « Nouvelle playlist… » : feuille existante, pré-remplie avec `label`. */
+  /** « Nouvelle playlist… » : dialogue de création, avec ces titres (`label` : ce qu'on ajoute). */
   newPlaylist(tracks: readonly TrackRow[], label: string): void;
   addToPlaylist(playlist: PlaylistTarget, tracks: readonly TrackRow[]): void;
   toggleFavorite(trackId: number): void;
@@ -47,10 +47,10 @@ export interface TrackMenuActions {
 }
 
 /**
- * Sous-menu « Ajouter à une playlist ▸ » : création (feuille existante) puis les playlists
+ * Sous-menu « Ajouter à une playlist ▸ » : création (dialogue « Nouvelle playlist… ») puis les playlists
  * existantes, dans l'ordre fourni (récentes d'abord, cf. `playlists.list`).
  */
-function playlistSubmenu(
+export function playlistSubmenu(
   onNew: () => void,
   onAdd: (p: PlaylistTarget) => void,
   playlists: readonly PlaylistTarget[],
@@ -137,14 +137,15 @@ export function albumMenuItems(
 
 /**
  * Menu contextuel d'une ligne de titre. `hideAlbumLink` retire « Aller à l'album » quand on est
- * déjà sur la page de cet album.
+ * déjà sur la page de cet album ; `extra` ajoute des entrées propres à la page en fin de menu
+ * (ex. « Retirer de la playlist »), après un séparateur.
  */
 export function trackMenuItems(
   track: TrackRow,
   actions: TrackMenuActions,
   favoriteIds: ReadonlySet<number>,
   playlists: readonly PlaylistTarget[] = [],
-  opts: { hideAlbumLink?: boolean } = {},
+  opts: { hideAlbumLink?: boolean; extra?: readonly MenuItem[] } = {},
 ): MenuItem[] {
   const isFav = favoriteIds.has(track.id);
   const name = quoted(track.title);
@@ -199,6 +200,7 @@ export function trackMenuItems(
     disabled: !track.artist,
     onSelect: () => actions.goToArtist(track.artist),
   });
+  if (opts.extra && opts.extra.length > 0) items.push("separator", ...opts.extra);
   return items;
 }
 

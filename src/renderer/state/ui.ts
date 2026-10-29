@@ -64,11 +64,6 @@ export interface UiState {
   future: Route[];
   compact: boolean;
   shortcutsHelpOpen: boolean;
-  /**
-   * Demande ponctuelle « créer une playlist » (bouton + de la barre latérale) : la vue Playlists
-   * focalise son champ de création puis la consomme (`consumePlaylistCreate`).
-   */
-  playlistCreateRequested: boolean;
   /** Tri / filtre de la grille d'albums (le filtre Favoris, lui, est porté par la route). */
   albumsView: AlbumsViewPrefs;
   tracksView: TracksViewPrefs;
@@ -76,16 +71,17 @@ export interface UiState {
   tracksExpanded: ReadonlySet<number>;
   /** Pousse la route courante dans `past`, vide `future` ; ignore une route identique. */
   navigate(route: Route): void;
+  /**
+   * Remplace la route courante SANS toucher à l'historique (frappe dans la recherche : `route.q`
+   * suit le champ sans empiler une entrée par touche ; playlist supprimée). Route identique : no-op.
+   */
+  replace(route: Route): void;
   back(): void;
   forward(): void;
   canBack(): boolean;
   canForward(): boolean;
   setCompact(on: boolean): void;
   setShortcutsHelpOpen(on: boolean): void;
-  /** Ouvre la page Playlists et demande le focus du champ de création. */
-  requestPlaylistCreate(): void;
-  /** Vrai (une seule fois) si une création était demandée ; remet la demande à zéro. */
-  consumePlaylistCreate(): boolean;
   setAlbumsView(patch: Partial<AlbumsViewPrefs>): void;
   /**
    * Clic sur un en-tête de colonne : même colonne → inverse le sens ; autre colonne → tri
@@ -153,7 +149,6 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
     future: [],
     compact: false,
     shortcutsHelpOpen: false,
-    playlistCreateRequested: false,
     albumsView: DEFAULT_ALBUMS_VIEW,
     tracksView: DEFAULT_TRACKS_VIEW,
     tracksExpanded: new Set<number>(),
@@ -164,6 +159,11 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
       const nextPast = [...past, current];
       if (nextPast.length > HISTORY_LIMIT) nextPast.splice(0, nextPast.length - HISTORY_LIMIT);
       set({ route, past: nextPast, future: [] });
+    },
+
+    replace(route) {
+      if (sameRoute(get().route, route)) return;
+      set({ route });
     },
 
     back() {
@@ -194,17 +194,6 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
 
     setShortcutsHelpOpen(on) {
       set({ shortcutsHelpOpen: on === true });
-    },
-
-    requestPlaylistCreate() {
-      get().navigate({ name: "playlists" });
-      set({ playlistCreateRequested: true });
-    },
-
-    consumePlaylistCreate() {
-      if (!get().playlistCreateRequested) return false;
-      set({ playlistCreateRequested: false });
-      return true;
     },
 
     setAlbumsView(patch) {

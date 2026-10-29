@@ -109,18 +109,19 @@ describe("ui router (navigate / back / forward)", () => {
     expect(s.getState().shortcutsHelpOpen).toBe(true);
   });
 
-  it("requestPlaylistCreate ouvre Playlists ; la demande se consomme une seule fois", () => {
+  it("replace() remplace la route courante sans toucher à l'historique", () => {
     const s = createUiStore();
-    expect(s.getState().consumePlaylistCreate()).toBe(false);
-    s.getState().requestPlaylistCreate();
-    expect(s.getState().route).toEqual({ name: "playlists" });
-    expect(s.getState().playlistCreateRequested).toBe(true);
-    expect(s.getState().consumePlaylistCreate()).toBe(true);
-    expect(s.getState().consumePlaylistCreate()).toBe(false);
-    // Déjà sur Playlists : pas de nouvelle entrée d'historique, mais la demande est reposée.
-    s.getState().requestPlaylistCreate();
+    s.getState().navigate(albums);
+    s.getState().navigate(album3);
+    s.getState().back(); // route albums, future [album3]
+    s.getState().replace({ name: "search", q: "a" });
+    expect(s.getState().route).toEqual({ name: "search", q: "a" });
     expect(s.getState().past).toEqual([home]);
-    expect(s.getState().consumePlaylistCreate()).toBe(true);
+    expect(s.getState().future).toEqual([album3]);
+    // Même route : aucun changement d'état (pas de rendu inutile).
+    const before = s.getState();
+    s.getState().replace({ name: "search", q: "a" });
+    expect(s.getState()).toBe(before);
   });
 
   it("le singleton uiStore expose la même API", () => {

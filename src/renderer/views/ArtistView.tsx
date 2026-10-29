@@ -1,7 +1,7 @@
 import type React from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, Clock3, Ellipsis, ListEnd, ListPlus, ListStart, MicVocal, Pause, Play, Shuffle } from "lucide-react";
+import { ChevronDown, Clock3, Ellipsis, ListEnd, ListStart, MicVocal, Pause, Play, Shuffle } from "lucide-react";
 import type { TrackRow } from "../../shared/types";
 import type { Album } from "../lib/library";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
@@ -40,7 +40,7 @@ import {
 } from "./artistPlay";
 import { EmptyState } from "./common";
 import { HeroCompactBar, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
-import { anchorBelow, anchorFromEvent, useViewMenus } from "./menus";
+import { anchorBelow, anchorFromEvent, playlistMenuItem, useViewMenus } from "./menus";
 import "./views.css";
 import "./artists.css";
 
@@ -172,8 +172,9 @@ function ArtistPageView({
     [menus],
   );
 
-  const openMoreMenu = (e: React.MouseEvent<HTMLElement>): void => {
+  const openMoreMenu = async (e: React.MouseEvent<HTMLElement>): Promise<void> => {
     const a = anchorBelow(e);
+    const addTo = await playlistMenuItem(playList, a, { disabled: empty });
     openMenu(
       a.x,
       a.y,
@@ -181,12 +182,7 @@ function ArtistPageView({
         { label: "Lire ensuite", icon: ListStart, disabled: empty, onSelect: () => playArtistNext(page.name, playList) },
         { label: "Ajouter à la file", icon: ListEnd, disabled: empty, onSelect: () => addArtistToQueue(page.name, playList) },
         "separator",
-        {
-          label: "Ajouter à une playlist…",
-          icon: ListPlus,
-          disabled: empty,
-          onSelect: () => actions.openPlaylistSheet(playList.map((t) => t.id), page.name),
-        },
+        addTo,
       ],
       { focusFirst: a.focusFirst },
     );
@@ -290,7 +286,7 @@ function ArtistPageView({
           variant="solid"
           size={40}
           aria-haspopup="menu"
-          onClick={openMoreMenu}
+          onClick={(e) => void openMoreMenu(e)}
         />
       </motion.div>
 

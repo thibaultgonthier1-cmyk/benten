@@ -23,7 +23,7 @@ import { quoted, toast } from "../ui/toastStore";
  * un album éphémère passé à `playAlbumInOrder` / `shuffleAlbum` (aucune autre API de lecture).
  */
 
-/** Album éphémère d'un artiste (Playlists : -1, Titres : -2). */
+/** Album éphémère d'un artiste (Playlists : -1, Titres : -2, Recherche : -4). */
 export const ARTIST_ALBUM_ID = -3;
 
 /** Élément partagé avatar tuile → en-tête de la page artiste. */
@@ -106,13 +106,23 @@ export function isQueue(list: readonly TrackRow[]): boolean {
  * « Aléatoire ») ; une simple mise en pause ne touche pas au mélange.
  */
 export function playArtist(name: string, list: readonly TrackRow[], actions: RouteViewActions): void {
+  playListInOrder(artistAlbum(name, list), actions);
+}
+
+/**
+ * « Lecture » d'une liste (artiste, playlist) passée en album éphémère : sur sa propre file,
+ * bascule lecture/pause ; sinon la lit depuis le début. Ce qui DÉMARRE la lecture coupe le mélange ;
+ * une simple pause n'y touche pas.
+ */
+export function playListInOrder(album: Album, actions: RouteViewActions): void {
+  const list = album.tracks;
   if (list.length === 0) return;
   const p = playerStore.getState();
   const toggle = isQueue(list) && canResume(p.status);
   const willPlay = !toggle || p.status !== "playing";
   if (willPlay && p.shuffle) p.setShuffle(false);
   if (toggle) actions.togglePlay();
-  else actions.playAlbumInOrder(artistAlbum(name, list));
+  else actions.playAlbumInOrder(album);
 }
 
 export function shuffleArtist(name: string, list: readonly TrackRow[], actions: RouteViewActions): void {

@@ -243,4 +243,27 @@ describe("libraryStore — recherche anti-rebondée", () => {
     expect(store.getState().results).toEqual([]);
     expect(store.getState().searched).toBe(false);
   });
+
+  it("resultsFor = terme des résultats affichés ; revenir au dernier terme les rend AUSSITÔT (puis rafraîchit)", async () => {
+    vi.useFakeTimers();
+    const benten = fakeBenten();
+    const hit = [track(1, 1)];
+    benten.library.search.mockResolvedValue(hit);
+    vi.stubGlobal("window", { benten });
+    const store = createLibraryStore();
+
+    store.getState().setQuery("montagem ");
+    await vi.advanceTimersByTimeAsync(150);
+    expect(store.getState().resultsFor).toBe("montagem");
+
+    store.getState().setQuery("");
+    expect(store.getState().resultsFor).toBe("");
+    // Retour par « Précédent » : aucun squelette, les résultats connus sont là tout de suite.
+    store.getState().setQuery("montagem");
+    expect(store.getState().searched).toBe(true);
+    expect(store.getState().results).toEqual(hit);
+    expect(store.getState().resultsFor).toBe("montagem");
+    await vi.advanceTimersByTimeAsync(150);
+    expect(benten.library.search).toHaveBeenCalledTimes(2);
+  });
 });

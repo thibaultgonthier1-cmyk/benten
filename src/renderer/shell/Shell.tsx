@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { RouteView, type RouteViewActions } from "./RouteView";
@@ -8,6 +8,11 @@ import { useGlobalShortcuts } from "../lib/shortcuts";
 import { ContextMenuHost } from "../ui/ContextMenu";
 import { ToastHost } from "../ui/Toast";
 import { ShortcutsHelp } from "../ui/ShortcutsHelp";
+import { FlyLayer } from "../ui/FlyLayer";
+import { PlaylistDialogs } from "../views/PlaylistDialogs";
+import { libraryStore } from "../state/library";
+import { bindSearchQuery } from "../state/searchSync";
+import { uiStore } from "../state/ui";
 import "./shell.css";
 
 export interface ShellProps {
@@ -26,8 +31,9 @@ export interface ShellProps {
  * uni. Le contenu défile dans `.shell-scroll` (conteneur de défilement des listes virtualisées) ;
  * la barre du haut reste fixe au-dessus et gagne un filet dès que le contenu a défilé.
  *
- * Monte aussi les hôtes d'interaction (menu contextuel, toasts, aide des raccourcis — rendus dans
- * `document.body`) et les raccourcis clavier globaux (`createShellShortcuts`), câblés sur
+ * Monte aussi les hôtes d'interaction (menu contextuel, toasts, aide des raccourcis, dialogues de
+ * playlist, pochettes en vol — rendus dans `document.body`), la synchronisation terme de recherche
+ * ↔ route (`bindSearchQuery`) et les raccourcis clavier globaux (`createShellShortcuts`), câblés sur
  * `controls` / le store lecteur / le routeur.
  */
 export function Shell({ views, controls, player, topActions }: ShellProps): JSX.Element {
@@ -55,6 +61,9 @@ export function Shell({ views, controls, player, topActions }: ShellProps): JSX.
   );
   useGlobalShortcuts(shortcuts);
 
+  // Terme de recherche ↔ route `search` (précédent / suivant rendent le terme ; quitter vide le champ).
+  useEffect(() => bindSearchQuery(uiStore, libraryStore), []);
+
   return (
     <div className="shell">
       <Sidebar />
@@ -69,6 +78,8 @@ export function Shell({ views, controls, player, topActions }: ShellProps): JSX.
       <ContextMenuHost />
       <ToastHost />
       <ShortcutsHelp />
+      <PlaylistDialogs />
+      <FlyLayer />
     </div>
   );
 }
