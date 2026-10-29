@@ -65,6 +65,8 @@ export interface AudioDiagnosticsDeps {
   clearInterval?: (handle: unknown) => void;
   /** `latencyHint` demande a la creation du contexte (consigne dans l'entree `session`). */
   latencyHint?: string;
+  /** Ecrire l'entree `session` au demarrage (defaut `true` ; `false` pour un remontage). */
+  logSession?: boolean;
   mediaDevices?: (DiagEventTarget & { enumerateDevices(): Promise<{ kind: string }[]> }) | null;
   win?: DiagEventTarget | null;
   doc?: (DiagEventTarget & { visibilityState?: string }) | null;
@@ -237,7 +239,7 @@ export function startAudioDiagnostics(deps: AudioDiagnosticsDeps): AudioDiagnost
   try {
     const ctx = readContext();
     attachCtx(ctx);
-    emit("session", {
+    if (deps.logSession !== false) emit("session", {
       ...(ctx ? latencies(ctx) : { sampleRate: null, baseLatency: null, outputLatency: null }),
       latencyHint: deps.latencyHint ?? null,
       ctxState: ctx ? ctx.state : null,

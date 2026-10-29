@@ -50,6 +50,12 @@ async function fetchAllAlbums(): Promise<Album[]> {
   return groupTracksToAlbums(all);
 }
 
+/**
+ * L'entree `session` du journal audio n'est ecrite qu'UNE fois par processus renderer : sous
+ * React.StrictMode (dev), l'effet moteur est monte/demonte/remonte et ecrirait sinon 2 sessions.
+ */
+let audioSessionLogged = false;
+
 export function App(): JSX.Element {
   // UN SEUL moteur (AudioContext reel + NativeDecoder), cree une fois.
   const engineRef = useRef<AudioEngine>();
@@ -132,10 +138,12 @@ export function App(): JSX.Element {
       engine,
       append: diagSink.append,
       latencyHint: AUDIO_LATENCY_HINT,
+      logSession: !audioSessionLogged,
       mediaDevices: typeof navigator !== "undefined" ? (navigator.mediaDevices ?? null) : null,
       win: window,
       doc: document,
     });
+    audioSessionLogged = true;
     let raf = 0;
     // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
     // ~15 Hz (66 ms) via une porte pure pilotee par le timestamp rAF : PRELOAD_LEAD_SEC = 10 s dans

@@ -142,6 +142,23 @@ describe("startAudioDiagnostics — session", () => {
     expect(new Date(s[0]!.t).toISOString()).toBe(s[0]!.t);
     b.handle.stop();
   });
+
+  it("logSession:false n'ecrit pas d'entree session (remontage StrictMode) mais journalise le reste", () => {
+    const entries: DiagEntry[] = [];
+    const engine = new FakeEngine();
+    const h = startAudioDiagnostics({
+      getContext: () => new FakeCtx(),
+      engine,
+      append: (e) => entries.push(e),
+      setInterval: () => 1,
+      clearInterval: () => {},
+      logSession: false,
+    });
+    engine.set({ status: "paused" });
+    h.stop();
+    expect(entries.filter((e) => e.kind === "session")).toHaveLength(0);
+    expect(entries.filter((e) => e.kind === "engine")).toHaveLength(1);
+  });
 });
 
 describe("startAudioDiagnostics — detecteur de coupures (glitch)", () => {
