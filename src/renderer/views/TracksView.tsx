@@ -11,6 +11,7 @@ import {
   sortTracks,
   versionName,
   versionRows,
+  withoutIds,
   type TrackSortKey,
   type VersionGroup,
   type VersionRow,
@@ -112,14 +113,25 @@ export function TracksView({ scrollRef, actions }: TracksViewProps): JSX.Element
   const animTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => () => clearTimeout(animTimer.current), []);
 
+  // Sélection (ids de pistes ; l'ancre est un id) — déclarée ici : le repli d'un groupe la purge.
+  const [sel, setSel] = useState<ReadonlySet<number>>(new Set());
+  const [anchorId, setAnchorId] = useState<number | null>(null);
+
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const toggleGroup = useCallback(
     (leadId: number): void => {
       const isOpen = uiStore.getState().tracksExpanded.has(leadId);
+      const versions = isOpen ? rowsRef.current.filter((r) => r.depth === 1 && r.groupId === leadId) : [];
+      if (isOpen) {
+        // Les versions masquées sortent de la sélection (le menu / glisser n'agiraient pas sur
+        // des lignes invisibles) ; une ancre masquée revient au lead.
+        const hidden = versions.map((r) => r.track.id);
+        setSel((prev) => withoutIds(prev, hidden));
+        setAnchorId((a) => (a !== null && hidden.includes(a) ? leadId : a));
+      }
       if (animMs > 0) {
         if (isOpen) {
-          const versions = rowsRef.current.filter((r) => r.depth === 1 && r.groupId === leadId);
           setLeaving((prev) => new Map(prev).set(leadId, versions));
         } else {
           setLeaving((prev) => {
@@ -169,8 +181,6 @@ export function TracksView({ scrollRef, actions }: TracksViewProps): JSX.Element
   }, [rows, leaving]);
 
   // --- Sélection (ids de pistes ; l'ancre est un id) -----------------------------------------------
-  const [sel, setSel] = useState<ReadonlySet<number>>(new Set());
-  const [anchorId, setAnchorId] = useState<number | null>(null);
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const selRef = useRef({ sel, anchorId });
   selRef.current = { sel, anchorId };

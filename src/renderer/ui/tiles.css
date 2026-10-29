@@ -87,8 +87,20 @@
     transform: scaleY(1);
   }
 }
+/* En pause (ou tout statut autre que « playing ») : les barres s'arrêtent et se posent bas, à
+   des hauteurs fixes — l'équaliseur ne mime plus une lecture en cours. */
 .eq.is-paused i {
-  animation-play-state: paused;
+  animation: none;
+  transform: scaleY(0.3);
+}
+.eq.is-paused i:nth-child(2) {
+  transform: scaleY(0.5);
+}
+.eq.is-paused i:nth-child(3) {
+  transform: scaleY(0.22);
+}
+.eq.is-paused i:nth-child(4) {
+  transform: scaleY(0.4);
 }
 
 /* ---------- Tuile d'album ---------- */

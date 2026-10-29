@@ -390,43 +390,76 @@ export interface VersionGroup {
   versions: TrackRow[];
 }
 
+/** Écart de durée (s) au-delà duquel deux titres SANS tag sont des morceaux distincts. */
+export const SAME_SONG_MAX_DELTA_SEC = 2;
+
+/** Ordre d'ajout : date de création du fichier (inconnues en dernier), puis id. */
+const byAddedOrder = (a: TrackRow, b: TrackRow): number => {
+  const na = a.addedAtMs == null;
+  const nb = b.addedAtMs == null;
+  if (na !== nb) return na ? 1 : -1;
+  return (a.addedAtMs ?? 0) - (b.addedAtMs ?? 0) || a.id - b.id;
+};
+
+/** Durées compatibles d'un même enregistrement (une durée inconnue ne sépare pas). */
+const sameLength = (a: TrackRow, b: TrackRow): boolean => {
+  const da = safeDuration(a);
+  const db = safeDuration(b);
+  return da === 0 || db === 0 || Math.abs(da - db) <= SAME_SONG_MAX_DELTA_SEC;
+};
+
 /**
  * Regroupe les versions d'un même morceau : clé = `base` normalisée + artiste principal.
- * `lead` = la piste sans tag (plusieurs : plus petit `id`), sinon le plus petit `id` ; `versions`
- * = les autres, par `id`. Les groupes suivent l'ordre d'entrée de leur `lead` (on trie d'abord
- * avec `sortTracks`, puis on regroupe). Rien n'est supprimé : chaque piste est dans un groupe.
+ * Deux titres SANS tag de même clé ne sont le même morceau (deux sorties) que si leurs durées
+ * diffèrent d'au plus 2 s — deux « Intro » d'un artiste restent deux morceaux ; les versions
+ * taguées rejoignent le premier original ajouté. `lead` = l'original ajouté en premier (date de
+ * création, puis id), sinon la version ajoutée en premier ; `versions` = les autres, dans l'ordre
+ * d'ajout. Les groupes suivent l'ordre d'entrée de leur `lead` (on trie d'abord avec
+ * `sortTracks`, puis on regroupe). Rien n'est supprimé : chaque piste est dans un groupe.
  */
 export function groupVersions(tracks: readonly TrackRow[]): VersionGroup[] {
-  interface Acc {
-    members: { track: TrackRow; pos: number; tagged: boolean }[];
-  }
-  const byKey = new Map<string, Acc>();
-  tracks.forEach((track, pos) => {
+  const pos = new Map<number, number>();
+  const byKey = new Map<string, { track: TrackRow; tagged: boolean }[]>();
+  tracks.forEach((track, i) => {
+    pos.set(track.id, i);
     const { base, tag } = versionInfo(track.title);
     const key = `${base}\u0000${primaryArtist(track.artist)}`;
-    let acc = byKey.get(key);
-    if (!acc) {
-      acc = { members: [] };
-      byKey.set(key, acc);
+    let members = byKey.get(key);
+    if (!members) {
+      members = [];
+      byKey.set(key, members);
     }
-    acc.members.push({ track, pos, tagged: tag !== null });
+    members.push({ track, tagged: tag !== null });
   });
 
-  const groups: { group: VersionGroup; pos: number }[] = [];
-  for (const { members } of byKey.values()) {
-    let lead = members[0]!;
-    for (const m of members) {
-      const better = lead.tagged !== m.tagged ? !m.tagged : m.track.id < lead.track.id;
-      if (better) lead = m;
+  const groups: VersionGroup[] = [];
+  for (const members of byKey.values()) {
+    const originals = members.filter((m) => !m.tagged).map((m) => m.track).sort(byAddedOrder);
+    const tagged = members.filter((m) => m.tagged).map((m) => m.track).sort(byAddedOrder);
+    // Originaux regroupés par durée compatible avec l'original qui mène chaque grappe.
+    const clusters: TrackRow[][] = [];
+    for (const t of originals) {
+      const c = clusters.find((cl) => sameLength(cl[0]!, t));
+      if (c) c.push(t);
+      else clusters.push([t]);
     }
-    const versions = members
-      .filter((m) => m !== lead)
-      .map((m) => m.track)
-      .sort((a, b) => a.id - b.id);
-    groups.push({ group: { lead: lead.track, versions }, pos: lead.pos });
+    if (clusters.length === 0) clusters.push([tagged.shift()!]);
+    clusters[0]!.push(...tagged);
+    for (const [lead, ...rest] of clusters) groups.push({ lead: lead!, versions: rest.sort(byAddedOrder) });
   }
-  groups.sort((a, b) => a.pos - b.pos);
-  return groups.map((g) => g.group);
+  groups.sort((a, b) => pos.get(a.lead.id)! - pos.get(b.lead.id)!);
+  return groups;
+}
+
+/** La sélection sans `ids` (versions masquées au repli) ; même ensemble si rien ne change. */
+export function withoutIds(sel: ReadonlySet<number>, ids: Iterable<number>): ReadonlySet<number> {
+  let next: Set<number> | null = null;
+  for (const id of ids) {
+    if (!sel.has(id)) continue;
+    next ??= new Set(sel);
+    next.delete(id);
+  }
+  return next ?? sel;
 }
 
 /** Ligne affichée de la vue Titres regroupée (lead ou version dépliée). */

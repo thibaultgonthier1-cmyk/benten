@@ -17,6 +17,7 @@ import {
   versionInfo,
   versionName,
   versionRows,
+  withoutIds,
 } from "../src/renderer/lib/viewModels";
 import { describeQuality, groupTracksToAlbums, type Album } from "../src/renderer/lib/library";
 import type { TrackRow } from "../src/shared/types";
@@ -410,6 +411,38 @@ describe("groupVersions", () => {
     expect(g[0]!.versions.map((x) => x.id)).toEqual([5, 8]);
   });
 
+  it("versions et lead de repli ordonnés par date d'ajout (addedAtMs) puis id", () => {
+    const at = (id: number, title: string, addedAtMs: number | null) => track(id, { title, artist: "A", addedAtMs });
+    const g = groupVersions([
+      at(1, "LUZ ROJA (VIP Mix - Super Slowed)", 900),
+      at(2, "LUZ ROJA", 100),
+      at(3, "LUZ ROJA (Slowed)", 200),
+      at(4, "LUZ ROJA (Super Slowed)", null),
+      at(5, "LUZ ROJA (Edit Slowed)", 200),
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0]!.versions.map((x) => x.id)).toEqual([3, 5, 1, 4]);
+    // Aucun original : le lead est la version ajoutée en premier (pas le plus petit id).
+    const h = groupVersions([at(1, "X (Slowed)", 500), at(2, "X (Sped Up)", 50)]);
+    expect(h[0]!.lead.id).toBe(2);
+    // Plusieurs originaux : le plus ancien ajouté mène.
+    const k = groupVersions([at(1, "Y", 500), at(2, "Y", 50)]);
+    expect(k[0]!.lead.id).toBe(2);
+  });
+
+  it("deux titres SANS tag (même base, même artiste) ne fusionnent que si leurs durées sont à ≤ 2 s", () => {
+    const d = (id: number, title: string, durationSec: number) => track(id, { title, artist: "A", durationSec });
+    // Deux « Intro » différentes d'un même artiste : deux morceaux distincts.
+    const g = groupVersions([d(1, "Intro", 60), d(2, "Intro", 200), d(3, "Intro (Slowed)", 75)]);
+    expect(g.map((x) => [x.lead.id, x.versions.map((v) => v.id)])).toEqual([
+      [1, [3]],
+      [2, []],
+    ]);
+    // Même morceau sur deux sorties (durées quasi identiques) : regroupés.
+    expect(groupVersions([d(4, "Song", 180), d(5, "Song", 181.5)])).toHaveLength(1);
+    expect(groupVersions([d(6, "Song", 180), d(7, "Song", 182.5)])).toHaveLength(2);
+  });
+
   it("« Amor Na Praia (Slowed to Perfection) [Reverb] » rejoint « Amor Na Praia »", () => {
     const g = groupVersions([t(1, "Amor Na Praia"), t(2, "Amor Na Praia (Slowed to Perfection) [Reverb]")]);
     expect(g).toHaveLength(1);
@@ -430,6 +463,15 @@ describe("groupVersions", () => {
     expect(g[0]!.lead.id).toBe(1);
     expect(g[0]!.versions).toEqual([]);
     expect(groupVersions([])).toEqual([]);
+  });
+});
+
+describe("withoutIds", () => {
+  it("retire des ids de la sélection ; renvoie le même ensemble si rien ne change", () => {
+    const sel = new Set([1, 2, 3]);
+    expect([...withoutIds(sel, [2, 9])]).toEqual([1, 3]);
+    expect(withoutIds(sel, [7, 8])).toBe(sel);
+    expect(sel.has(2)).toBe(true);
   });
 });
 
