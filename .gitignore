@@ -11,3 +11,7 @@ build/*.blockmap
 .vite/
 # Captures CDP de vérification (scripts/cdp-smoke.mjs --screenshot), régénérables
 design/screens/
+
+# After Effects auto-save folders
+design/motion/Enregistrement automatique/
+design/motion/Adobe After Effects Auto-Save/
