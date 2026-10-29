@@ -232,3 +232,15 @@ describe("pont dev", () => {
     expect(win.__benten).toEqual({ ui: uiStore });
   });
 });
+
+describe("préférences de la grille d'albums", () => {
+  it("tri « Ajouté » par défaut, sans filtre ; setAlbumsView fusionne et survit à la navigation", () => {
+    const s = createUiStore();
+    expect(s.getState().albumsView).toEqual({ sort: "added", losslessOnly: false });
+    s.getState().setAlbumsView({ sort: "artist" });
+    s.getState().navigate({ name: "album", id: 3 });
+    s.getState().setAlbumsView({ losslessOnly: true });
+    s.getState().back();
+    expect(s.getState().albumsView).toEqual({ sort: "artist", losslessOnly: true });
+  });
+});

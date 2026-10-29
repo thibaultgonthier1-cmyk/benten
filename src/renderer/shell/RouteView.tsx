@@ -1,35 +1,40 @@
 import type React from "react";
-import { useCallback, useMemo, useState, type RefObject } from "react";
+import { useCallback, useInsertionEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, type TargetAndTransition } from "framer-motion";
-import { Construction, FolderOpen, Heart, Search, type LucideIcon } from "lucide-react";
-import { routeKey, uiStore, useUi, type Route } from "../state/ui";
+import { Construction, FolderOpen, Search } from "lucide-react";
+import { routeKey, sameRoute, uiStore, useUi, type Route } from "../state/ui";
+import { planScroll, rememberScroll, savedScroll } from "./scrollMemory";
 import { libraryStore, useLibrary } from "../state/library";
-import { playerStore, usePlayer } from "../state/player";
-import { openMenu } from "../ui/menuStore";
-import { albumMenuItems } from "./albumMenu";
+import { playerStore } from "../state/player";
 import { pageTransition } from "../theme/ds/motion";
-import { sortFilterAlbums, type Album, type AlbumSortFilter } from "../lib/library";
+import type { Album } from "../lib/library";
+import { canResume } from "../lib/viewModels";
 import type { TrackRow } from "../../shared/types";
-import { LibraryGrid } from "../components/LibraryGrid";
-import { SortFilterBar } from "../components/SortFilterBar";
 import { SearchResults } from "../components/SearchResults";
 import { Playlists } from "../components/Playlists";
 import { BentenMark } from "../ui/BentenMark";
 import { Button } from "../ui/Button";
-import { ICON_STROKE } from "../ui/IconButton";
-import { Skeleton } from "../ui/Skeleton";
 import { useMotion } from "../ui/useMotion";
+import { AlbumsView } from "../views/AlbumsView";
+import { AlbumView } from "../views/AlbumView";
+import { EmptyState, PageHeader } from "../views/common";
+import { anchorFromEvent, useViewMenus } from "../views/menus";
 
 /** Actions de lecture / bibliothèque fournies par l'App (chemins de lecture inchangés). */
 export interface RouteViewActions {
-  playAlbum(album: Album): void;
+  /** Joue l'album depuis `index` (file = pistes de l'album). */
+  playAlbum(album: Album, index?: number): void;
+  /** Lecture aléatoire de l'album (active le mélange, départ au hasard). */
+  shuffleAlbum(album: Album): void;
+  /** Lecture / pause de la piste courante. */
+  togglePlay(): void;
   playTracks(tracks: readonly TrackRow[], index?: number): void;
   albumPlayNext(album: Album): void;
   albumAddToQueue(album: Album): void;
+  /** Ouvre la feuille « Ajouter à une playlist » existante pour l'album. */
   albumAddToPlaylist(album: Album): void;
-  /** Tri/filtres de la grille d'albums (hors « favoris », porté par la route). */
-  sortFilter: AlbumSortFilter;
-  setSortFilter(next: AlbumSortFilter): void;
+  /** Ouvre la même feuille pour des pistes quelconques (menu d'un titre). */
+  openPlaylistSheet(trackIds: readonly number[], label?: string): void;
 }
 
 interface PageProps {
@@ -41,32 +46,86 @@ interface PageProps {
 /**
  * Rend la page de la route courante avec une transition animée (`AnimatePresence`) : la page
  * entrante monte de 8 px en fondu, la sortante s'efface ; durées via `motionFor` (réglage
- * d'intensité + préférence système). Le défilement revient en haut à chaque changement de page.
+ * d'intensité + préférence système). Le défilement revient en haut à chaque changement de page
+ * (ou reprend sa position au retour par « Précédent »).
  *
- * Mapping TEMPORAIRE (Tâche 3) vers les anciennes vues tant que les nouveaux écrans n'existent pas :
- * home / albums / favorites → grille (`LibraryGrid` + `SortFilterBar`), playlists → `Playlists`,
- * search → `SearchResults` ; les autres routes → état vide neutre « En construction ».
+ * Mode `popLayout` : la page sortante est sortie du flux pendant son effacement (~100 ms) et la
+ * nouvelle se monte dans le MÊME rendu — condition pour qu'un élément partagé (`layoutId`) passe
+ * de l'une à l'autre. Grille ↔ album : la page quittée disparaît d'un coup et l'album n'entre pas
+ * en fondu global — la pochette voyage de la tuile à l'en-tête et doit rester visible ; le reste
+ * de la page album (titre, boutons, liste) joue sa propre entrée.
+ *
+ * Routes : home (grille d'albums, ou accueil/scan si la bibliothèque est vide — jusqu'à la
+ * Tâche 11), albums, favorites (même grille filtrée), album, playlists (ancienne vue), search ;
+ * les autres → état vide neutre « En construction ».
  */
 export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
   const route = useUi((s) => s.route);
   const m = useMotion();
   const t = pageTransition(m);
-  const resetScroll = useCallback((): void => {
-    scrollRef.current?.scrollTo({ top: 0 });
-  }, [scrollRef]);
+  const key = routeKey(route);
+  const prevRef = useRef<Route>(route);
+
+  // Calculé une fois par changement de page : transition partagée (grille ↔ album) et position de
+  // défilement à restaurer (retour par « Précédent »), annoncée à la grille virtualisée.
+  const nav = useMemo(() => {
+    const prev = prevRef.current;
+    const prevKey = routeKey(prev);
+    const { future } = uiStore.getState();
+    const back = prevKey !== key && future.length > 0 && sameRoute(future[0]!, prev);
+    const restore = back ? savedScroll(key) : null;
+    planScroll(key, restore);
+    return { prevKey, restore, shared: m.enabled && prevKey !== key && isSharedPair(prev, route) };
+  }, [key]);
+
+  // Phase de MUTATION (avant toute mesure de layout) : on relève le défilement de la page quittée
+  // puis on place la nouvelle (haut, ou position restaurée). L'instantané de la pochette (avant
+  // mutation) est déjà pris à l'ancienne position ; l'en-tête album est mesuré à la nouvelle.
+  useInsertionEffect(() => {
+    const el = scrollRef.current;
+    if (el && nav.prevKey !== key) {
+      rememberScroll(nav.prevKey, el.scrollTop);
+      el.scrollTop = nav.restore ?? 0;
+    }
+    prevRef.current = route;
+  }, [key]);
+
+  // Transition partagée : la page quittée s'efface d'un coup (seule la pochette voyage) et la
+  // page entrante ne fond pas (la pochette doit rester visible pendant le voyage).
+  const variants = useMemo(
+    () => ({
+      exit: (instant: boolean) => (instant ? INSTANT_EXIT : t.exit) as TargetAndTransition,
+    }),
+    [t],
+  );
+  const initial = nav.shared || route.name === "album" ? { opacity: 1, y: 0 } : t.initial;
 
   return (
-    <AnimatePresence mode="wait" initial={false} onExitComplete={resetScroll}>
+    <AnimatePresence mode="popLayout" initial={false} custom={nav.shared}>
       <motion.div
-        key={routeKey(route)}
+        key={key}
         className={`route route--${route.name}`}
-        initial={t.initial}
+        initial={initial}
         animate={t.animate as TargetAndTransition}
-        exit={t.exit as TargetAndTransition}
+        exit="exit"
+        variants={variants}
+        custom={nav.shared}
       >
         <RoutePage route={route} scrollRef={scrollRef} actions={actions} />
       </motion.div>
     </AnimatePresence>
+  );
+}
+
+const INSTANT_EXIT = { opacity: 0, transition: { duration: 0 } };
+
+/** Pages qui affichent des tuiles d'album (source / cible de la pochette partagée). */
+const GRID_ROUTES: ReadonlySet<Route["name"]> = new Set(["home", "albums", "favorites", "search"]);
+
+/** Navigation grille → album (ou retour album → grille) : la pochette voyage. */
+function isSharedPair(from: Route, to: Route): boolean {
+  return (
+    (GRID_ROUTES.has(from.name) && to.name === "album") || (from.name === "album" && GRID_ROUTES.has(to.name))
   );
 }
 
@@ -75,13 +134,11 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
     case "home":
       return <HomePage scrollRef={scrollRef} actions={actions} />;
     case "albums":
-      return (
-        <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly={false} title="Albums" />
-      );
+      return <AlbumsView scrollRef={scrollRef} actions={actions} variant="albums" />;
     case "favorites":
-      return (
-        <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly title="Favoris" />
-      );
+      return <AlbumsView scrollRef={scrollRef} actions={actions} variant="favorites" />;
+    case "album":
+      return <AlbumView id={route.id} scrollRef={scrollRef} actions={actions} />;
     case "playlists":
       return (
         <>
@@ -100,8 +157,6 @@ function titleOf(route: Route): string {
   switch (route.name) {
     case "tracks":
       return "Titres";
-    case "album":
-      return "Album";
     case "artists":
       return "Artistes";
     case "artist":
@@ -117,46 +172,6 @@ function titleOf(route: Route): string {
   }
 }
 
-// --- Briques de page ---------------------------------------------------------------------------
-
-function PageHeader({
-  eyebrow,
-  title,
-  sub,
-}: {
-  eyebrow?: string;
-  title: string;
-  sub?: string | null;
-}): JSX.Element {
-  return (
-    <header className="page-head">
-      {eyebrow && <div className="page-eyebrow">{eyebrow}</div>}
-      <h1 className="page-title">{title}</h1>
-      {sub ? <p className="page-sub num">{sub}</p> : null}
-    </header>
-  );
-}
-
-function EmptyState({
-  icon: Icon,
-  title,
-  text,
-}: {
-  icon: LucideIcon;
-  title: string;
-  text: string;
-}): JSX.Element {
-  return (
-    <div className="page-empty">
-      <span className="page-empty-icon" aria-hidden="true">
-        <Icon size={24} strokeWidth={ICON_STROKE} />
-      </span>
-      <h2>{title}</h2>
-      <p>{text}</p>
-    </div>
-  );
-}
-
 function UnderConstruction({ title }: { title: string }): JSX.Element {
   return (
     <>
@@ -170,119 +185,7 @@ function UnderConstruction({ title }: { title: string }): JSX.Element {
   );
 }
 
-/** Grille de chargement : des pochettes fantômes au rythme de la vraie grille. */
-function GridSkeleton({ count = 12 }: { count?: number }): JSX.Element {
-  return (
-    <div className="grid-skel" aria-busy="true" aria-label="Chargement">
-      {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="grid-skel-card">
-          <div className="grid-skel-art">
-            <Skeleton h="100%" radius={16} />
-          </div>
-          <Skeleton w="72%" h={12} radius={6} />
-          <Skeleton w="46%" h={10} radius={5} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// --- Pages (mapping temporaire vers les anciennes vues) ----------------------------------------
-
-function AlbumsSection({
-  scrollRef,
-  actions,
-  favoritesOnly,
-  heading,
-  title,
-}: Omit<PageProps, "route"> & {
-  favoritesOnly: boolean;
-  /** Titre de section (h2) — utilisé sur l'accueil, sous l'en-tête de page. */
-  heading?: string;
-  /** Titre de PAGE : l'en-tête porte alors le compte (filtré) des albums affichés. */
-  title?: string;
-}): JSX.Element {
-  const albums = useLibrary((s) => s.albums);
-  const loading = useLibrary((s) => s.loading);
-  const favoriteIds = usePlayer((s) => s.favoriteIds);
-  const currentAlbumId = usePlayer((s) => s.currentTrack?.albumId ?? null);
-  const { sortFilter, setSortFilter } = actions;
-
-  const value = useMemo<AlbumSortFilter>(
-    () => ({ ...sortFilter, favoritesOnly }),
-    [sortFilter, favoritesOnly],
-  );
-  const shown = useMemo(
-    () => sortFilterAlbums(albums, value, favoriteIds),
-    [albums, value, favoriteIds],
-  );
-
-  // Le filtre « Favoris » de la barre est porté par la route : le basculer navigue.
-  const onChange = useCallback(
-    (next: AlbumSortFilter): void => {
-      setSortFilter({ ...next, favoritesOnly: false });
-      if (next.favoritesOnly !== favoritesOnly) {
-        uiStore.getState().navigate(next.favoritesOnly ? { name: "favorites" } : { name: "albums" });
-      }
-    },
-    [setSortFilter, favoritesOnly],
-  );
-
-  // Clic droit sur une tuile : menu contextuel aux actions existantes. Les favoris sont lus à
-  // l'ouverture (pas en dépendance) : le callback reste stable et la grille mémoïsée ne re-rend pas.
-  const onAlbumContextMenu = useCallback(
-    (album: Album, e: React.MouseEvent<HTMLElement>): void => {
-      const player = playerStore.getState();
-      const items = albumMenuItems(
-        album,
-        { ...actions, toggleFavorite: (id) => playerStore.getState().toggleFavorite(id) },
-        player.favoriteIds,
-      );
-      // Clic droit : au curseur. Touche Menu / Maj+F10 (bouton ≠ 2) : au centre de la tuile, focus
-      // sur le 1er élément.
-      if (e.button === 2) {
-        openMenu(e.clientX, e.clientY, items);
-      } else {
-        const r = e.currentTarget.getBoundingClientRect();
-        openMenu(r.left + r.width / 2, r.top + Math.min(r.height / 2, r.width / 2), items, { focusFirst: true });
-      }
-    },
-    [actions],
-  );
-
-  // Le compte vit dans l'en-tête de page (pas de doublon à droite des filtres).
-  return (
-    <>
-      {title && <PageHeader title={title} sub={loading ? null : `${shown.length} albums`} />}
-      <section className="section">
-        <div className="section-head">
-          {heading && <h2>{heading}</h2>}
-          <SortFilterBar value={value} onChange={onChange} />
-        </div>
-        {loading && albums.length === 0 ? (
-          <GridSkeleton />
-        ) : favoritesOnly && shown.length === 0 ? (
-          <EmptyState
-            icon={Heart}
-            title="Aucun favori"
-            text="Touche le cœur d'un titre pendant la lecture pour le retrouver ici."
-          />
-        ) : (
-          <LibraryGrid
-            albums={shown}
-            scrollRef={scrollRef}
-            playingAlbumId={currentAlbumId}
-            onPlay={actions.playAlbum}
-            onPlayNext={actions.albumPlayNext}
-            onAddToQueue={actions.albumAddToQueue}
-            onAddToPlaylist={actions.albumAddToPlaylist}
-            onContextMenu={onAlbumContextMenu}
-          />
-        )}
-      </section>
-    </>
-  );
-}
+// --- Pages ---------------------------------------------------------------------------------------
 
 /** Ancienne vue Playlists + demande de création venue de la barre latérale (bouton +). */
 function PlaylistsPage({ onPlay }: { onPlay: RouteViewActions["playTracks"] }): JSX.Element {
@@ -295,22 +198,15 @@ function PlaylistsPage({ onPlay }: { onPlay: RouteViewActions["playTracks"] }): 
   );
 }
 
+/**
+ * Accueil provisoire (jusqu'à la Tâche 11) : la grille d'albums sous l'en-tête d'accueil, ou
+ * l'écran de premier lancement (choix du dossier + scan) quand la bibliothèque est vide.
+ */
 function HomePage({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
   const loading = useLibrary((s) => s.loading);
   const albumCount = useLibrary((s) => s.albums.length);
-  const trackCount = useLibrary((s) => s.tracks.length);
-
   if (!loading && albumCount === 0) return <Onboarding />;
-  return (
-    <>
-      <PageHeader
-        eyebrow="今宵 · ce soir"
-        title="Ta bibliothèque, en local"
-        sub={loading ? null : `${trackCount} titres · ${albumCount} albums`}
-      />
-      <AlbumsSection scrollRef={scrollRef} actions={actions} favoritesOnly={false} heading="Albums" />
-    </>
-  );
+  return <AlbumsView scrollRef={scrollRef} actions={actions} variant="home" />;
 }
 
 /** Premier lancement / bibliothèque vide : choix du dossier + scan (ancien écran d'accueil). */
@@ -375,12 +271,28 @@ function Onboarding(): JSX.Element {
   );
 }
 
+/** Recherche (ancienne vue de résultats, désormais rendue avec la grille d'albums de la Tâche 6). */
 function SearchPage({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
   const query = useLibrary((s) => s.query);
   const results = useLibrary((s) => s.results);
   const searched = useLibrary((s) => s.searched);
-  const currentAlbumId = usePlayer((s) => s.currentTrack?.albumId ?? null);
+  const menus = useViewMenus(actions);
   const q = query.trim();
+
+  const onPlay = useCallback(
+    (album: Album): void => {
+      const p = playerStore.getState();
+      if (p.currentTrack?.albumId === album.id && canResume(p.status)) actions.togglePlay();
+      else actions.playAlbum(album);
+    },
+    [actions],
+  );
+  const onContextMenu = useCallback(
+    (album: Album, e: React.MouseEvent<HTMLElement>): void => {
+      void menus.openAlbumMenu(album, anchorFromEvent(e));
+    },
+    [menus],
+  );
 
   return (
     <>
@@ -391,8 +303,8 @@ function SearchPage({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Eleme
           query={query}
           searched={searched}
           scrollRef={scrollRef}
-          playingAlbumId={currentAlbumId}
-          onPlay={actions.playAlbum}
+          onPlay={onPlay}
+          onContextMenu={onContextMenu}
         />
       ) : (
         <EmptyState

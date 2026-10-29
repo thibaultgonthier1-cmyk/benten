@@ -332,6 +332,12 @@
 
 /* Zone défilante (conteneur des listes virtualisées). */
 .shell-scroll {
+  /* Parent de positionnement de la page sortante (AnimatePresence « popLayout ») : elle reste
+     à sa place dans le contenu défilant pendant son effacement. */
+  position: relative;
+  /* Pas d'ancrage de défilement automatique : la position est pilotée (haut de page / reprise au
+     retour) et le retrait de la page sortante ne doit pas la décaler. */
+  overflow-anchor: none;
   flex: 1;
   min-height: 0;
   overflow-y: auto;

@@ -70,8 +70,9 @@ export function reducedMotionFor(intensity: MotionIntensity): "always" | "user" 
 export const PAGE_SLIDE_PX = 8;
 
 /**
- * Durée (s) de sortie d'une page. Brève : la page entrante n'attend la sortante (mode « wait »,
- * jamais deux pages montées) que ~100 ms, la navigation reste vive.
+ * Durée (s) de sortie d'une page. Brève : la page sortante s'efface en ~100 ms, sortie du flux
+ * (mode « popLayout », condition des éléments partagés tuile → en-tête album) pendant que la
+ * nouvelle entre ; la navigation reste vive.
  */
 export const PAGE_EXIT_SEC = 0.1;
 

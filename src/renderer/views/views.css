@@ -1,0 +1,379 @@
+/* ============================================================
+   BENTEN — Écrans Albums / Album (Phase 3, Tâche 6)
+   Fond #000 ; seule la page album porte, SOUS son en-tête, un dégradé de la couleur vive de
+   la pochette qui s'éteint dans le noir. Seuls transform/opacity sont animés.
+   ============================================================ */
+
+/* ---------- En-tête de page avec contrôles à droite ---------- */
+.page-head.has-aside {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding-bottom: 22px;
+}
+.page-head__text {
+  min-width: 0;
+}
+.page-head__aside {
+  display: flex;
+  align-items: center;
+  padding-bottom: 2px;
+}
+
+.view-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--grad-surface), var(--surface-1);
+  box-shadow:
+    var(--highlight-inner),
+    inset 0 0 0 1px var(--line);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.view-chip:hover {
+  color: var(--text);
+}
+.view-chip:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+.view-chip__chev {
+  margin-right: -3px;
+  opacity: 0.7;
+}
+.view-chip.is-on {
+  color: var(--text);
+  background: var(--accent-soft);
+  box-shadow:
+    var(--highlight-inner),
+    inset 0 0 0 1px rgba(231, 60, 130, 0.55);
+}
+
+/* ---------- Grille virtualisée ---------- */
+.album-grid {
+  position: relative;
+}
+.album-grid__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: grid;
+}
+.album-grid__cell {
+  min-width: 0;
+}
+.albums-view .grid-skel {
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 28px 24px;
+}
+
+/* ---------- Page album ---------- */
+.album-view {
+  position: relative;
+}
+
+/* En-tête pleine largeur : déborde de la marge de page pour que le dégradé touche les bords. */
+.album-hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-end;
+  gap: 36px;
+  margin: -12px calc(-1 * var(--page-x)) 0;
+  padding: 44px var(--page-x) 30px;
+  min-height: 316px;
+}
+/* Dégradé de la couleur vive vers le noir (le fond de page reste #000 en dessous). Arrêts
+   nombreux et courbe douce + grain très léger : pas de bandes visibles sur ce fond sombre. */
+.album-hero__bg {
+  /* Teinte de tête : la couleur vive approfondie et ravivée (OKLCH) — une teinte pastel ne
+     tourne pas au gris boueux une fois assombrie ; luminosité bornée pour le texte blanc. */
+  --hero-deep: oklch(from var(--hero) min(l, 0.56) calc(c * 1.45) h);
+  position: absolute;
+  inset: 0 0 -240px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(80% 110% at 14% 0%, color-mix(in oklch, var(--hero-deep) 42%, transparent) 0%, transparent 65%),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--hero-deep) 82%, #000) 0%,
+      color-mix(in oklch, var(--hero-deep) 70%, #000) 14%,
+      color-mix(in oklch, var(--hero-deep) 54%, #000) 30%,
+      color-mix(in oklch, var(--hero-deep) 36%, #000) 47%,
+      color-mix(in oklch, var(--hero-deep) 19%, #000) 64%,
+      color-mix(in oklch, var(--hero-deep) 7%, #000) 82%,
+      #000 100%
+    );
+  animation: hero-bloom 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.album-hero__bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@keyframes hero-bloom {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.album-hero__cover {
+  position: relative;
+  flex: none;
+  width: 232px;
+  height: 232px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-2);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.album-hero__meta {
+  min-width: 0;
+  flex: 1;
+  padding-bottom: 6px;
+}
+.album-hero__kind {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+.album-hero__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 10px 0 14px;
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(30px, 3.4vw, 52px);
+  line-height: 1.12;
+  letter-spacing: 0.005em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.28);
+}
+.album-hero__artist {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.album-hero__artist:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.album-hero__artist:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.album-hero__artist.is-empty {
+  color: rgba(255, 255, 255, 0.6);
+  cursor: default;
+}
+.album-hero__sub {
+  margin: 6px 0 0;
+  color: rgba(236, 233, 228, 0.74);
+  font-size: 13.5px;
+}
+
+.album-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 26px;
+}
+.album-actions .ui-btn--primary {
+  min-width: 132px;
+}
+.album-actions__fav.is-on {
+  color: var(--accent);
+}
+.album-actions__fav.is-on svg {
+  fill: currentColor;
+}
+
+/* Barre compacte (défilement) : collée sous la barre du haut, pleine largeur. */
+.album-compact-anchor {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  height: 0;
+}
+.album-compact {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--page-x));
+  right: calc(-1 * var(--page-x));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 64px;
+  padding: 0 var(--page-x);
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--hero, #1c1c20) 30%, #000) 0%, #000 70%);
+  box-shadow:
+    0 1px 0 var(--line),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+.album-compact__play {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0 0 0 1px;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--grad-btn);
+  box-shadow:
+    var(--highlight-inner),
+    0 4px 14px rgba(231, 60, 130, 0.35);
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.album-compact__play:hover {
+  transform: scale(1.06);
+}
+.album-compact__play:active {
+  transform: scale(0.94);
+}
+.album-compact__play:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+.album-compact__thumb {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: 7px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.album-compact__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.album-compact__artist {
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Liste des titres. */
+.album-tracks {
+  position: relative;
+}
+.track-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) 40px 56px;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  margin-bottom: 6px;
+  padding: 0 12px 0 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.track-head.no-album {
+  grid-template-columns: 40px minmax(0, 2fr) minmax(0, 1fr) 40px 56px;
+}
+.track-head__num {
+  text-align: center;
+  letter-spacing: 0;
+}
+.track-head__dur {
+  display: flex;
+  justify-content: flex-end;
+}
+.disc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 8px 8px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.disc-group + .disc-group .disc-head {
+  margin-top: 8px;
+}
+
+/* Fenêtres étroites : l'en-tête s'empile, la colonne artiste disparaît. */
+@media (max-width: 900px) {
+  .album-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 22px;
+  }
+  .album-hero__cover {
+    width: 184px;
+    height: 184px;
+  }
+}
+
+:root[data-motion="reduced"] .album-hero__bg {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .album-hero__bg {
+    animation: none;
+  }
+}

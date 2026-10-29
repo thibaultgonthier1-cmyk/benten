@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
+import type { AlbumSort } from "../lib/viewModels";
 
 /**
  * Store UI (Phase 3, Tâche 3) : routeur maison — route courante + historique précédent/suivant —
@@ -37,6 +38,14 @@ export type NavSection =
   | "downloads"
   | "settings";
 
+/** Préférences de la grille d'albums (tri + filtre « Sans perte »), conservées entre les pages. */
+export interface AlbumsViewPrefs {
+  sort: AlbumSort;
+  losslessOnly: boolean;
+}
+
+export const DEFAULT_ALBUMS_VIEW: AlbumsViewPrefs = { sort: "added", losslessOnly: false };
+
 /** Nombre max d'entrées conservées dans `past` (les plus anciennes sont abandonnées). */
 export const HISTORY_LIMIT = 100;
 
@@ -51,6 +60,8 @@ export interface UiState {
    * focalise son champ de création puis la consomme (`consumePlaylistCreate`).
    */
   playlistCreateRequested: boolean;
+  /** Tri / filtre de la grille d'albums (le filtre Favoris, lui, est porté par la route). */
+  albumsView: AlbumsViewPrefs;
   /** Pousse la route courante dans `past`, vide `future` ; ignore une route identique. */
   navigate(route: Route): void;
   back(): void;
@@ -63,6 +74,7 @@ export interface UiState {
   requestPlaylistCreate(): void;
   /** Vrai (une seule fois) si une création était demandée ; remet la demande à zéro. */
   consumePlaylistCreate(): boolean;
+  setAlbumsView(patch: Partial<AlbumsViewPrefs>): void;
 }
 
 /** Égalité de routes : même nom ET mêmes paramètres. */
@@ -123,6 +135,7 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
     compact: false,
     shortcutsHelpOpen: false,
     playlistCreateRequested: false,
+    albumsView: DEFAULT_ALBUMS_VIEW,
 
     navigate(route) {
       const { route: current, past } = get();
@@ -171,6 +184,10 @@ export function createUiStore(initial: Route = { name: "home" }): UiStore {
       if (!get().playlistCreateRequested) return false;
       set({ playlistCreateRequested: false });
       return true;
+    },
+
+    setAlbumsView(patch) {
+      set({ albumsView: { ...get().albumsView, ...patch } });
     },
   }));
 }

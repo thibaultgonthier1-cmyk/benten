@@ -301,8 +301,9 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
  * (`favoritesOnly` via jointure `favorites`, `losslessOnly` via `bit_depth IS NOT NULL`). Les parties
  * dynamiques du SQL sont exclusivement des constantes en liste blanche (voir `buildAlbumsQuery`).
  *
- * NB (chemin de tri) : la vue albums du Renderer ne passe PAS par ce tri — `App.tsx` regroupe les
- * albums côté client depuis la requête `tracks` et les trie via `sortFilterAlbums` (`localeCompare`,
+ * NB (chemin de tri) : la vue albums du Renderer ne passe PAS par ce tri — le store bibliothèque
+ * regroupe les albums côté client depuis la requête `tracks` et les trie via `arrangeAlbums`
+ * (`lib/viewModels.ts`, `localeCompare`,
  * sensible aux accents), qui est le chemin UI voulu pour une bibliothèque accentuée. Ce tri backend
  * sert le chemin IPC / la vue `tracks` (et un futur câblage direct de la vue albums). Il s'appuie sur
  * `COLLATE NOCASE` + départage `al.id`, ce qui PEUT ordonner les titres accentués différemment de

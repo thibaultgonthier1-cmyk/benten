@@ -4,7 +4,7 @@ import { playerStore } from "./state/player";
 import { libraryStore } from "./state/library";
 import { startAudioRuntime, type AudioRuntime } from "./runtime/audioRuntime";
 import { restorePlaybackState } from "./runtime/restore";
-import { DEFAULT_SORT_FILTER, type Album, type AlbumSortFilter } from "./lib/library";
+import type { Album } from "./lib/library";
 import type { TrackRow } from "../shared/types";
 import { Shell } from "./shell/Shell";
 import type { RouteViewActions } from "./shell/RouteView";
@@ -53,9 +53,6 @@ export function App(): JSX.Element {
   // un ref preserve par Fast Refresh pointerait encore vers l'ancien moteur dispose.
   const { engine, controls } = ensureAudioRuntime();
 
-  // Tri/filtres de la grille d'albums, conserves d'une page a l'autre (le filtre « favoris » est
-  // porte par la route `favorites`, cf. RouteView).
-  const [sortFilter, setSortFilter] = useState<AlbumSortFilter>(DEFAULT_SORT_FILTER);
   // Feuille « Ajouter à une playlist » : pistes a ajouter + libelle (titre d'album).
   const [plSheet, setPlSheet] = useState<{ open: boolean; trackIds: number[]; label?: string }>({
     open: false,
@@ -76,13 +73,28 @@ export function App(): JSX.Element {
   // Désabonnement au démontage.
   useEffect(() => libraryStore.getState().subscribeLibraryChanged(), []);
 
+  // Lecture d'un album depuis les nouvelles vues (grille, page album, menus) : la lecture démarre
+  // SUR PLACE, comme dans Apple Music / Spotify — l'écran de lecture ne s'ouvre plus d'office
+  // (il reste à un clic, depuis le mini-lecteur).
   const playAlbum = useCallback(
-    (album: Album): void => {
-      controls.playAlbum(album, 0);
-      playerStore.getState().setNowPlayingOpen(true);
+    (album: Album, index = 0): void => {
+      controls.playAlbum(album, index);
     },
     [controls],
   );
+
+  // « Aléatoire » : active le mélange du moteur (action existante du store), puis lance l'album
+  // depuis une piste tirée au hasard (elle devient la tête de l'ordre mélangé).
+  const shuffleAlbum = useCallback(
+    (album: Album): void => {
+      if (album.tracks.length === 0) return;
+      playerStore.getState().setShuffle(true);
+      controls.playAlbum(album, Math.floor(Math.random() * album.tracks.length));
+    },
+    [controls],
+  );
+
+  const togglePlay = useCallback((): void => controls.toggle(), [controls]);
 
   // Lecture d'une playlist : on fabrique un album ephemere (id synthetique) a partir de ses pistes
   // et on reutilise exactement le chemin de file de `playAlbum` (store.setQueue + engine.setQueue).
@@ -102,7 +114,7 @@ export function App(): JSX.Element {
     [controls],
   );
 
-  // Actions du menu « ⋯ » des cartes d'album (Task 11 / Task 10 replie). Memoisees : AlbumCard est
+  // Actions des menus d'album (clic droit / « ⋯ »). Memoisees : les tuiles (`AlbumTile`) sont
   // `memo`, donc des callbacks stables evitent de re-rendre toute la grille virtualisee.
   const albumPlayNext = useCallback((album: Album): void => {
     playerStore.getState().playNext(album.tracks);
@@ -113,6 +125,9 @@ export function App(): JSX.Element {
   const albumAddToPlaylist = useCallback((album: Album): void => {
     setPlSheet({ open: true, trackIds: album.tracks.map((t) => t.id), label: album.title });
   }, []);
+  const openPlaylistSheet = useCallback((trackIds: readonly number[], label?: string): void => {
+    setPlSheet({ open: true, trackIds: trackIds.slice(), label });
+  }, []);
   const closePlSheet = useCallback((): void => {
     setPlSheet((s) => ({ ...s, open: false }));
   }, []);
@@ -120,14 +135,15 @@ export function App(): JSX.Element {
   const views = useMemo<RouteViewActions>(
     () => ({
       playAlbum,
+      shuffleAlbum,
+      togglePlay,
       playTracks,
       albumPlayNext,
       albumAddToQueue,
       albumAddToPlaylist,
-      sortFilter,
-      setSortFilter,
+      openPlaylistSheet,
     }),
-    [playAlbum, playTracks, albumPlayNext, albumAddToQueue, albumAddToPlaylist, sortFilter],
+    [playAlbum, shuffleAlbum, togglePlay, playTracks, albumPlayNext, albumAddToQueue, albumAddToPlaylist, openPlaylistSheet],
   );
 
   return (
