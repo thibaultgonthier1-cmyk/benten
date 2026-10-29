@@ -3,6 +3,7 @@ import { uiStore, type UiStore } from "../state/ui";
 import { playerStore, type PlayerStore } from "../state/player";
 import type { PlayerControls } from "../components/controls";
 import type { ShortcutHandlers } from "../lib/shortcuts";
+import { withOrigin } from "../runtime/transportJournal";
 import { closeMenu, menuStore } from "../ui/menuStore";
 import { quoted, toast } from "../ui/toastStore";
 
@@ -69,8 +70,11 @@ export function closeTopmostLayer(ui: UiStore = uiStore, player: PlayerStore = p
  * historique) et les hôtes de menu / d'aide.
  */
 export function createShellShortcuts(deps: ShellShortcutDeps): ShortcutHandlers {
-  const { controls, focusSearch } = deps;
+  const { focusSearch } = deps;
   const player = deps.player ?? playerStore;
+  // Transport étiqueté « shortcut » dans le journal audio (observation seule, cf. transportJournal).
+  const controls =
+    deps.controls && withOrigin(deps.controls, "shortcut", { getStatus: () => player.getState().status });
   const ui = deps.ui ?? uiStore;
   const isModalOpen = deps.isModalOpen ?? ((): boolean => isAnyModalOpen(ui, player));
   /**

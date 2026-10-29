@@ -2,6 +2,7 @@ import type { PlayerState, PlayerStore } from "../state/player";
 import type { PlayerControls } from "../components/controls";
 import type { TrackRow } from "../../shared/types";
 import { artUrl } from "../lib/library";
+import { alreadyJournaled, journalCommand, type TransportCmd } from "./transportJournal";
 
 /**
  * Touches média + contrôle de lecture Windows (Phase 3, Tâche 4) via `navigator.mediaSession` :
@@ -167,23 +168,48 @@ export function bindMediaSession(
   };
   const seekBy = (delta: number): void => seekTo(store.getState().positionSec + delta);
 
+  // Origine des commandes (diagnostic) : CHAQUE invocation système est consignée — même sans
+  // effet (« pause » déjà en pause) — avant d'être routée, inchangée, vers `controls`.
+  const journal = (cmd: TransportCmd, action: string, noop: boolean, extra: Record<string, unknown> = {}): void =>
+    journalCommand(cmd, "media-session", { action, noop, status: store.getState().status, ...extra });
+
   const handlers: Record<(typeof ACTIONS)[number], MediaSessionActionHandler> = {
     play: () => {
-      if (store.getState().status !== "playing") controls.toggle();
+      const noop = store.getState().status === "playing";
+      journal("play", "play", noop);
+      if (!noop) alreadyJournaled(() => controls.toggle());
     },
     pause: () => {
-      if (store.getState().status === "playing") controls.toggle();
+      const noop = store.getState().status !== "playing";
+      journal("pause", "pause", noop);
+      if (!noop) alreadyJournaled(() => controls.toggle());
     },
     stop: () => {
-      if (store.getState().status === "playing") controls.toggle();
+      const noop = store.getState().status !== "playing";
+      journal("pause", "stop", noop);
+      if (!noop) alreadyJournaled(() => controls.toggle());
     },
-    previoustrack: () => controls.prev(),
-    nexttrack: () => controls.next(),
+    previoustrack: () => {
+      journal("prev", "previoustrack", false);
+      alreadyJournaled(() => controls.prev());
+    },
+    nexttrack: () => {
+      journal("next", "nexttrack", false);
+      alreadyJournaled(() => controls.next());
+    },
     seekto: (d) => {
-      if (typeof d.seekTime === "number") seekTo(d.seekTime);
+      const ok = typeof d.seekTime === "number";
+      journal("seek", "seekto", !ok, ok ? { seekTime: d.seekTime } : {});
+      if (ok) alreadyJournaled(() => seekTo(d.seekTime as number));
     },
-    seekforward: (d) => seekBy(d.seekOffset ?? MEDIA_SEEK_STEP_SEC),
-    seekbackward: (d) => seekBy(-(d.seekOffset ?? MEDIA_SEEK_STEP_SEC)),
+    seekforward: (d) => {
+      journal("seek", "seekforward", false, { offset: d.seekOffset ?? MEDIA_SEEK_STEP_SEC });
+      alreadyJournaled(() => seekBy(d.seekOffset ?? MEDIA_SEEK_STEP_SEC));
+    },
+    seekbackward: (d) => {
+      journal("seek", "seekbackward", false, { offset: -(d.seekOffset ?? MEDIA_SEEK_STEP_SEC) });
+      alreadyJournaled(() => seekBy(-(d.seekOffset ?? MEDIA_SEEK_STEP_SEC)));
+    },
   };
 
   const setHandler = (action: MediaSessionAction, h: MediaSessionActionHandler | null): void => {

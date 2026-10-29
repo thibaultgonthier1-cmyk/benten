@@ -14,6 +14,8 @@ import { bindMediaSession } from "./mediaSession";
 import { makeThrottle } from "../lib/throttle";
 import { restoreState, serializeState } from "../lib/persist";
 import type { QualityMode } from "../../shared/types";
+import type { DiagEntry } from "../../shared/diagnostics";
+import { isCommandJournal, setCommandJournal, withOrigin } from "./transportJournal";
 
 /** Clé `app_state` sous laquelle l'état de lecture est persisté. */
 export const PLAYER_STATE_KEY = "player";
@@ -79,7 +81,12 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   // UN SEUL moteur (AudioContext reel + NativeDecoder), cree une fois.
   const ctx = createContext();
   const engine = new AudioEngine(ctx, createDecoder(ctx));
-  const controls = createControls(engine, playerStore);
+  const rawControls = createControls(engine, playerStore);
+  // Commandes de l'interface (barre de lecture, en-têtes, lignes, menus) : consignées avec
+  // l'origine « ui » dans le journal audio, puis déléguées à l'identique (observation seule). Les
+  // raccourcis ré-étiquettent en « shortcut » ; la session média consigne elle-même (avec
+  // l'action système) et neutralise l'entrée « ui » de ses appels (`alreadyJournaled`).
+  const controls = withOrigin(rawControls, "ui", { getStatus: () => playerStore.getState().status });
 
   // Branche le store sur le moteur + boucle rAF (pompe tick() et anime la position).
   const unbind = bindEngine(playerStore, engine);
@@ -87,7 +94,16 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   playerStore.getState().attachEngine(engine);
   // Touches media + overlay Windows (Phase 3, Tache 4) : la session reflete le store et route les
   // commandes systeme vers `controls` (API de transport existante). No-op sans `navigator.mediaSession`.
-  const unbindMediaSession = bindMediaSession(playerStore, controls);
+  // DEV : la session est enveloppée pour retenir ses gestionnaires (pont `mediaSession.fire`, qui
+  // rejoue une action système depuis CDP) ; en production, la vraie session telle quelle.
+  const mediaHandlers = new Map<string, MediaSessionActionHandler | null>();
+  const realSession =
+    typeof navigator !== "undefined" && "mediaSession" in navigator ? navigator.mediaSession : undefined;
+  const unbindMediaSession = bindMediaSession(
+    playerStore,
+    controls,
+    import.meta.env.DEV && realSession ? recordingSession(realSession, mediaHandlers) : realSession,
+  );
 
   // Recreation PROPRE du contexte au changement de mode (Task 13). Le runtime est le SEUL a creer
   // un `AudioContext` : le store appelle ce gestionnaire, qui fabrique le nouveau contexte a la
@@ -116,7 +132,7 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   // build de production -> ce pont n'est JAMAIS attache en prod. Nettoye au dispose.
   // FUSION avec un pont existant : `state/ui.ts` y attache `ui` (DEV) indépendamment du runtime.
   const w = win();
-  const BRIDGE_KEYS = ["engine", "store", "persist", "library"] as const;
+  const BRIDGE_KEYS = ["engine", "store", "persist", "library", "mediaSession"] as const;
   if (import.meta.env.DEV && w) {
     w.__benten = {
       ...((w.__benten ?? {}) as Record<string, unknown>),
@@ -124,6 +140,16 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
       store: playerStore,
       persist: { serializeState, restoreState },
       library: libraryStore,
+      // Rejoue une action de la session média (touche multimédia, overlay Windows) : même chemin
+      // que le système, journal compris.
+      mediaSession: {
+        fire(action: string, details: Partial<MediaSessionActionDetails> = {}): boolean {
+          const h = mediaHandlers.get(action);
+          if (!h) return false;
+          h({ action, ...details } as MediaSessionActionDetails);
+          return true;
+        },
+      },
     };
   }
   // Journal audio (diagnostic des micro-coupures, actif en PRODUCTION) : demarre UNE fois avec le
@@ -136,6 +162,9 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   const diagSink = createDiagnosticsSink({
     send: (entries) => win()?.benten?.diagnostics?.append(entries),
   });
+  // Origine des commandes de transport → même puits que le reste du journal.
+  const commandJournal = (entry: DiagEntry): void => diagSink.append(entry);
+  setCommandJournal(commandJournal);
   const w0 = win();
   const diagnostics = startDiagnostics({
     getContext: () => engine.getContext(),
@@ -221,6 +250,7 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
     if (disposed) return;
     disposed = true;
     cancelFrame(raf);
+    if (isCommandJournal(commandJournal)) setCommandJournal(null); // seulement le sien (HMR)
     diagnostics.stop(); // glitch en attente consigne, puis plus aucun echantillonnage
     diagSink.stop(); // dernier lot envoye au Main
     unbind();
@@ -244,4 +274,29 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   };
 
   return { engine, controls, dispose };
+}
+
+/**
+ * Session média qui retient ses gestionnaires (DEV : pont de vérification) ; tout le reste
+ * (métadonnées, état, position) est transmis tel quel à la vraie session.
+ */
+function recordingSession(
+  session: MediaSession,
+  handlers: Map<string, MediaSessionActionHandler | null>,
+): MediaSession {
+  return new Proxy(session, {
+    get(target, key) {
+      if (key === "setActionHandler") {
+        return (action: MediaSessionAction, handler: MediaSessionActionHandler | null): void => {
+          handlers.set(action, handler);
+          target.setActionHandler(action, handler);
+        };
+      }
+      const v: unknown = Reflect.get(target, key, target);
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+    set(target, key, value) {
+      return Reflect.set(target, key, value, target);
+    },
+  });
 }
