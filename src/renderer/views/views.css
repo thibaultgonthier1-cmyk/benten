@@ -112,7 +112,9 @@
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(80% 110% at 14% 0%, color-mix(in oklch, var(--hero-deep) 42%, transparent) 0%, transparent 65%),
+    /* Halo derrière la pochette : il s'éteint avant le bord haut, qui reste exactement le premier
+       arrêt linéaire (= teinte de la barre du haut, cf. shell.css) — raccord invisible à 64 px. */
+    radial-gradient(50% 45% at 16% 60%, color-mix(in oklch, var(--hero-deep) 36%, transparent) 0%, transparent 100%),
     linear-gradient(
       180deg,
       color-mix(in oklch, var(--hero-deep) 82%, #000) 0%,

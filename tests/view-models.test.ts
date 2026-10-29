@@ -8,6 +8,7 @@ import {
   discGroups,
   formatTotal,
   gridLayout,
+  GRID_MAX_COLS,
   summaryLine,
 } from "../src/renderer/lib/viewModels";
 import { describeQuality, groupTracksToAlbums, type Album } from "../src/renderer/lib/library";
@@ -169,6 +170,16 @@ describe("gridLayout", () => {
     expect(gridLayout(100, 176, 24)).toEqual({ cols: 1, cardW: 100 });
     expect(gridLayout(0, 176, 24)).toEqual({ cols: 1, cardW: 176 });
     expect(gridLayout(1376, 176, 24).cols).toBe(7);
+  });
+
+  it("grand écran (3840 px) : colonnes plafonnées, les tuiles grandissent — DOM < 120 tuiles", () => {
+    const { cols, cardW } = gridLayout(3840, 176, 24);
+    expect(cols).toBe(GRID_MAX_COLS);
+    expect(cardW).toBe(Math.floor((3840 - 24 * (GRID_MAX_COLS - 1)) / GRID_MAX_COLS));
+    // Rangées montées au pire sur un écran 4K (2160 px de haut) : visibles + 1 + 2 × 2 de marge.
+    const rowH = cardW + 58 + 28;
+    const mountedRows = Math.ceil(2160 / rowH) + 1 + 2 * 2;
+    expect(mountedRows * cols).toBeLessThan(120);
   });
 });
 

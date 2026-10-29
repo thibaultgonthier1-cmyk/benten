@@ -86,7 +86,7 @@ export interface ViewMenus {
 export function useViewMenus(actions: RouteViewActions): ViewMenus {
   return useMemo<ViewMenus>(() => {
     const albumActions: AlbumMenuActions = {
-      playAlbum: (album) => actions.playAlbum(album),
+      playAlbum: (album) => actions.playAlbumInOrder(album),
       albumPlayNext: actions.albumPlayNext,
       albumAddToQueue: actions.albumAddToQueue,
       albumAddToPlaylist: actions.albumAddToPlaylist,

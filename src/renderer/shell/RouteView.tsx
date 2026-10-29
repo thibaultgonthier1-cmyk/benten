@@ -4,6 +4,8 @@ import { AnimatePresence, motion, type TargetAndTransition } from "framer-motion
 import { Construction, FolderOpen, Search } from "lucide-react";
 import { routeKey, sameRoute, uiStore, useUi, type Route } from "../state/ui";
 import { planScroll, rememberScroll, savedScroll } from "./scrollMemory";
+import { exitIsInstant } from "./routeTransition";
+import { DetachedPresence } from "../ui/DetachedPresence";
 import { libraryStore, useLibrary } from "../state/library";
 import { playerStore } from "../state/player";
 import { pageTransition } from "../theme/ds/motion";
@@ -24,6 +26,8 @@ import { anchorFromEvent, useViewMenus } from "../views/menus";
 export interface RouteViewActions {
   /** Joue l'album depuis `index` (file = pistes de l'album). */
   playAlbum(album: Album, index?: number): void;
+  /** « Lecture » d'un album entier : dans l'ordre (coupe le mélange), depuis la 1re piste. */
+  playAlbumInOrder(album: Album): void;
   /** Lecture aléatoire de l'album (active le mélange, départ au hasard). */
   shuffleAlbum(album: Album): void;
   /** Lecture / pause de la piste courante. */
@@ -75,7 +79,11 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
     const back = prevKey !== key && future.length > 0 && sameRoute(future[0]!, prev);
     const restore = back ? savedScroll(key) : null;
     planScroll(key, restore);
-    return { prevKey, restore, shared: m.enabled && prevKey !== key && isSharedPair(prev, route) };
+    const shared = m.enabled && prevKey !== key && isSharedPair(prev, route);
+    // Lecture seule pendant le rendu : position encore celle de la page quittée.
+    const prevScroll = scrollRef.current?.scrollTop ?? 0;
+    const instant = prevKey !== key && exitIsInstant({ shared, prevScroll, nextScroll: restore ?? 0 });
+    return { prevKey, restore, shared, instant };
   }, [key]);
 
   // Phase de MUTATION (avant toute mesure de layout) : on relève le défilement de la page quittée
@@ -90,8 +98,8 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
     prevRef.current = route;
   }, [key]);
 
-  // Transition partagée : la page quittée s'efface d'un coup (seule la pochette voyage) et la
-  // page entrante ne fond pas (la pochette doit rester visible pendant le voyage).
+  // La page quittée s'efface d'un coup quand la pochette voyage OU quand le défilement change
+  // (sinon elle sauterait pendant son fondu) ; la page album n'entre pas en fondu global.
   const variants = useMemo(
     () => ({
       exit: (instant: boolean) => (instant ? INSTANT_EXIT : t.exit) as TargetAndTransition,
@@ -101,7 +109,7 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
   const initial = nav.shared || route.name === "album" ? { opacity: 1, y: 0 } : t.initial;
 
   return (
-    <AnimatePresence mode="popLayout" initial={false} custom={nav.shared}>
+    <AnimatePresence mode="popLayout" initial={false} custom={nav.instant}>
       <motion.div
         key={key}
         className={`route route--${route.name}`}
@@ -109,9 +117,14 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
         animate={t.animate as TargetAndTransition}
         exit="exit"
         variants={variants}
-        custom={nav.shared}
+        custom={nav.instant}
       >
-        <RoutePage route={route} scrollRef={scrollRef} actions={actions} />
+        {/* Le contenu de la page ne retient jamais sa sortie : un élément `layoutId` démonté
+            pendant que la page est présente (tuile virtualisée, pochette d'un album retiré de la
+            bibliothèque) bloquerait sinon le démontage (cf. DetachedPresence). */}
+        <DetachedPresence>
+          <RoutePage route={route} scrollRef={scrollRef} actions={actions} />
+        </DetachedPresence>
       </motion.div>
     </AnimatePresence>
   );
@@ -283,7 +296,7 @@ function SearchPage({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Eleme
     (album: Album): void => {
       const p = playerStore.getState();
       if (p.currentTrack?.albumId === album.id && canResume(p.status)) actions.togglePlay();
-      else actions.playAlbum(album);
+      else actions.playAlbumInOrder(album);
     },
     [actions],
   );

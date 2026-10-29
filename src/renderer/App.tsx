@@ -83,6 +83,16 @@ export function App(): JSX.Element {
     [controls],
   );
 
+  // « Lecture » d'un album entier (en-tête, tuile, menu) : DANS L'ORDRE, comme Apple Music — le
+  // mélange éventuel est coupé (action existante du store) AVANT de poser la file.
+  const playAlbumInOrder = useCallback(
+    (album: Album): void => {
+      if (playerStore.getState().shuffle) playerStore.getState().setShuffle(false);
+      controls.playAlbum(album, 0);
+    },
+    [controls],
+  );
+
   // « Aléatoire » : active le mélange du moteur (action existante du store), puis lance l'album
   // depuis une piste tirée au hasard (elle devient la tête de l'ordre mélangé).
   const shuffleAlbum = useCallback(
@@ -135,6 +145,7 @@ export function App(): JSX.Element {
   const views = useMemo<RouteViewActions>(
     () => ({
       playAlbum,
+      playAlbumInOrder,
       shuffleAlbum,
       togglePlay,
       playTracks,
@@ -143,7 +154,7 @@ export function App(): JSX.Element {
       albumAddToPlaylist,
       openPlaylistSheet,
     }),
-    [playAlbum, shuffleAlbum, togglePlay, playTracks, albumPlayNext, albumAddToQueue, albumAddToPlaylist, openPlaylistSheet],
+    [playAlbum, playAlbumInOrder, shuffleAlbum, togglePlay, playTracks, albumPlayNext, albumAddToQueue, albumAddToPlaylist, openPlaylistSheet],
   );
 
   return (

@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Clock3, Disc3, Ellipsis, Heart, Pause, Play, Shuffle } from "lucide-react";
 import type { TrackRow } from "../../shared/types";
@@ -48,6 +48,9 @@ export function AlbumView({ id, scrollRef, actions }: AlbumViewProps): JSX.Eleme
   return <AlbumPage key={album.id} album={album} scrollRef={scrollRef} actions={actions} />;
 }
 
+/** Défilement (px) sur lequel la teinte de la barre du haut s'éteint. */
+const TINT_FADE_PX = 220;
+
 function AlbumPage({
   album,
   scrollRef,
@@ -69,12 +72,48 @@ function AlbumPage({
   const isPlaying = usePlayer((s) => s.status === "playing") && isCurrent;
   const isFav = usePlayer((s) => album.tracks.some((t) => s.favoriteIds.has(t.id)));
   const [selected, setSelected] = useState<number | null>(null);
+  // Tabulation itinérante : un seul arrêt de tabulation pour toute la liste (dernière ligne
+  // focalisée, sinon la sélection, le titre en cours ou la première ligne) ; ↑/↓ circulent.
+  const [focusedRow, setFocusedRow] = useState<number | null>(null);
   const [compact, setCompact] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
 
   const groups = useMemo(() => discGroups(album.tracks), [album.tracks]);
   const indexOf = useMemo(() => new Map(album.tracks.map((t, i) => [t.id, i])), [album.tracks]);
   const multiDisc = groups.length > 1;
+
+  // La couleur de l'en-tête passe sous la barre du haut (aucune arête nette) : la page publie sa
+  // teinte sur `.shell-main` (`--top-tint`, `data-tint`) et l'éteint en défilant (opacité
+  // `--top-tint-o`, mise à jour au plus une fois par frame) ; tout est retiré en quittant la page.
+  const tint = resolved?.vibrant ?? null;
+  const tintOwner = useId();
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const main = scroller?.parentElement;
+    if (!scroller || !main || !tint) return;
+    main.style.setProperty("--top-tint", tint);
+    // Jeton de propriété : la page sortante (démontée APRÈS l'entrée de la suivante, mode
+    // popLayout) ne retire pas la teinte posée par un autre album.
+    main.dataset.tint = tintOwner;
+    let raf = 0;
+    const update = (): void => {
+      raf = 0;
+      main.style.setProperty("--top-tint-o", Math.max(0, 1 - scroller.scrollTop / TINT_FADE_PX).toFixed(3));
+    };
+    const onScroll = (): void => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+      if (main.dataset.tint !== tintOwner) return;
+      delete main.dataset.tint;
+      main.style.removeProperty("--top-tint");
+      main.style.removeProperty("--top-tint-o");
+    };
+  }, [tint, tintOwner, scrollRef]);
 
   // Barre compacte : visible dès que la rangée de boutons passe sous la barre du haut.
   useEffect(() => {
@@ -93,9 +132,11 @@ function AlbumPage({
     return () => io.disconnect();
   }, [scrollRef]);
 
+  // « Lecture » d'en-tête : lecture DANS L'ORDRE (le mélange est coupé, comme Apple Music) ;
+  // « Aléatoire » l'active.
   const playPause = useCallback((): void => {
     if (isCurrent && canResume(playerStore.getState().status)) actions.togglePlay();
-    else actions.playAlbum(album);
+    else actions.playAlbumInOrder(album);
   }, [isCurrent, actions, album]);
 
   const playTrack = useCallback(
@@ -109,6 +150,11 @@ function AlbumPage({
   );
   const onRowPlay = useCallback((track: TrackRow) => playTrack(track), [playTrack]);
   const onRowSelect = useCallback((track: TrackRow) => setSelected(track.id), []);
+  const onRowFocus = useCallback((track: TrackRow) => setFocusedRow(track.id), []);
+  const tabStopId =
+    [focusedRow, selected, currentTrackId].find((id) => id !== null && indexOf.has(id)) ??
+    album.tracks[0]?.id ??
+    null;
   const onRowMenu = useCallback(
     (track: TrackRow, e: React.MouseEvent<HTMLElement>): void => {
       void menus.openTrackMenu(track, anchorFromEvent(e), (t) => actions.playAlbum(album, indexOf.get(t.id) ?? 0), {
@@ -212,9 +258,9 @@ function AlbumPage({
         </div>
         <div className="track-list" role="list" data-track-list="" aria-label={`Titres de ${album.title}`}>
           {groups.map((g) => (
-            <div key={g.disc ?? "none"} className="disc-group">
+            <div key={g.disc ?? "none"} className="disc-group" role="presentation">
               {multiDisc && (
-                <div className="disc-head">
+                <div className="disc-head" role="presentation">
                   <Disc3 size={16} strokeWidth={ICON_STROKE} aria-hidden />
                   <span>{g.disc === null ? "Autres titres" : `Disque ${g.disc}`}</span>
                 </div>
@@ -224,6 +270,9 @@ function AlbumPage({
                   key={t.id}
                   track={t}
                   index={i}
+                  number={t.trackNo ?? i + 1}
+                  tabbable={t.id === tabStopId}
+                  onFocusRow={onRowFocus}
                   playing={t.id === currentTrackId}
                   selected={t.id === selected}
                   onPlay={onRowPlay}

@@ -48,7 +48,13 @@ export function SearchResults({
           <div className="scan-note">Rien ne correspond à « {query.trim()} ».</div>
         ) : null
       ) : (
-        <AlbumGrid albums={albums} scrollRef={scrollRef} onPlay={onPlay} onContextMenu={onContextMenu} />
+        <AlbumGrid
+          albums={albums}
+          scrollRef={scrollRef}
+          onPlay={onPlay}
+          onContextMenu={onContextMenu}
+          memoryKey="search"
+        />
       )}
     </section>
   );

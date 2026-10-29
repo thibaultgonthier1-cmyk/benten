@@ -183,11 +183,23 @@ export function canResume(status: PlaybackStatus): boolean {
 /* ----------------------------------------- Grille ----------------------------------------- */
 
 /**
- * Colonnes et largeur de tuile pour une largeur de conteneur (reproduit `auto-fill minmax(min,1fr)`
- * avec une gouttière `gap`). Largeur nulle (pas encore mesurée) : une colonne de `min` px.
+ * Plafond de colonnes : au-delà, ce sont les tuiles qui grandissent (grand écran / 4K). Garde le
+ * DOM de la grille virtualisée sous ~120 tuiles et la pochette lisible.
  */
-export function gridLayout(width: number, min: number, gap: number): { cols: number; cardW: number } {
+export const GRID_MAX_COLS = 8;
+
+/**
+ * Colonnes et largeur de tuile pour une largeur de conteneur (reproduit `auto-fill minmax(min,1fr)`
+ * avec une gouttière `gap`, plafonné à `maxCols`). Largeur nulle (pas encore mesurée) : une
+ * colonne de `min` px.
+ */
+export function gridLayout(
+  width: number,
+  min: number,
+  gap: number,
+  maxCols: number = GRID_MAX_COLS,
+): { cols: number; cardW: number } {
   if (!(width > 0)) return { cols: 1, cardW: min };
-  const cols = Math.max(1, Math.floor((width + gap) / (min + gap)));
+  const cols = Math.max(1, Math.min(maxCols, Math.floor((width + gap) / (min + gap))));
   return { cols, cardW: Math.floor((width - gap * (cols - 1)) / cols) };
 }

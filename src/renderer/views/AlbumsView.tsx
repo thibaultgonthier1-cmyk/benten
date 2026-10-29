@@ -49,7 +49,7 @@ export function AlbumsView({ scrollRef, actions, variant = "albums" }: AlbumsVie
     (album: Album): void => {
       const p = playerStore.getState();
       if (p.currentTrack?.albumId === album.id && canResume(p.status)) actions.togglePlay();
-      else actions.playAlbum(album);
+      else actions.playAlbumInOrder(album);
     },
     [actions],
   );

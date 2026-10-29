@@ -26,14 +26,24 @@ export interface TrackRowItemProps {
   draggable?: boolean;
   /** Colonne album (inutile sur la page de l'album lui-même). */
   showAlbum?: boolean;
+  /** Numéro affiché (ex. n° de piste du tag) ; défaut : `index + 1`. */
+  number?: number;
+  /**
+   * Tabulation itinérante : une seule ligne de la liste est dans l'ordre de tabulation (`true`) ;
+   * les flèches déplacent le focus entre lignes. Défaut : focalisable au clavier.
+   */
+  tabbable?: boolean;
+  /** La ligne reçoit le focus (la liste y déplace son arrêt de tabulation). */
+  onFocusRow?(track: TrackRow): void;
 }
 
-/** Déplace le focus vers la ligne précédente / suivante de la même liste. */
-function focusSibling(row: HTMLElement, dir: 1 | -1): void {
+/** Déplace le focus vers la ligne voisine (`dir` ±1) ou vers la première / dernière (`"first"`/`"last"`). */
+function focusSibling(row: HTMLElement, dir: 1 | -1 | "first" | "last"): void {
   const list = row.closest("[data-track-list]");
   if (!list) return;
   const rows = Array.from(list.querySelectorAll<HTMLElement>("[data-track-row]"));
-  const next = rows[rows.indexOf(row) + dir];
+  const next =
+    dir === "first" ? rows[0] : dir === "last" ? rows[rows.length - 1] : rows[rows.indexOf(row) + dir];
   next?.focus();
 }
 
@@ -52,6 +62,9 @@ function TrackRowItemImpl({
   onContextMenu,
   draggable = true,
   showAlbum = true,
+  number,
+  tabbable = true,
+  onFocusRow,
 }: TrackRowItemProps): JSX.Element {
   const favorite = usePlayer((s) => s.favoriteIds.has(track.id));
   const statusPlaying = usePlayer((s) => playing && s.status === "playing");
@@ -66,6 +79,9 @@ function TrackRowItemImpl({
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       focusSibling(e.currentTarget, e.key === "ArrowDown" ? 1 : -1);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      focusSibling(e.currentTarget, e.key === "Home" ? "first" : "last");
     }
   };
 
@@ -80,7 +96,8 @@ function TrackRowItemImpl({
       }
       data-track-row=""
       role="listitem"
-      tabIndex={0}
+      tabIndex={tabbable ? 0 : -1}
+      onFocus={onFocusRow ? (e) => e.target === e.currentTarget && onFocusRow(track) : undefined}
       aria-label={`${track.title}${track.artist ? ` — ${track.artist}` : ""}`}
       aria-current={playing ? "true" : undefined}
       data-selected={selected || undefined}
@@ -100,7 +117,7 @@ function TrackRowItemImpl({
       }
     >
       <div className="track-row__num num">
-        {playing ? <Equalizer className="track-row__eq" /> : <span className="track-row__n">{index + 1}</span>}
+        {playing ? <Equalizer className="track-row__eq" /> : <span className="track-row__n">{number ?? index + 1}</span>}
         <button
           type="button"
           tabIndex={-1}

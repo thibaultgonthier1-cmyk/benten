@@ -6,7 +6,6 @@ import { gridLayout } from "../lib/viewModels";
 import { usePlayer } from "../state/player";
 import { plannedScroll } from "../shell/scrollMemory";
 import { AlbumTile } from "../ui/AlbumTile";
-import { DetachedPresence } from "../ui/DetachedPresence";
 import "./views.css";
 
 export interface AlbumGridProps {
@@ -125,9 +124,6 @@ export function AlbumGrid({ albums, scrollRef, onPlay, onContextMenu, memoryKey 
       aria-label="Albums"
       style={{ height: Math.max(0, virtualizer.getTotalSize() - GAP_Y) }}
     >
-      {/* Tuiles virtualisées (pochettes `layoutId`) : détachées de la présence de la page, sans
-          quoi une tuile démontée au défilement bloquerait la sortie de la page (cf. DetachedPresence). */}
-      <DetachedPresence>
       {rows.map((row) => {
         const start = row.index * cols;
         const rowAlbums = albums.slice(start, start + cols);
@@ -135,6 +131,7 @@ export function AlbumGrid({ albums, scrollRef, onPlay, onContextMenu, memoryKey 
           <div
             key={row.key}
             className="album-grid__row"
+            role="presentation"
             data-row={row.index}
             style={{
               transform: `translateY(${row.start - scrollMargin}px)`,
@@ -156,7 +153,6 @@ export function AlbumGrid({ albums, scrollRef, onPlay, onContextMenu, memoryKey 
           </div>
         );
       })}
-      </DetachedPresence>
     </div>
   );
 }
