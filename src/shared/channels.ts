@@ -22,6 +22,8 @@ export const CHANNELS = {
   PLAYLISTS_REORDER: "playlists:reorder",
   STATE_GET: "state:get",
   STATE_SET: "state:set",
+  /** Journal audio : le Renderer envoie des lots d'entrees, le Main les ajoute au fichier. */
+  DIAGNOSTICS_APPEND: "diagnostics:append",
   /** Push Main -> Renderer (une voie) : la bibliotheque a change (veille de dossiers, Task 14B). */
   LIBRARY_CHANGED: "library:changed",
 } as const;

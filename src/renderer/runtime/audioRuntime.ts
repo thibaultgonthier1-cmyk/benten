@@ -1,5 +1,12 @@
 import { AudioEngine, qualitySampleRate } from "../audio/engine";
 import { NativeDecoder, type Decoder } from "../audio/decoder";
+import { AUDIO_LATENCY_HINT, createAudioContext } from "../audio/context";
+import {
+  createDiagnosticsSink,
+  startAudioDiagnostics,
+  type AudioDiagnosticsDeps,
+  type AudioDiagnosticsHandle,
+} from "../audio/diagnostics";
 import { bindEngine, playerStore, type PlayerState } from "../state/player";
 import { libraryStore } from "../state/library";
 import { createControls, type PlayerControls } from "../components/controls";
@@ -21,6 +28,8 @@ export interface AudioRuntimeDeps {
   createDecoder?: (ctx: AudioContext) => Decoder;
   raf?: typeof requestAnimationFrame;
   caf?: typeof cancelAnimationFrame;
+  /** Demarrage du journal audio (defaut `startAudioDiagnostics`). */
+  startDiagnostics?: (deps: AudioDiagnosticsDeps) => AudioDiagnosticsHandle;
 }
 
 export interface AudioRuntime {
@@ -34,8 +43,13 @@ export interface AudioRuntime {
   dispose(opts?: { closeContext?: boolean }): void;
 }
 
+/**
+ * Fabrique par defaut : TOUJOURS `createAudioContext` (`latencyHint: "playback"`), au demarrage
+ * comme a la reconstruction de qualite (`sampleRate` du mode ; frequence refusee : repli au
+ * defaut, toujours en "playback").
+ */
 const defaultCreateContext = (opts?: AudioContextOptions): AudioContext =>
-  opts === undefined ? new AudioContext() : new AudioContext(opts);
+  createAudioContext(opts?.sampleRate);
 const defaultCreateDecoder = (ctx: AudioContext): Decoder => new NativeDecoder(ctx);
 const defaultRaf: typeof requestAnimationFrame = (cb) => requestAnimationFrame(cb);
 const defaultCaf: typeof cancelAnimationFrame = (id) => cancelAnimationFrame(id);
@@ -60,6 +74,7 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   const createDecoder = deps.createDecoder ?? defaultCreateDecoder;
   const requestFrame = deps.raf ?? defaultRaf;
   const cancelFrame = deps.caf ?? defaultCaf;
+  const startDiagnostics = deps.startDiagnostics ?? startAudioDiagnostics;
 
   // UN SEUL moteur (AudioContext reel + NativeDecoder), cree une fois.
   const ctx = createContext();
@@ -111,6 +126,27 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
       library: libraryStore,
     };
   }
+  // Journal audio (diagnostic des micro-coupures, actif en PRODUCTION) : demarre UNE fois avec le
+  // runtime (singleton de page : ni StrictMode ni un HMR de l'App ne le relancent ; un HMR qui
+  // remplace le runtime arrete l'ancien journal au dispose AVANT d'en demarrer un nouveau). Il
+  // OBSERVE seulement le contexte COURANT (getter : la reconstruction de qualite le remplace) et
+  // les transitions du moteur ; n'appelle aucun mutateur, ne cree aucun noeud audio, ses erreurs
+  // restent chez lui. Les entrees partent par lots vers le Main (au plus toutes les 2 s,
+  // immediatement sur glitch).
+  const diagSink = createDiagnosticsSink({
+    send: (entries) => win()?.benten?.diagnostics?.append(entries),
+  });
+  const w0 = win();
+  const diagnostics = startDiagnostics({
+    getContext: () => engine.getContext(),
+    engine,
+    append: diagSink.append,
+    latencyHint: AUDIO_LATENCY_HINT,
+    mediaDevices: typeof navigator !== "undefined" ? (navigator.mediaDevices ?? null) : null,
+    win: w0 && typeof w0.addEventListener === "function" ? w0 : null,
+    doc: typeof document !== "undefined" ? document : null,
+  });
+
   let raf = 0;
   // La boucle rAF tourne a la frequence ecran (~60 Hz) mais on ne pompe tick()+setPosition qu'a
   // ~15 Hz (66 ms) via une porte pure pilotee par le timestamp rAF : PRELOAD_LEAD_SEC = 10 s dans
@@ -185,6 +221,8 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
     if (disposed) return;
     disposed = true;
     cancelFrame(raf);
+    diagnostics.stop(); // glitch en attente consigne, puis plus aucun echantillonnage
+    diagSink.stop(); // dernier lot envoye au Main
     unbind();
     unbindMediaSession();
     unsubscribeSave();

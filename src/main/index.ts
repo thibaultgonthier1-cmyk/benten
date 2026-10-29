@@ -1,12 +1,14 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, powerMonitor } from "electron";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme } from "./artprotocol";
-import { registerIpc } from "./ipc";
+import { registerDiagnosticsIpc, registerIpc } from "./ipc";
+import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
+import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
 import { backfillAddedAt } from "./library/addedAt";
-import { openDb } from "./library/db";
+import { backupDb, openDbSafe, wireDbClose } from "./library/dbsafety";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
 import { createWatcher, type WatchFactory, type WatcherHandle } from "./library/watcher";
@@ -25,7 +27,21 @@ if (process.env["ELECTRON_RENDERER_URL"]) {
   app.commandLine.appendSwitch("remote-debugging-port", "9222");
 }
 
-function createWindow(): void {
+/** Journal audio (cree a `whenReady`, une fois `userData` connu). */
+let journal: JournalWriter | null = null;
+/** Fenetre principale (ramenee au premier plan sur un second lancement). */
+let mainWindow: BrowserWindow | null = null;
+
+// ── Instance unique ──────────────────────────────────────────────────────────────────────────
+// La build de dev (`benten`) et l'exe (`Benten`) partagent le meme %APPDATA% sous Windows : deux
+// processus ecrivant la meme base SQLite est une cause plausible de corruption. Un second
+// lancement rend la main a la fenetre existante et quitte SANS jamais ouvrir la base.
+const isPrimaryInstance = enforceSingleInstance(app, () => {
+  void journal?.log({ kind: "process", event: "second-instance" });
+  focusWindow(mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0]);
+});
+
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -47,17 +63,62 @@ function createWindow(): void {
   });
 
   win.on("ready-to-show", () => win.show());
+  // Journal audio : fenetre bloquee / debloquee (thread principal du renderer).
+  const j = journal;
+  if (j) watchWindowJournal(win, (e) => j.log(e));
 
   if (process.env["ELECTRON_RENDERER_URL"]) {
     void win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
     void win.loadFile(join(__dirname, "../renderer/index.html"));
   }
+  mainWindow = win;
+  return win;
 }
 
+/** Delai apres l'affichage de la fenetre avant la sauvegarde de la base (demarrage jamais ralenti). */
+const BACKUP_DELAY_MS = 5000;
+
 app.whenReady().then(() => {
+  // Seconde instance : `app.quit()` est deja demande ; elle n'ouvre NI la base NI de fenetre.
+  if (!isPrimaryInstance) return;
   registerArtProtocol();
-  const db = openDb(join(app.getPath("userData"), "benten.db"));
+  const userData = app.getPath("userData");
+
+  // ── Journal audio (diagnostic des micro-coupures) ──────────────────────────────────────────
+  // `userData/logs/audio-journal.log` (+ un seul ancien `.1.log` apres 1 Mo). Le Renderer y
+  // ajoute ses entrees via `diagnostics:append` ; le Main y consigne lui-meme les evenements
+  // processus (service audio Chromium, renderer, fenetre, veille/reprise, recuperation de base).
+  // Cree AVANT l'ouverture de la base pour qu'une recuperation y soit consignee.
+  const j = createJournalWriter(join(userData, "logs"));
+  journal = j;
+  registerDiagnosticsIpc(j, {
+    appVersion: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+  });
+  attachMainJournal({ app, powerMonitor, log: (e) => j.log(e) });
+
+  // ── Base de bibliotheque crash-safe ────────────────────────────────────────────────────────
+  // Copie pre-ouverture apres arret non propre ; ouverture verifiee (quick_check) ; corruption
+  // averee -> copie verifiee dans `db-corrupted-<horodatage>/`, restauration de la derniere
+  // sauvegarde saine (ou base neuve), `app_state.dbRecovered`, entree de journal. L'app demarre
+  // normalement : la veille re-indexe. Echec irrecuperable -> message clair puis sortie (exit 1).
+  let opened: ReturnType<typeof openDbSafe>["db"];
+  try {
+    opened = openDbSafe(userData, { log: (e) => j.log(e) }).db;
+  } catch (err) {
+    // Synchrone : la ligne est sur disque AVANT `app.exit(1)` (pas de perte en vol).
+    j.logSync({
+      kind: "process",
+      event: "db",
+      action: "fatal",
+      reason: err instanceof Error ? err.message : String(err),
+    });
+    reportFatalStartup({ app, dialog }, err, j.file);
+    return;
+  }
+  const db = opened;
 
   // ── Veille de dossiers (Task 14B) ────────────────────────────────────────────────────────────
   // Un seul watcher a la fois, pose sur l'ENSEMBLE des sources persistees. A chaque lot de re-scan
@@ -94,7 +155,16 @@ app.whenReady().then(() => {
   };
 
   registerIpc(db, { onSourcesChanged: startWatcher });
-  createWindow();
+
+  const win = createWindow();
+  // Sauvegarde de lancement, apres l'affichage de la fenetre (asynchrone, differee) :
+  // `userData/db-backups/benten-<horodatage>.db`, sautee si la derniere a moins de 20 h ;
+  // retention = 3 plus recentes + une par jour sur 7 jours.
+  win.once("show", () => {
+    setTimeout(() => {
+      void backupDb(db, userData);
+    }, BACKUP_DELAY_MS);
+  });
 
   // Rattrapage unique de la date d'ajout (pistes indexées avant la v3) : stats en parallèle, une
   // seule transaction ; la vue Titres se recharge si des dates ont été complétées. Best-effort.
@@ -114,6 +184,9 @@ app.whenReady().then(() => {
     watcher = null;
     if (previous) void previous.close();
   });
+  // Puis fermeture ORDONNEE de la base (checkpoint WAL final propre) sur `will-quit` — enregistree
+  // APRES la veille pour que celle-ci soit arretee d'abord — ou sur `session-end` (Windows).
+  wireDbClose(app, db);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

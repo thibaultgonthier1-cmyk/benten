@@ -3,6 +3,7 @@ import { startAudioRuntime, type AudioRuntime } from "../src/renderer/runtime/au
 import { playerStore } from "../src/renderer/state/player";
 import { libraryStore } from "../src/renderer/state/library";
 import type { Decoder } from "../src/renderer/audio/decoder";
+import type { AudioDiagnosticsDeps } from "../src/renderer/audio/diagnostics";
 
 /**
  * Runtime audio (Phase 3, Tâche 2) : la logique jadis dans l'effet d'`App.tsx` (liaison store,
@@ -212,5 +213,74 @@ describe("startAudioRuntime", () => {
     expect(bridge.persist).toBeDefined();
     runtime.dispose();
     expect(win.__benten).toBeUndefined();
+  });
+});
+
+describe("startAudioRuntime — journal audio + latencyHint (fusion du hotfix main)", () => {
+  it("fabrique par défaut : createAudioContext (latencyHint « playback »), au démarrage ET à la reconstruction de qualité", async () => {
+    const made: (AudioContextOptions | undefined)[] = [];
+    class StubCtx extends FakeAudioContext {
+      constructor(opts?: AudioContextOptions) {
+        super(opts?.sampleRate ?? 48000);
+        made.push(opts);
+      }
+    }
+    vi.stubGlobal("AudioContext", StubCtx);
+    const h = harness();
+    runtime = startAudioRuntime({
+      createDecoder: h.createDecoder,
+      raf: h.raf,
+      caf: h.caf,
+      startDiagnostics: () => ({ stop: () => undefined }),
+    });
+    expect(made).toEqual([{ latencyHint: "playback" }]);
+    const old = runtime.engine.getContext() as unknown as FakeAudioContext;
+    playerStore.getState().setQualityMode("economy");
+    await vi.waitFor(() => expect(old.closed).toBe(1));
+    expect(made).toEqual([{ latencyHint: "playback" }, { latencyHint: "playback", sampleRate: 44100 }]);
+    runtime.dispose();
+    runtime = undefined;
+    playerStore.getState().setQualityMode("balanced"); // gestionnaire détaché : état du store remis
+  });
+
+  it("démarre le journal UNE fois avec le moteur et un getter du contexte COURANT ; l'arrête au dispose", async () => {
+    const h = harness();
+    const stop = vi.fn();
+    const calls: AudioDiagnosticsDeps[] = [];
+    runtime = startAudioRuntime({
+      ...h,
+      startDiagnostics: (d) => {
+        calls.push(d);
+        return { stop };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    const d = calls[0]!;
+    expect(d.engine).toBe(runtime.engine);
+    expect(d.latencyHint).toBe("playback");
+    expect(d.getContext()).toBe(h.contexts[0]);
+    // La reconstruction de qualité remplace le contexte : le getter suit (pas de capture figée).
+    playerStore.getState().setQualityMode("economy");
+    await vi.waitFor(() => expect(h.contexts[0]!.closed).toBe(1));
+    expect(d.getContext()).toBe(h.contexts[1]);
+    expect(stop).not.toHaveBeenCalled();
+    runtime.dispose();
+    runtime.dispose();
+    runtime = undefined;
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+    playerStore.getState().setQualityMode("balanced");
+  });
+
+  it("le journal réel envoie son entrée `session` à window.benten.diagnostics.append (vidée au dispose)", () => {
+    const append = vi.fn(async (_entries: unknown[]) => undefined);
+    vi.stubGlobal("window", { benten: { diagnostics: { append } } });
+    runtime = startAudioRuntime(harness());
+    runtime.dispose();
+    runtime = undefined;
+    const entries = append.mock.calls.flatMap((c) => c[0] as unknown as { kind: string; latencyHint?: string }[]);
+    const sessions = entries.filter((e) => e.kind === "session");
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]!.latencyHint).toBe("playback");
   });
 });

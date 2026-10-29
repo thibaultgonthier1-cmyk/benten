@@ -105,11 +105,30 @@ function migrate(db: Database.Database): void {
   }
 }
 
-/** Ouvre (ou crée) la base SQLite et applique les migrations en attente. */
+/**
+ * Ouvre (ou crée) la base SQLite et applique les migrations en attente.
+ *
+ * `synchronous = NORMAL` (explicite) : en mode WAL, NORMAL est sur face a un crash du PROCESSUS
+ * (kill, plantage) — la base reste coherente ; seule une coupure d'ALIMENTATION peut perdre les
+ * derniers commits (jamais corrompre). FULL fsync-erait chaque commit et ralentirait nettement
+ * l'indexation d'une grosse bibliotheque, pour un gain marginal. Si l'initialisation echoue
+ * (base corrompue : SQLITE_CORRUPT / SQLITE_NOTADB), la connexion est FERMEE avant de relancer
+ * l'erreur : sous Windows, un handle ouvert verrouillerait le fichier et empecherait de le deplacer.
+ */
 export function openDb(path: string): Database.Database {
   const db = new Database(path);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  migrate(db);
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("foreign_keys = ON");
+    migrate(db);
+  } catch (err) {
+    try {
+      db.close();
+    } catch {
+      /* deja fermee */
+    }
+    throw err;
+  }
   return db;
 }
