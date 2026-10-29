@@ -56,3 +56,46 @@ export function motionFor(intensity: MotionIntensity, prefersReduced: boolean): 
     spring: subtle ? springs.soft : springs.snappy,
   };
 }
+
+/**
+ * Valeur de `MotionConfig.reducedMotion` pour un réglage d'intensité : « Réduit » coupe les
+ * animations de transformation/layout partout (`always`) ; « Complet » et « Sobre » laissent
+ * framer-motion suivre `prefers-reduced-motion` du système (`user`).
+ */
+export function reducedMotionFor(intensity: MotionIntensity): "always" | "user" {
+  return intensity === "reduced" ? "always" : "user";
+}
+
+/** Amplitude (px) du glissé vertical à l'entrée d'une page. */
+export const PAGE_SLIDE_PX = 8;
+
+interface TweenTransition {
+  duration: number;
+  ease: readonly number[];
+}
+
+export interface PageTransition {
+  initial: { opacity: number; y: number };
+  animate: { opacity: number; y: number; transition: TweenTransition };
+  exit: { opacity: number; y?: number; transition: TweenTransition };
+}
+
+/**
+ * Transition de page (navigation) : la page entrante monte de 8 px en fondu (durée de base), la
+ * sortante s'efface vite. Désactivé (Réduit ou préférence système) : bascule instantanée, sans
+ * glissé. Uniquement `opacity`/`transform` (GPU).
+ */
+export function pageTransition(m: ResolvedMotion): PageTransition {
+  if (!m.enabled) {
+    return {
+      initial: { opacity: 1, y: 0 },
+      animate: { opacity: 1, y: 0, transition: { duration: 0, ease: ease.out } },
+      exit: { opacity: 0, transition: { duration: 0, ease: ease.out } },
+    };
+  }
+  return {
+    initial: { opacity: 0, y: PAGE_SLIDE_PX },
+    animate: { opacity: 1, y: 0, transition: { duration: m.d(dur.base), ease: ease.out } },
+    exit: { opacity: 0, transition: { duration: m.d(dur.fast), ease: ease.inOut } },
+  };
+}

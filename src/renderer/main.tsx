@@ -1,11 +1,12 @@
-import React from "react";
+import React, { useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MotionConfig } from "framer-motion";
 // Design system Phase 3 : chargé AVANT l'ancien theme/tokens.css (importé par App).
 import "./theme/ds/base.css";
 import "./theme/ds/tokens.css";
 import { App } from "./App";
-import { settingsStore } from "./state/settings";
+import { settingsStore, useSettings } from "./state/settings";
+import { reducedMotionFor } from "./theme/ds/motion";
 
 // Préchauffe les polices embarquées : @fontsource découpe le japonais en tranches `unicode-range`
 // chargées à la demande ; on charge d'emblée les tranches de base (latin + kana, ~30 Ko locaux par
@@ -26,10 +27,23 @@ for (const font of WARM_FONTS) {
 // Amorce les réglages persistés (intensité du mouvement, intro) ; best-effort, non bloquant.
 void settingsStore.getState().load();
 
+/**
+ * Mouvement global piloté par le réglage d'intensité (réactif) : « Réduit » coupe les animations
+ * framer-motion partout (`always`) ; sinon framer suit `prefers-reduced-motion` (`user`).
+ * `data-motion` sur <html> permet aussi au CSS (shimmer, transitions) de suivre le réglage.
+ */
+function MotionRoot({ children }: { children: ReactNode }): JSX.Element {
+  const intensity = useSettings((s) => s.motionIntensity);
+  useEffect(() => {
+    document.documentElement.dataset.motion = intensity;
+  }, [intensity]);
+  return <MotionConfig reducedMotion={reducedMotionFor(intensity)}>{children}</MotionConfig>;
+}
+
 createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <MotionConfig reducedMotion="user">
+    <MotionRoot>
       <App />
-    </MotionConfig>
+    </MotionRoot>
   </React.StrictMode>,
 );

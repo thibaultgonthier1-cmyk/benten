@@ -1,20 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import "./theme/tokens.css";
-import { playerStore, usePlayer } from "./state/player";
-import { libraryStore, useLibrary } from "./state/library";
+import { playerStore } from "./state/player";
+import { libraryStore } from "./state/library";
 import { startAudioRuntime, type AudioRuntime } from "./runtime/audioRuntime";
 import { restorePlaybackState } from "./runtime/restore";
-import {
-  DEFAULT_SORT_FILTER,
-  sortFilterAlbums,
-  type Album,
-  type AlbumSortFilter,
-} from "./lib/library";
+import { DEFAULT_SORT_FILTER, type Album, type AlbumSortFilter } from "./lib/library";
 import type { TrackRow } from "../shared/types";
-import { LibraryGrid } from "./components/LibraryGrid";
-import { SortFilterBar } from "./components/SortFilterBar";
-import { SearchResults } from "./components/SearchResults";
-import { Playlists } from "./components/Playlists";
+import { Shell } from "./shell/Shell";
+import type { RouteViewActions } from "./shell/RouteView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
@@ -60,32 +53,14 @@ export function App(): JSX.Element {
   // un ref preserve par Fast Refresh pointerait encore vers l'ancien moteur dispose.
   const { engine, controls } = ensureAudioRuntime();
 
-  const albums = useLibrary((s) => s.albums);
-  const loading = useLibrary((s) => s.loading);
-  const query = useLibrary((s) => s.query);
-  const results = useLibrary((s) => s.results);
-  // `true` seulement quand une recherche a abouti pour le terme courant : empeche le clignotement de
-  // « aucun resultat » pendant l'anti-rebond, avant que la premiere reponse ne soit arrivee.
-  const searched = useLibrary((s) => s.searched);
-  const scanning = useLibrary((s) => s.scanning);
-  const scanMsg = useLibrary((s) => s.scanMsg);
-  // Racines persistées (Task 5) : proposées en raccourci de ré-indexation sur l'écran d'accueil,
-  // en remplacement de l'ancienne bibliothèque codée en dur.
-  const sources = useLibrary((s) => s.sources);
-  const setQuery = libraryStore.getState().setQuery;
-
-  const [view, setView] = useState<"library" | "playlists">("library");
+  // Tri/filtres de la grille d'albums, conserves d'une page a l'autre (le filtre « favoris » est
+  // porte par la route `favorites`, cf. RouteView).
   const [sortFilter, setSortFilter] = useState<AlbumSortFilter>(DEFAULT_SORT_FILTER);
-  const [scanPath, setScanPath] = useState("");
-  const mainRef = useRef<HTMLElement>(null);
   // Feuille « Ajouter à une playlist » : pistes a ajouter + libelle (titre d'album).
   const [plSheet, setPlSheet] = useState<{ open: boolean; trackIds: number[]; label?: string }>({
     open: false,
     trackIds: [],
   });
-
-  const currentAlbumId = usePlayer((s) => s.currentTrack?.albumId ?? null);
-  const favoriteIds = usePlayer((s) => s.favoriteIds);
 
   useEffect(() => {
     const library = libraryStore.getState();
@@ -142,219 +117,22 @@ export function App(): JSX.Element {
     setPlSheet((s) => ({ ...s, open: false }));
   }, []);
 
-  // Indexation : chemin explicite (raccourci de source) ou champ de saisie.
-  const runScan = useCallback(
-    (pathArg?: string): Promise<void> => libraryStore.getState().scan(pathArg ?? scanPath),
-    [scanPath],
+  const views = useMemo<RouteViewActions>(
+    () => ({
+      playAlbum,
+      playTracks,
+      albumPlayNext,
+      albumAddToQueue,
+      albumAddToPlaylist,
+      sortFilter,
+      setSortFilter,
+    }),
+    [playAlbum, playTracks, albumPlayNext, albumAddToQueue, albumAddToPlaylist, sortFilter],
   );
-
-  // Selecteur de dossier natif (process Main) : chemin propose plutot que saisi a la main.
-  const pickFolder = useCallback(
-    (): Promise<void> => libraryStore.getState().pickFolderAndScan(setScanPath),
-    [],
-  );
-
-  // Tri + filtres appliqués côté vue (la SortFilterBar pilote la liste affichée). Même liste
-  // blanche que le repository `getAlbums` ; voir `sortFilterAlbums`.
-  const shownAlbums = useMemo(
-    () => sortFilterAlbums(albums, sortFilter, favoriteIds),
-    [albums, sortFilter, favoriteIds],
-  );
-
-  const empty = !loading && albums.length === 0;
-  const searching = query.trim().length > 0;
 
   return (
     <>
-      <div className="ambient" aria-hidden="true">
-        <div className="blob b1" />
-        <div className="blob b2" />
-        <div className="blob b3" />
-        <div className="seigaiha" />
-      </div>
-
-      <div id="app">
-        <nav className="nav">
-          <div className="brand">
-            <div className="mark">弁</div>
-            <div>
-              <b>Benten</b>
-              <small>lecture locale</small>
-            </div>
-          </div>
-          <button
-            className={"nav-item" + (view === "library" && !sortFilter.favoritesOnly ? " active" : "")}
-            type="button"
-            aria-current={view === "library" && !sortFilter.favoritesOnly ? "page" : undefined}
-            onClick={() => {
-              setView("library");
-              setSortFilter((sf) => ({ ...sf, favoritesOnly: false }));
-            }}
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M3 11l9-8 9 8" />
-              <path d="M5 10v10h14V10" />
-            </svg>
-            Accueil <span className="kanji">家</span>
-          </button>
-          <div className="nav-group">Ma bibliotheque</div>
-          <button
-            className={"nav-item" + (view === "library" && sortFilter.favoritesOnly ? " active" : "")}
-            type="button"
-            aria-current={view === "library" && sortFilter.favoritesOnly ? "page" : undefined}
-            onClick={() => {
-              setView("library");
-              setSortFilter((sf) => ({ ...sf, favoritesOnly: true }));
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 20.5l-1.3-1.2C5.4 14.5 2.5 11.9 2.5 8.6 2.5 6.2 4.4 4.3 6.8 4.3c1.4 0 2.7.65 3.6 1.7l1.6 1.9 1.6-1.9c.9-1.05 2.2-1.7 3.6-1.7 2.4 0 4.3 1.9 4.3 4.3 0 3.3-2.9 5.9-8.2 10.7L12 20.5z" />
-            </svg>
-            Favoris <span className="kanji">好</span>
-          </button>
-          <button
-            className={"nav-item" + (view === "playlists" ? " active" : "")}
-            type="button"
-            aria-current={view === "playlists" ? "page" : undefined}
-            onClick={() => setView("playlists")}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h12" />
-              <path d="M4 12h12" />
-              <path d="M4 17h8" />
-              <circle cx="19" cy="16" r="2.4" />
-              <path d="M21.4 16V8.5l-3.4 1" />
-            </svg>
-            Playlists <span className="kanji">曲</span>
-          </button>
-        </nav>
-
-        <main className="main" ref={mainRef}>
-          <div className="topbar">
-            <label className="search">
-              <svg viewBox="0 0 24 24">
-                <circle cx="11" cy="11" r="7" />
-                <path d="M21 21l-4-4" />
-              </svg>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Recherche"
-                aria-label="Recherche"
-                spellCheck={false}
-                type="search"
-              />
-            </label>
-            <div className="top-actions">
-              <span className="chip">
-                <span className="dot" />
-                {albums.length} albums
-              </span>
-            </div>
-          </div>
-
-          <header className="hero">
-            <div className="jp">今宵 · ce soir</div>
-            <h1>Ta bibliotheque, lue en local</h1>
-            <p>
-              Chaque fichier est analyse pour afficher sa vraie qualite. Clique un album pour lancer
-              la lecture gapless.
-            </p>
-          </header>
-
-          {view === "playlists" ? (
-            <Playlists onPlay={playTracks} />
-          ) : searching ? (
-            <SearchResults
-              tracks={results}
-              query={query}
-              searched={searched}
-              scrollRef={mainRef}
-              playingAlbumId={currentAlbumId}
-              onPlay={playAlbum}
-            />
-          ) : empty ? (
-            <section className="section">
-              <div className="empty">
-                <div className="mark">弁</div>
-                <h2>Aucune musique pour l'instant</h2>
-                <p>
-                  Indique le dossier de ta bibliotheque locale pour l'indexer. Benten lit les
-                  fichiers sur place, hors-ligne.
-                </p>
-                <div className="scan-actions">
-                  <button
-                    className="btn"
-                    type="button"
-                    onClick={() => void pickFolder()}
-                    disabled={scanning}
-                  >
-                    {scanning ? "Analyse…" : "Choisir un dossier"}
-                  </button>
-                </div>
-                <div className="scan-row">
-                  <input
-                    value={scanPath}
-                    onChange={(e) => setScanPath(e.target.value)}
-                    placeholder="… ou colle un chemin ici"
-                    spellCheck={false}
-                    disabled={scanning}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void runScan();
-                    }}
-                  />
-                  <button
-                    className="btn ghost"
-                    type="button"
-                    onClick={() => void runScan()}
-                    disabled={scanning}
-                  >
-                    Scanner
-                  </button>
-                </div>
-                {sources.length > 0 && (
-                  <div className="scan-sources">
-                    {sources.map((s) => (
-                      <button
-                        key={s.id}
-                        className="scan-hint"
-                        type="button"
-                        onClick={() => void runScan(s.path)}
-                        disabled={scanning}
-                        title={s.path}
-                      >
-                        {s.path}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {scanMsg && <div className="scan-note">{scanMsg}</div>}
-              </div>
-            </section>
-          ) : (
-            <section className="section">
-              <div className="section-head">
-                <h2>{sortFilter.favoritesOnly ? "Favoris" : "Albums"}</h2>
-                <SortFilterBar value={sortFilter} onChange={setSortFilter} />
-                <span className="count">
-                  {loading ? "chargement…" : `${shownAlbums.length} albums`}
-                </span>
-              </div>
-              <LibraryGrid
-                albums={shownAlbums}
-                scrollRef={mainRef}
-                playingAlbumId={currentAlbumId}
-                onPlay={playAlbum}
-                onPlayNext={albumPlayNext}
-                onAddToQueue={albumAddToQueue}
-                onAddToPlaylist={albumAddToPlaylist}
-              />
-            </section>
-          )}
-        </main>
-
-        <MiniPlayer controls={controls} />
-      </div>
+      <Shell views={views} player={<MiniPlayer controls={controls} />} />
 
       <NowPlaying controls={controls} />
       <QueuePanel />

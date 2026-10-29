@@ -2,6 +2,7 @@ import { AudioEngine, qualitySampleRate } from "../audio/engine";
 import { NativeDecoder, type Decoder } from "../audio/decoder";
 import { bindEngine, playerStore, type PlayerState } from "../state/player";
 import { libraryStore } from "../state/library";
+import { uiStore } from "../state/ui";
 import { createControls, type PlayerControls } from "../components/controls";
 import { makeThrottle } from "../lib/throttle";
 import { restoreState, serializeState } from "../lib/persist";
@@ -102,6 +103,7 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
       store: playerStore,
       persist: { serializeState, restoreState },
       library: libraryStore,
+      ui: uiStore,
     };
   }
   let raf = 0;
