@@ -1,9 +1,12 @@
+import type React from "react";
 import { useCallback, useMemo, useState, type RefObject } from "react";
 import { AnimatePresence, motion, type TargetAndTransition } from "framer-motion";
 import { Construction, FolderOpen, Heart, Search, type LucideIcon } from "lucide-react";
 import { routeKey, uiStore, useUi, type Route } from "../state/ui";
 import { libraryStore, useLibrary } from "../state/library";
-import { usePlayer } from "../state/player";
+import { playerStore, usePlayer } from "../state/player";
+import { openMenu } from "../ui/menuStore";
+import { albumMenuItems } from "./albumMenu";
 import { pageTransition } from "../theme/ds/motion";
 import { sortFilterAlbums, type Album, type AlbumSortFilter } from "../lib/library";
 import type { TrackRow } from "../../shared/types";
@@ -225,6 +228,28 @@ function AlbumsSection({
     [setSortFilter, favoritesOnly],
   );
 
+  // Clic droit sur une tuile : menu contextuel aux actions existantes. Les favoris sont lus à
+  // l'ouverture (pas en dépendance) : le callback reste stable et la grille mémoïsée ne re-rend pas.
+  const onAlbumContextMenu = useCallback(
+    (album: Album, e: React.MouseEvent<HTMLElement>): void => {
+      const player = playerStore.getState();
+      const items = albumMenuItems(
+        album,
+        { ...actions, toggleFavorite: (id) => playerStore.getState().toggleFavorite(id) },
+        player.favoriteIds,
+      );
+      // Clic droit : au curseur. Touche Menu / Maj+F10 (bouton ≠ 2) : au centre de la tuile, focus
+      // sur le 1er élément.
+      if (e.button === 2) {
+        openMenu(e.clientX, e.clientY, items);
+      } else {
+        const r = e.currentTarget.getBoundingClientRect();
+        openMenu(r.left + r.width / 2, r.top + Math.min(r.height / 2, r.width / 2), items, { focusFirst: true });
+      }
+    },
+    [actions],
+  );
+
   // Le compte vit dans l'en-tête de page (pas de doublon à droite des filtres).
   return (
     <>
@@ -251,6 +276,7 @@ function AlbumsSection({
             onPlayNext={actions.albumPlayNext}
             onAddToQueue={actions.albumAddToQueue}
             onAddToPlaylist={actions.albumAddToPlaylist}
+            onContextMenu={onAlbumContextMenu}
           />
         )}
       </section>

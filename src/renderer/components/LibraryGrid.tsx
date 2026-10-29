@@ -22,6 +22,8 @@ export interface LibraryGridProps {
   onPlayNext?: (album: Album) => void;
   onAddToQueue?: (album: Album) => void;
   onAddToPlaylist?: (album: Album) => void;
+  /** Menu contextuel d'une tuile (clic droit). */
+  onContextMenu?: (album: Album, e: React.MouseEvent<HTMLElement>) => void;
 }
 
 const MIN_CARD = 172;
@@ -36,6 +38,7 @@ export function LibraryGrid({
   onPlayNext,
   onAddToQueue,
   onAddToPlaylist,
+  onContextMenu,
 }: LibraryGridProps): JSX.Element {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [cols, setCols] = useState(1);
@@ -125,6 +128,7 @@ export function LibraryGrid({
                 onPlayNext={onPlayNext}
                 onAddToQueue={onAddToQueue}
                 onAddToPlaylist={onAddToPlaylist}
+                onContextMenu={onContextMenu}
               />
             ))}
           </div>

@@ -132,7 +132,7 @@ export function App(): JSX.Element {
 
   return (
     <>
-      <Shell views={views} player={<MiniPlayer controls={controls} />} />
+      <Shell views={views} controls={controls} player={<MiniPlayer controls={controls} />} />
 
       <NowPlaying controls={controls} />
       <QueuePanel />

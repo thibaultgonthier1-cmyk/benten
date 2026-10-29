@@ -3,6 +3,7 @@ import { NativeDecoder, type Decoder } from "../audio/decoder";
 import { bindEngine, playerStore, type PlayerState } from "../state/player";
 import { libraryStore } from "../state/library";
 import { createControls, type PlayerControls } from "../components/controls";
+import { bindMediaSession } from "./mediaSession";
 import { makeThrottle } from "../lib/throttle";
 import { restoreState, serializeState } from "../lib/persist";
 import type { QualityMode } from "../../shared/types";
@@ -69,6 +70,9 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   const unbind = bindEngine(playerStore, engine);
   // Rattache le moteur au store pour les mutations de file A CHAUD (updateQueue / jumpTo).
   playerStore.getState().attachEngine(engine);
+  // Touches media + overlay Windows (Phase 3, Tache 4) : la session reflete le store et route les
+  // commandes systeme vers `controls` (API de transport existante). No-op sans `navigator.mediaSession`.
+  const unbindMediaSession = bindMediaSession(playerStore, controls);
 
   // Recreation PROPRE du contexte au changement de mode (Task 13). Le runtime est le SEUL a creer
   // un `AudioContext` : le store appelle ce gestionnaire, qui fabrique le nouveau contexte a la
@@ -182,6 +186,7 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
     disposed = true;
     cancelFrame(raf);
     unbind();
+    unbindMediaSession();
     unsubscribeSave();
     if (saveTimer) clearTimeout(saveTimer);
     clearInterval(positionSaver);

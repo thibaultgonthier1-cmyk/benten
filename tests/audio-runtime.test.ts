@@ -173,6 +173,33 @@ describe("startAudioRuntime", () => {
     expect(win.__benten).toBeUndefined();
   });
 
+  it("lie navigator.mediaSession (touches média) et la libère au dispose", () => {
+    const handlers = new Map<string, unknown>();
+    const ms = {
+      metadata: null as unknown,
+      playbackState: "none",
+      setActionHandler(a: string, h: unknown): void {
+        handlers.set(a, h);
+      },
+    };
+    vi.stubGlobal("navigator", { mediaSession: ms });
+    runtime = startAudioRuntime(harness());
+    expect(typeof handlers.get("nexttrack")).toBe("function");
+    const next = vi.spyOn(runtime.controls, "next");
+    (handlers.get("nexttrack") as () => void)();
+    expect(next).toHaveBeenCalledTimes(1);
+    runtime.dispose();
+    expect(handlers.get("nexttrack")).toBeNull();
+    expect(ms.metadata).toBeNull();
+  });
+
+  it("sans mediaSession (navigator de node) : le runtime démarre normalement", () => {
+    vi.stubGlobal("navigator", {});
+    expect(() => {
+      runtime = startAudioRuntime(harness());
+    }).not.toThrow();
+  });
+
   it("en dev, le pont expose engine/store/persist/library et est retiré au dispose", () => {
     vi.stubEnv("DEV", true);
     const win: Record<string, unknown> = {};

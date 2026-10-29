@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { uiStore, useUi } from "../state/ui";
 import { libraryStore, useLibrary } from "../state/library";
@@ -9,6 +9,8 @@ export interface TopBarProps {
   scrolled?: boolean;
   /** Emplacement d'actions (à droite). */
   actions?: ReactNode;
+  /** Ref du champ de recherche (le raccourci Ctrl+F du Shell le focalise). */
+  searchRef?: RefObject<HTMLInputElement>;
 }
 
 /**
@@ -19,11 +21,12 @@ export interface TopBarProps {
  * Pas de navigation sur `focus` : quand la fenêtre reprend le focus avec le champ encore focalisé,
  * le navigateur rejoue `focus` et l'on sauterait en silence vers la Recherche.
  */
-export function TopBar({ scrolled = false, actions }: TopBarProps): JSX.Element {
+export function TopBar({ scrolled = false, actions, searchRef }: TopBarProps): JSX.Element {
   const canBack = useUi((s) => s.past.length > 0);
   const canForward = useUi((s) => s.future.length > 0);
   const query = useLibrary((s) => s.query);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const localRef = useRef<HTMLInputElement>(null);
+  const inputRef = searchRef ?? localRef;
 
   // Quitter la page Recherche vide le terme : le champ ne garde pas un texte périmé au-dessus d'une
   // grille non filtrée.
@@ -81,6 +84,9 @@ export function TopBar({ scrolled = false, actions }: TopBarProps): JSX.Element 
           }}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
+              // Échap est consommée ici (vider + quitter le champ) : le raccourci global « fermer »
+              // ne s'y ajoute pas (une touche, un effet).
+              e.preventDefault();
               libraryStore.getState().setQuery("");
               inputRef.current?.blur();
             } else if (e.key === "Enter" || e.key === "ArrowDown") {

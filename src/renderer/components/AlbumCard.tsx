@@ -1,3 +1,4 @@
+import type React from "react";
 import { memo, useState } from "react";
 import type { Album } from "../lib/library";
 import { coverAccent, Cover } from "./Cover";
@@ -21,6 +22,8 @@ export interface AlbumCardProps {
   onAddToQueue?: (album: Album) => void;
   /** Ouvre la feuille « Ajouter à une playlist » pour l'album. */
   onAddToPlaylist?: (album: Album) => void;
+  /** Clic droit (ou touche Menu / Maj+F10) sur la tuile : menu contextuel (Phase 3, Tâche 4). */
+  onContextMenu?: (album: Album, e: React.MouseEvent<HTMLElement>) => void;
 }
 
 function AlbumCardImpl({
@@ -30,6 +33,7 @@ function AlbumCardImpl({
   onPlayNext,
   onAddToQueue,
   onAddToPlaylist,
+  onContextMenu,
 }: AlbumCardProps): JSX.Element {
   const first = album.tracks[0];
   const seed = `${album.id}:${album.title}`;
@@ -39,7 +43,18 @@ function AlbumCardImpl({
   const close = (): void => setMenuOpen(false);
 
   return (
-    <div className="card-wrap">
+    <div
+      className="card-wrap"
+      onContextMenu={
+        onContextMenu
+          ? (e) => {
+              e.preventDefault();
+              setMenuOpen(false);
+              onContextMenu(album, e);
+            }
+          : undefined
+      }
+    >
       <button
         type="button"
         className={"card" + (playing ? " playing" : "")}
