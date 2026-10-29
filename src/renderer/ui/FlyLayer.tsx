@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { dur } from "../theme/ds/motion";
 import { FLIGHT_SIZE, FlightVisual } from "./FlightVisual";
 import { playlistFx, usePlaylistFx, type Flight } from "./playlistFx";
-import { useMotion } from "./useMotion";
+import { useMotion, useMotionLevel } from "./useMotion";
+import { requestFx } from "./FxOverlay";
 import "./fly.css";
 
 /** Taille de départ de l'objet volant (px), fixée par son visuel. */
@@ -38,6 +39,7 @@ const easeIn = (t: number): number => t * t;
 
 function FlyingCover({ flight }: { flight: Flight }): JSX.Element {
   const m = useMotion();
+  const level = useMotionLevel();
   const ref = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -46,6 +48,8 @@ function FlyingCover({ flight }: { flight: Flight }): JSX.Element {
       land();
       return;
     }
+    // Éclats de feuille d'or au départ du vol (Complet seulement ; `requestFx` renvoie null sinon).
+    if (level.flakes) requestFx("goldFlakes", flight.from, { level });
     let raf = 0;
     let tries = 0;
     let anim: Animation | null = null;
@@ -102,3 +106,4 @@ function FlyingCover({ flight }: { flight: Flight }): JSX.Element {
     </div>
   );
 }
+

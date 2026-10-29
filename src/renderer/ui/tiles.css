@@ -548,3 +548,24 @@
     linear-gradient(180deg, var(--surface-3), var(--surface-1));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
+
+/* DA3 — le bouton lecture des tuiles et des lignes est désormais le médaillon d'or
+   (`GoldMedallion size="sm"`). L'ancien fond rond est neutralisé : c'est le médaillon
+   qui porte la matière, pas son conteneur. */
+.album-tile__play,
+.track-row__play {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  color: inherit;
+  border: 0;
+}
+
+.album-tile__play {
+  width: 32px;
+  height: 32px;
+}
+
+.album-tile__play.is-current {
+  padding-left: 0;
+}

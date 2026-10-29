@@ -1,6 +1,6 @@
 import type React from "react";
 import { memo, type ReactNode } from "react";
-import { Heart, Pause, Play } from "lucide-react";
+import { Heart } from "lucide-react";
 import type { TrackRow } from "../../shared/types";
 import { formatTime } from "../lib/library";
 import { setDragTracks } from "../lib/dnd";
@@ -8,6 +8,7 @@ import { playerStore, usePlayer } from "../state/player";
 import { uiStore } from "../state/ui";
 import { Equalizer } from "./Equalizer";
 import { ICON_STROKE } from "./IconButton";
+import { GoldMedallion } from "./GoldMedallion";
 import "./tiles.css";
 
 export interface TrackRowItemProps {
@@ -87,7 +88,6 @@ function TrackRowItemImpl({
   const favorite = usePlayer((s) => s.favoriteIds.has(track.id));
   const statusPlaying = usePlayer((s) => playing && s.status === "playing");
   const unplayable = track.playable === false;
-  const PlayIcon = statusPlaying ? Pause : Play;
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget) return;
@@ -143,20 +143,16 @@ function TrackRowItemImpl({
         ) : hideNumber ? null : (
           <span className="track-row__n">{number ?? index + 1}</span>
         )}
-        <button
-          type="button"
-          tabIndex={-1}
-          className="track-row__play"
-          aria-label={statusPlaying ? `Mettre en pause ${track.title}` : `Lire ${track.title}`}
-          disabled={unplayable}
-          onClick={(e) => {
-            e.stopPropagation();
-            onPlay(track, index);
-          }}
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          <PlayIcon size={15} strokeWidth={0} fill="currentColor" aria-hidden />
-        </button>
+        <span className="track-row__play" onClick={(e) => e.stopPropagation()}>
+          <GoldMedallion
+            playing={statusPlaying}
+            size="sm"
+            onToggle={() => onPlay(track, index)}
+            disabled={unplayable}
+            label={statusPlaying ? `Mettre en pause ${track.title}` : `Lire ${track.title}`}
+            title={statusPlaying ? "Pause" : "Lire"}
+          />
+        </span>
       </div>
       {titleAddon ? (
         <div className="track-row__title has-addon">
@@ -225,3 +221,4 @@ function TrackRowItemImpl({
 }
 
 export const TrackRowItem = memo(TrackRowItemImpl);
+

@@ -1,7 +1,7 @@
 import type React from "react";
 import { memo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
-import { Pause, Play } from "lucide-react";
+import { GoldMedallion } from "./GoldMedallion";
 import type { Album } from "../lib/library";
 import { setDragTracks } from "../lib/dnd";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
@@ -141,7 +141,10 @@ function AlbumTileImpl({ album, playing, onPlay, onContextMenu, enterIndex = nul
   );
 }
 
-/** Bouton lecture de la pochette ; « pause » si l'album joue (seule tuile abonnée au statut). */
+/**
+ * Bouton lecture de la pochette ; « pause » si l'album joue (seule tuile abonnée au statut).
+ * DA « Biwa & Or » : c'est le médaillon d'or (`GoldMedallion size="sm"`), pas un bouton rond neutre.
+ */
 function TilePlayButton({
   album,
   current,
@@ -152,23 +155,22 @@ function TilePlayButton({
   onPlay(album: Album): void;
 }): JSX.Element {
   const playing = usePlayer((s) => current && s.status === "playing");
-  const Icon = playing ? Pause : Play;
   return (
-    <button
-      type="button"
-      tabIndex={-1}
+    <span
       className={`album-tile__play${current ? " is-current" : ""}`}
-      aria-label={playing ? `Mettre en pause ${album.title}` : `Lire ${album.title}`}
-      title={playing ? "Pause" : "Lire"}
-      disabled={album.tracks.length === 0}
-      onClick={(e) => {
-        e.stopPropagation();
-        onPlay(album);
-      }}
+      onClick={(e) => e.stopPropagation()}
     >
-      <Icon size={20} strokeWidth={0} fill="currentColor" aria-hidden />
-    </button>
+      <GoldMedallion
+        playing={playing}
+        size="sm"
+        onToggle={() => onPlay(album)}
+        disabled={album.tracks.length === 0}
+        label={playing ? `Mettre en pause ${album.title}` : `Lire ${album.title}`}
+        title={playing ? "Pause" : "Lire"}
+      />
+    </span>
   );
 }
 
 export const AlbumTile = memo(AlbumTileImpl);
+
