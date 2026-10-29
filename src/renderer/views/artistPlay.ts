@@ -9,6 +9,7 @@ import {
   canResume,
   sameTrackList,
   type ArtistIndex,
+  type ArtistPageModel,
 } from "../lib/viewModels";
 import { libraryStore } from "../state/library";
 import { playerStore } from "../state/player";
@@ -49,11 +50,49 @@ export function libraryIndex(albums: readonly Album[]): ArtistIndex {
   return index;
 }
 
-/** File « Lecture » de l'artiste `name`, lue dans les stores au moment du clic. */
+/**
+ * Pages et files d'artiste MÉMOÏSÉES par (liste d'albums, nom replié[, regroupement]) : la liste
+ * d'albums change de référence à chaque rechargement de la bibliothèque (WeakMap → l'ancien cache
+ * part avec elle). Une tuile qui se re-rend à chaque lecture / pause / suivant ne rescanne plus
+ * toute la bibliothèque.
+ */
+const pageCache = new WeakMap<readonly Album[], Map<string, ArtistPageModel>>();
+const queueCache = new WeakMap<readonly Album[], Map<string, TrackRow[]>>();
+
+const bucket = <V>(cache: WeakMap<readonly Album[], Map<string, V>>, albums: readonly Album[]): Map<string, V> => {
+  let m = cache.get(albums);
+  if (!m) {
+    m = new Map();
+    cache.set(albums, m);
+  }
+  return m;
+};
+
+export function cachedArtistPage(albums: readonly Album[], name: string): ArtistPageModel {
+  const m = bucket(pageCache, albums);
+  const key = artistKey(name);
+  let page = m.get(key);
+  if (!page) {
+    page = artistPage(albums, name, libraryIndex(albums));
+    m.set(key, page);
+  }
+  return page;
+}
+
+export function cachedArtistQueue(albums: readonly Album[], grouped: boolean, name: string): TrackRow[] {
+  const m = bucket(queueCache, albums);
+  const key = `${grouped ? 1 : 0}|${artistKey(name)}`;
+  let list = m.get(key);
+  if (!list) {
+    list = artistQueue(cachedArtistPage(albums, name).tracks, grouped);
+    m.set(key, list);
+  }
+  return list;
+}
+
+/** File « Lecture » de l'artiste `name`, lue dans les stores (mise en cache). */
 export function artistQueueOf(name: string): TrackRow[] {
-  const albums = libraryStore.getState().albums;
-  const { tracks } = artistPage(albums, name, libraryIndex(albums));
-  return artistQueue(tracks, settingsStore.getState().groupVersions);
+  return cachedArtistQueue(libraryStore.getState().albums, settingsStore.getState().groupVersions, name);
 }
 
 /** La file du lecteur est exactement celle-ci (le bouton lecture bascule alors lecture/pause). */
@@ -62,14 +101,17 @@ export function isQueue(list: readonly TrackRow[]): boolean {
 }
 
 /**
- * « Lecture » : TOUJOURS dans l'ordre (mélange coupé, même pour reprendre la file en cours après
- * un « Aléatoire ») ; sur la file en cours : bascule lecture/pause ; sinon lit tout l'artiste.
+ * « Lecture » : sur la file en cours, bascule lecture/pause ; sinon lit tout l'artiste. Ce qui
+ * DÉMARRE la lecture la démarre dans l'ordre (mélange coupé, même pour reprendre après un
+ * « Aléatoire ») ; une simple mise en pause ne touche pas au mélange.
  */
 export function playArtist(name: string, list: readonly TrackRow[], actions: RouteViewActions): void {
   if (list.length === 0) return;
   const p = playerStore.getState();
-  if (p.shuffle) p.setShuffle(false);
-  if (isQueue(list) && canResume(p.status)) actions.togglePlay();
+  const toggle = isQueue(list) && canResume(p.status);
+  const willPlay = !toggle || p.status !== "playing";
+  if (willPlay && p.shuffle) p.setShuffle(false);
+  if (toggle) actions.togglePlay();
   else actions.playAlbumInOrder(artistAlbum(name, list));
 }
 

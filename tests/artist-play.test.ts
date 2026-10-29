@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { playArtist, shuffleArtist } from "../src/renderer/views/artistPlay";
+import { cachedArtistPage, cachedArtistQueue, playArtist, shuffleArtist } from "../src/renderer/views/artistPlay";
+import type { Album } from "../src/renderer/lib/library";
 import { playerStore } from "../src/renderer/state/player";
 import type { RouteViewActions } from "../src/renderer/shell/RouteView";
 import type { TrackRow } from "../src/shared/types";
@@ -74,9 +75,36 @@ describe("playArtist (Lecture d'en-tête / de tuile)", () => {
     expect(playerStore.getState().shuffle).toBe(false);
   });
 
+  it("en lecture + mélangé : Pause garde le mélange (seule une reprise / nouvelle lecture le coupe)", () => {
+    playerStore.getState().setQueue(list, 0);
+    playerStore.setState({ status: "playing", shuffle: true });
+    const a = fakeActions();
+    playArtist("Ridsa", list, a);
+    expect(a.togglePlay).toHaveBeenCalledTimes(1);
+    expect(playerStore.getState().shuffle).toBe(true);
+  });
+
   it("Aléatoire passe par shuffleAlbum (qui active le mélange)", () => {
     const a = fakeActions();
     shuffleArtist("Ridsa", list, a);
     expect(a.shuffleAlbum).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cache des pages / files d'artiste", () => {
+  const albums: Album[] = [
+    { id: 1, title: "Solo", artist: "Ridsa", artKey: null, tracks: [track(1), track(2)] },
+    { id: 2, title: "Autre", artist: "Dadju", artKey: null, tracks: [{ ...track(3), artist: "Dadju" }] },
+  ];
+
+  it("mêmes entrées (liste d'albums, nom replié) → même résultat, sans recalcul", () => {
+    const p1 = cachedArtistPage(albums, "Ridsa");
+    expect(cachedArtistPage(albums, "RIDSA")).toBe(p1);
+    expect(p1.tracks.map((t) => t.id)).toEqual([1, 2]);
+    const q1 = cachedArtistQueue(albums, true, "Ridsa");
+    expect(cachedArtistQueue(albums, true, "ridsa")).toBe(q1);
+    // Autre réglage de regroupement ou autre bibliothèque : autre entrée de cache.
+    expect(cachedArtistQueue(albums, false, "Ridsa")).not.toBe(q1);
+    expect(cachedArtistPage(albums.slice(), "Ridsa")).not.toBe(p1);
   });
 });

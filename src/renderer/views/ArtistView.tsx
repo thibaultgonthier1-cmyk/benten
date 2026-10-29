@@ -7,7 +7,6 @@ import type { Album } from "../lib/library";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
 import {
   artistKey,
-  artistPage,
   artistQueue,
   canResume,
   groupVersions,
@@ -34,7 +33,7 @@ import {
   addArtistToQueue,
   artistAlbum,
   artistLayoutId,
-  libraryIndex,
+  cachedArtistPage,
   playArtist,
   playArtistNext,
   shuffleArtist,
@@ -63,7 +62,7 @@ export interface ArtistViewProps {
 export function ArtistView({ name, scrollRef, actions }: ArtistViewProps): JSX.Element {
   const albums = useLibrary((s) => s.albums);
   const loading = useLibrary((s) => s.loading);
-  const page = useMemo(() => artistPage(albums, name, libraryIndex(albums)), [albums, name]);
+  const page = useMemo(() => cachedArtistPage(albums, name), [albums, name]);
 
   if (page.albums.length === 0 && page.tracks.length === 0) {
     return loading ? <ArtistSkeleton /> : (

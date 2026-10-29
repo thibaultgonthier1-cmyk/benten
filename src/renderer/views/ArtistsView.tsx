@@ -6,6 +6,7 @@ import { MicVocal, Pause, Play } from "lucide-react";
 import { setDragTracks } from "../lib/dnd";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
 import {
+  artistCredits,
   artistInitial,
   artistRail,
   artistShowsPause,
@@ -27,7 +28,14 @@ import { Equalizer } from "../ui/Equalizer";
 import { openMenu } from "../ui/menuStore";
 import { Skeleton } from "../ui/Skeleton";
 import { useMotion } from "../ui/useMotion";
-import { artistLayoutId, artistMenuItems, artistQueueOf, libraryIndex, playArtist } from "./artistPlay";
+import {
+  artistLayoutId,
+  artistMenuItems,
+  artistQueueOf,
+  cachedArtistQueue,
+  libraryIndex,
+  playArtist,
+} from "./artistPlay";
 import { EmptyState, PageHeader } from "./common";
 import { anchorFromEvent } from "./menus";
 import "./views.css";
@@ -418,11 +426,17 @@ function ArtistPlayButton({
   const queue = usePlayer((s) => s.queue);
   const albums = useLibrary((s) => s.albums);
   const grouped = useSettings((s) => s.groupVersions);
-  // Recalcul seulement quand la file, la bibliothèque ou le regroupement changent (pas à chaque frame).
-  const showPause = useMemo(
-    () => playing && queue.length > 0 && artistShowsPause(queue, playing, artistQueueOf(artist.name)),
-    [playing, queue, albums, grouped, artist.name],
-  );
+  // Recalcul seulement quand la file, le statut, la bibliothèque ou le regroupement changent. Pré-
+  // filtre bon marché : la file ne peut être celle de l'artiste que si son 1er titre est sur un de
+  // ses albums ou le crédite ; la file complète (mise en cache) n'est comparée qu'ensuite.
+  const showPause = useMemo(() => {
+    const first = queue[0];
+    if (!playing || !first) return false;
+    const mayBeOwn =
+      artist.albums.some((a) => a.id === first.albumId) ||
+      artistCredits([first], artist.name, libraryIndex(albums)).length > 0;
+    return mayBeOwn && artistShowsPause(queue, playing, cachedArtistQueue(albums, grouped, artist.name));
+  }, [playing, queue, albums, grouped, artist]);
   const Icon = showPause ? Pause : Play;
   return (
     <button
