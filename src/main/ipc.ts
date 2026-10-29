@@ -22,6 +22,7 @@ import type {
 } from "../shared/types";
 import { defaultOutputDevice, listOutputDevices } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
+import { validateDiagEntries, type JournalWriter } from "./journal";
 import {
   addSource,
   addToPlaylist,
@@ -292,6 +293,37 @@ export function searchLibrary(db: Database.Database, args: unknown): TrackRow[] 
   const { q, limit } = args as Partial<SearchArgs>;
   if (typeof q !== "string") throw new Error("library:search: q must be a string");
   return searchTracks(db, q, normalizePage({ limit }));
+}
+
+/** Versions consignees dans l'entree `session` du journal audio (fournies par le Main). */
+export interface DiagnosticsVersions {
+  appVersion: string;
+  electron?: string;
+  chrome?: string;
+}
+
+/**
+ * Canal `diagnostics:append` (journal audio). Expediteur fiable exige (`assertTrusted`), payload
+ * valide STRICTEMENT (`validateDiagEntries`), puis ajoute au fichier fixe par le Main — jamais de
+ * chemin fourni par le Renderer. Les entrees `session` sont enrichies des versions de l'app.
+ * Enregistre a part de `registerIpc` : le journal est independant de la base.
+ */
+export function registerDiagnosticsIpc(writer: JournalWriter, versions: DiagnosticsVersions): void {
+  ipcMain.handle(CHANNELS.DIAGNOSTICS_APPEND, async (event, entries: unknown): Promise<void> => {
+    assertTrusted(event);
+    const valid = validateDiagEntries(entries);
+    const enriched = valid.map((e) =>
+      e.kind === "session"
+        ? {
+            ...e,
+            appVersion: versions.appVersion,
+            electron: versions.electron ?? null,
+            chrome: versions.chrome ?? null,
+          }
+        : e,
+    );
+    await writer.append(enriched);
+  });
 }
 
 /** Crochets optionnels du process Main (ex. : (re)démarrer la veille quand les sources changent). */

@@ -1,4 +1,5 @@
 // Types partagés Main <-> Preload <-> Renderer. Aucune dépendance Node/Electron ici.
+import type { DiagEntry } from "./diagnostics";
 
 export type LibraryView = "albums" | "tracks" | "artists";
 
@@ -200,6 +201,14 @@ export interface BentenApi {
     get(key: string): Promise<string | undefined>;
     /** Écrit (upsert) la valeur d'une clé. */
     set(key: string, value: string): Promise<void>;
+  };
+  /** Journal audio (diagnostic des micro-coupures). */
+  diagnostics: {
+    /**
+     * Ajoute un lot d'entrees (≤ 200, chacune ≤ 2 Ko, `kind` connu) a
+     * `userData/logs/audio-journal.log`. Rejette un payload invalide (lot entier).
+     */
+    append(entries: readonly DiagEntry[]): Promise<void>;
   };
   /**
    * S'abonne au signal PUSH Main -> Renderer « la bibliothèque a changé » (veille de dossiers,

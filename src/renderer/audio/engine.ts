@@ -82,6 +82,11 @@ export interface EngineEventMap {
   unplayable: { trackId: number | null; path: string; reason: string };
   /** Erreur inattendue hors decodage (rare ; le moteur reste utilisable). */
   error: { trackId: number | null; error: unknown };
+  /**
+   * Seek demande (`seek()`), position cible bornee. Signal d'OBSERVATION uniquement (journal audio :
+   * un seek n'est pas un saut de position inattendu) ; n'altere en rien le transport.
+   */
+  seek: { positionSec: number; trackId: number | null };
 }
 export type EngineEvent = keyof EngineEventMap;
 type Listener<E extends EngineEvent> = (payload: EngineEventMap[E]) => void;
@@ -126,6 +131,7 @@ export class AudioEngine {
     ended: new Set(),
     unplayable: new Set(),
     error: new Set(),
+    seek: new Set(),
   };
 
   private status: PlaybackStatus = "idle";
@@ -321,6 +327,7 @@ export class AudioEngine {
       this.startSourceAt(target); // remplace la source (un BufferSource ne se rejoue pas)
       this.pump();
     }
+    this.emit("seek", { positionSec: target, trackId: this.trackId }); // observation seule
   }
 
   getState(): PlaybackState {
