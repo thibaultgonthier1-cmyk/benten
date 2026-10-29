@@ -66,6 +66,21 @@ describe("toast store", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("survol et focus sont deux raisons distinctes : reprise seulement quand les deux sont levées", () => {
+    const id = toast("x");
+    vi.advanceTimersByTime(1000);
+    toastStore.getState().pause(id, "hover");
+    toastStore.getState().pause(id, "focus");
+    toastStore.getState().resume(id, "hover"); // le focus est toujours là
+    vi.advanceTimersByTime(10_000);
+    expect(messages()).toEqual(["x"]);
+    toastStore.getState().resume(id, "focus");
+    vi.advanceTimersByTime(1599);
+    expect(messages()).toEqual(["x"]);
+    vi.advanceTimersByTime(1);
+    expect(messages()).toEqual([]);
+  });
+
   it("pause (survol) suspend l'expiration ; resume repart du temps restant", () => {
     const id = toast("x");
     vi.advanceTimersByTime(2000);

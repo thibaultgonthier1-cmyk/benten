@@ -120,6 +120,22 @@ describe("matchShortcut", () => {
     expect(matchShortcut(ev("KeyM", { shiftKey: true, ctrlKey: true }, BODY, "?"))).toBeNull();
   });
 
+  it("AZERTY : la touche « , » (code KeyM) + Ctrl ouvre les réglages", () => {
+    expect(matchShortcut(ev("KeyM", { ctrlKey: true }, BODY, ","))).toBe("settings");
+    // Exacte : pas avec un autre modificateur, ni dans un champ.
+    expect(matchShortcut(ev("KeyM", { ctrlKey: true, shiftKey: true }, BODY, ","))).toBeNull();
+    expect(matchShortcut(ev("KeyM", { ctrlKey: true, altKey: true }, BODY, ","))).toBeNull();
+    expect(matchShortcut(ev("KeyM", { ctrlKey: true }, { tagName: "INPUT" }, ","))).toBeNull();
+    // Sans le caractère « , » : Ctrl+KeyM ne fait rien.
+    expect(matchShortcut(ev("KeyM", { ctrlKey: true }, BODY, "m"))).toBeNull();
+  });
+
+  it("Espace dans un menu / dialogue / liste focalisé → null (le conteneur gère ses touches)", () => {
+    expect(matchShortcut(ev("Space", {}, withRole("DIV", "menu")))).toBeNull();
+    expect(matchShortcut(ev("Space", {}, withRole("DIV", "dialog")))).toBeNull();
+    expect(matchShortcut(ev("Space", {}, withRole("UL", "listbox")))).toBeNull();
+  });
+
   it("Espace sur un bouton / élément interactif → null (pas de double déclenchement)", () => {
     expect(matchShortcut(ev("Space", {}, { tagName: "BUTTON" }))).toBeNull();
     expect(matchShortcut(ev("Space", {}, { tagName: "A" }))).toBeNull();
@@ -196,6 +212,7 @@ describe("aide des raccourcis", () => {
     expect(shortcutKeys("search")).toEqual(["Ctrl", "F"]);
     expect(shortcutKeys("help")).toEqual(["?"]);
     expect(shortcutKeys("close")).toEqual(["Échap"]);
+    // Libellés par CARACTÈRE (pas par position) : ce qu'un utilisateur AZERTY presse vraiment.
     expect(shortcutKeys("settings")).toEqual(["Ctrl", ","]);
     expect(shortcutKeys("back")).toEqual(["Alt", "←"]);
   });

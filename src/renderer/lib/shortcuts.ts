@@ -93,6 +93,11 @@ const SPACE_ACTIVATED_ROLES = new Set([
   "switch",
   "tab",
   "option",
+  // Conteneurs qui pilotent eux-mêmes leur clavier : un Espace dans un menu contextuel focalisé,
+  // un dialogue ou une liste ne doit pas lancer/couper la lecture derrière.
+  "menu",
+  "dialog",
+  "listbox",
 ]);
 
 function isTextEntry(t: ShortcutTarget | null): boolean {
@@ -114,8 +119,13 @@ function activatesOnSpace(t: ShortcutTarget | null): boolean {
  */
 export function matchShortcut(e: ShortcutEventLike): Action | null {
   let action: Action | null = BY_COMBO.get(comboOf(e)) ?? null;
-  // « ? » produit par une autre disposition (AZERTY : Maj+KeyM) : l'aide reste accessible.
+  // Replis par CARACTÈRE pour les dispositions non-QWERTY (l'utilisateur est en AZERTY) :
+  //  - « ? » (AZERTY : Maj+KeyM) ouvre l'aide ;
+  //  - Ctrl+« , » (AZERTY : la touche « , » rapporte le code KeyM) ouvre les réglages.
   if (action === null && e.key === "?" && !e.ctrlKey && !e.altKey && !e.metaKey) action = "help";
+  if (action === null && e.key === "," && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+    action = "settings";
+  }
   if (action === null) return null;
   if (action !== "close" && isTextEntry(e.target)) return null;
   if (action === "toggle" && activatesOnSpace(e.target)) return null;
@@ -204,7 +214,11 @@ const KEY_LABELS: Record<string, string> = {
   Slash: "/",
 };
 
-/** Touches d'une action, libellées en français pour l'aide (`["Ctrl", "→"]`). */
+/**
+ * Touches d'une action, libellées en français pour l'aide (`["Ctrl", "→"]`). Les touches de
+ * caractère sont libellées par le CARACTÈRE (« , », « ? »), que `matchShortcut` accepte aussi par
+ * `key` : ce que l'aide affiche est ce qu'un utilisateur AZERTY presse réellement.
+ */
 export function shortcutKeys(action: Action): string[] {
   // « ? » se lit mieux que « Maj + / » (et vaut pour toutes les dispositions, cf. matchShortcut).
   if (action === "help") return ["?"];

@@ -13,7 +13,12 @@ export const artCacheDir = (): string => join(app.getPath("userData"), "art-cach
  */
 export function registerArtScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: ART_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+    {
+      scheme: ART_SCHEME,
+      // corsEnabled : `fetch` depuis le renderer (origine http/file) est autorise par l'en-tete
+      // Access-Control-Allow-Origin de `serveArt` (pochette des touches media en blob).
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+    },
   ]);
 }
 

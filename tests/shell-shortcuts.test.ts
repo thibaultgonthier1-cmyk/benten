@@ -94,6 +94,54 @@ describe("raccourcis du Shell", () => {
     expect(ui.getState().shortcutsHelpOpen).toBe(false);
   });
 
+  it("dialogue modal ouvert : recherche / réglages / historique neutralisés ; fermer et lecture restent", () => {
+    const player = createPlayerStore();
+    const ui = createUiStore();
+    const controls = {
+      playAlbum: vi.fn(),
+      toggle: vi.fn(),
+      next: vi.fn(),
+      prev: vi.fn(),
+      seekFraction: vi.fn(),
+    } satisfies PlayerControls;
+    const focusSearch = vi.fn();
+    let modal = true;
+    player.getState().setQueue([tr(1)], 0);
+    player.getState().setQueueOpen(true);
+    ui.getState().navigate({ name: "albums" });
+    const h = createShellShortcuts({ controls, focusSearch, player, ui, isModalOpen: () => modal });
+
+    h.search!();
+    h.settings!();
+    h.back!();
+    h.forward!();
+    expect(focusSearch).not.toHaveBeenCalled();
+    expect(ui.getState().route).toEqual({ name: "albums" });
+
+    h.toggle!();
+    expect(controls.toggle).toHaveBeenCalledTimes(1);
+    h.close!();
+    expect(player.getState().queueOpen).toBe(false);
+
+    modal = false;
+    h.back!();
+    expect(ui.getState().route).toEqual({ name: "home" });
+  });
+
+  it("par défaut, l'aide, l'écran de lecture et la file comptent comme modaux", () => {
+    const { ui, player, focusSearch, h } = setup();
+    ui.getState().setShortcutsHelpOpen(true);
+    h.search!();
+    expect(focusSearch).not.toHaveBeenCalled();
+    ui.getState().setShortcutsHelpOpen(false);
+    player.getState().setNowPlayingOpen(true);
+    h.settings!();
+    expect(ui.getState().route).toEqual({ name: "home" });
+    player.getState().setNowPlayingOpen(false);
+    h.search!();
+    expect(focusSearch).toHaveBeenCalledTimes(1);
+  });
+
   it("close ferme le calque le plus haut : menu > aide > écran de lecture > file", () => {
     const { player, ui, h } = setup();
     player.getState().setQueueOpen(true);

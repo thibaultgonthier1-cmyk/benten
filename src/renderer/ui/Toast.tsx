@@ -58,10 +58,15 @@ function ToastCard({ item, m }: { item: ToastItem; m: ResolvedMotion }): JSX.Ele
           : { opacity: 0, transition: { duration: 0 } }
       }
       transition={enabled ? m.spring : { duration: 0 }}
-      onPointerEnter={() => pause(item.id)}
-      onPointerLeave={() => resume(item.id)}
-      onFocus={() => pause(item.id)}
-      onBlur={() => resume(item.id)}
+      // Survol et focus sont deux raisons de pause distinctes : la reprise n'a lieu que lorsque
+      // les deux sont levées. Le focus qui passe d'un bouton du toast à l'autre n'est pas une sortie.
+      onPointerEnter={() => pause(item.id, "hover")}
+      onPointerLeave={() => resume(item.id, "hover")}
+      onFocus={() => pause(item.id, "focus")}
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        resume(item.id, "focus");
+      }}
     >
       {Icon ? (
         <span className="toast-icon" aria-hidden="true">

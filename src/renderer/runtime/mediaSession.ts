@@ -35,13 +35,42 @@ function defaultSession(): MediaSession | undefined {
     : undefined;
 }
 
-function metadataFor(track: TrackRow): MediaMetadata {
+/** Chargeur de pochette (blob) et fabrique d'URL d'objet, injectables (tests). */
+export interface MediaSessionOptions {
+  /**
+   * Charge la pochette `benten-art://…` en blob. `null` : pas de repli, l'URL du protocole est
+   * donnée telle quelle. Défaut : `fetch` dans une fenêtre, `null` ailleurs (tests node).
+   */
+  fetchArt?: ((url: string) => Promise<Blob>) | null;
+  objectUrls?: { create(blob: Blob): string; revoke(url: string): void };
+}
+
+const defaultFetchArt = async (url: string): Promise<Blob> => {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`art ${res.status}`);
+  return res.blob();
+};
+
+function defaultOptions(): Required<MediaSessionOptions> {
+  const inWindow = typeof window !== "undefined" && typeof fetch === "function";
+  return {
+    fetchArt: inWindow ? defaultFetchArt : null,
+    objectUrls: {
+      create: (b) => URL.createObjectURL(b),
+      revoke: (u) => URL.revokeObjectURL(u),
+    },
+  };
+}
+
+const ART_SIZES = `${MEDIA_ART_SIZE}x${MEDIA_ART_SIZE}`;
+
+function metadataFor(track: TrackRow, art?: MediaImage): MediaMetadata {
   const src = artUrl(track.artKey, MEDIA_ART_SIZE);
   const init: MediaMetadataInit = {
     title: track.title,
     artist: track.artist,
     album: track.album,
-    artwork: src ? [{ src, sizes: `${MEDIA_ART_SIZE}x${MEDIA_ART_SIZE}` }] : [],
+    artwork: art ? [art] : src ? [{ src, sizes: ART_SIZES }] : [],
   };
   // `MediaMetadata` n'existe qu'au navigateur ; ailleurs (session factice) l'objet simple suffit.
   return typeof MediaMetadata === "function" ? new MediaMetadata(init) : (init as MediaMetadata);
@@ -67,15 +96,69 @@ const durationOf = (s: PlayerState): number => s.durationSec || s.currentTrack?.
 
 /**
  * Lie la session média au store de lecture. Renvoie le désabonnement : il retire les gestionnaires,
- * vide les métadonnées et repasse l'état à `none`. Sans session disponible : no-op.
+ * vide les métadonnées, repasse l'état à `none` et révoque l'URL d'objet de la pochette. Sans
+ * session disponible : no-op.
+ *
+ * Pochette : l'overlay système télécharge l'image côté navigateur ; rien ne garantit qu'il passe
+ * par le gestionnaire du protocole personnalisé `benten-art://`. Les métadonnées partent donc tout
+ * de suite avec l'URL du protocole, puis la pochette est chargée en blob et republiée en URL
+ * d'objet (`blob:`), que Chromium sait toujours lire. Un résultat arrivé pour une piste déjà
+ * remplacée (ou après le désabonnement) est ignoré sans créer d'URL ; l'URL précédente est révoquée
+ * à chaque changement de piste et au désabonnement.
  */
 export function bindMediaSession(
   store: PlayerStore,
   controls: PlayerControls,
   ms: MediaSession | undefined = defaultSession(),
+  options: MediaSessionOptions = {},
 ): () => void {
   if (!ms) return () => undefined;
   const session = ms;
+  const defaults = defaultOptions();
+  const fetchArt = options.fetchArt === undefined ? defaults.fetchArt : options.fetchArt;
+  const objectUrls = options.objectUrls ?? defaults.objectUrls;
+
+  /** Jeton de la piste courante : un chargement ne publie que s'il porte encore le jeton actif. */
+  let artToken = 0;
+  let artObjectUrl: string | null = null;
+  let released = false;
+  const revokeArt = (): void => {
+    if (artObjectUrl === null) return;
+    try {
+      objectUrls.revoke(artObjectUrl);
+    } catch {
+      /* best-effort */
+    }
+    artObjectUrl = null;
+  };
+  const loadArt = (track: TrackRow): void => {
+    const token = ++artToken;
+    const src = artUrl(track.artKey, MEDIA_ART_SIZE);
+    if (!fetchArt || !src) return;
+    fetchArt(src).then(
+      (blob) => {
+        if (released || token !== artToken) return; // périmé : aucune URL créée
+        let url: string;
+        try {
+          url = objectUrls.create(blob);
+        } catch {
+          return;
+        }
+        artObjectUrl = url;
+        const art: MediaImage = blob.type
+          ? { src: url, sizes: ART_SIZES, type: blob.type }
+          : { src: url, sizes: ART_SIZES };
+        try {
+          session.metadata = metadataFor(track, art);
+        } catch {
+          /* best-effort : l'URL du protocole reste */
+        }
+      },
+      () => {
+        /* échec : l'URL du protocole reste en place */
+      },
+    );
+  };
 
   const seekTo = (sec: number): void => {
     const dur = durationOf(store.getState());
@@ -140,7 +223,10 @@ export function bindMediaSession(
     const trackChanged = s.currentTrack !== lastTrack;
     if (trackChanged) {
       lastTrack = s.currentTrack;
+      revokeArt();
       session.metadata = s.currentTrack ? metadataFor(s.currentTrack) : null;
+      if (s.currentTrack) loadArt(s.currentTrack);
+      else artToken++;
       positionDirty = true;
     }
     // L'état dépend du statut ET de la présence d'une piste (file vidée en pause → « none »).
@@ -166,10 +252,10 @@ export function bindMediaSession(
   apply(store.getState());
   const unsubscribe = store.subscribe(apply);
 
-  let released = false;
   return () => {
     if (released) return;
     released = true;
+    artToken++;
     unsubscribe();
     for (const a of ACTIONS) setHandler(a, null);
     try {
@@ -178,5 +264,6 @@ export function bindMediaSession(
     } catch {
       /* best-effort */
     }
+    revokeArt();
   };
 }

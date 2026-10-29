@@ -198,3 +198,121 @@ describe("bindMediaSession", () => {
     expect(controls.next).toHaveBeenCalled();
   });
 });
+
+describe("bindMediaSession : pochette servie en blob (repli robuste pour l'overlay système)", () => {
+  /** fetch factice contrôlable : chaque appel renvoie une promesse résolue à la main. */
+  function harness() {
+    const pending = new Map<string, { resolve: (b: Blob) => void; reject: (e: unknown) => void }>();
+    const fetchArt = vi.fn(
+      (url: string) =>
+        new Promise<Blob>((resolve, reject) => {
+          pending.set(url, { resolve, reject });
+        }),
+    );
+    let n = 0;
+    const created: string[] = [];
+    const revoked: string[] = [];
+    const objectUrls = {
+      create: vi.fn((_b: Blob) => {
+        const u = `blob:fake/${++n}`;
+        created.push(u);
+        return u;
+      }),
+      revoke: vi.fn((u: string) => {
+        revoked.push(u);
+      }),
+    };
+    const settle = async (url: string, ok = true): Promise<void> => {
+      const p = pending.get(url)!;
+      if (ok) p.resolve(new Blob(["jpg"], { type: "image/jpeg" }));
+      else p.reject(new TypeError("Failed to fetch"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    return { fetchArt, objectUrls, settle, created, revoked };
+  }
+  const ART1 = "benten-art://abc%2Fdef?size=512";
+  const ART2 = "benten-art://zzz?size=512";
+
+  it("remplace l'URL du protocole par une URL d'objet une fois la pochette chargée", async () => {
+    const store = createPlayerStore();
+    const ms = new FakeMediaSession();
+    const h = harness();
+    release = bindMediaSession(store, fakeControls(), ms as unknown as MediaSession, {
+      fetchArt: h.fetchArt,
+      objectUrls: h.objectUrls,
+    });
+    store.getState().setQueue([track(1, "andata")], 0);
+    // Immédiatement : URL du protocole (rien n'attend le chargement).
+    expect(meta(ms)?.artwork[0]?.src).toBe(ART1);
+    expect(h.fetchArt).toHaveBeenCalledWith(ART1);
+    await h.settle(ART1);
+    expect(meta(ms)?.title).toBe("andata");
+    expect(meta(ms)?.artwork).toEqual([{ src: "blob:fake/1", sizes: "512x512", type: "image/jpeg" }]);
+  });
+
+  it("résultat périmé (piste déjà changée) : n'écrase jamais la nouvelle piste, rien ne fuit", async () => {
+    const store = createPlayerStore();
+    const ms = new FakeMediaSession();
+    const h = harness();
+    release = bindMediaSession(store, fakeControls(), ms as unknown as MediaSession, {
+      fetchArt: h.fetchArt,
+      objectUrls: h.objectUrls,
+    });
+    store.getState().setQueue([track(1, "a"), track(2, "b", { artKey: "zzz" })], 0);
+    store.getState().next(); // la piste 2 arrive avant la pochette de la 1
+    await h.settle(ART1); // pochette de la 1, en retard
+    expect(meta(ms)?.title).toBe("b");
+    expect(meta(ms)?.artwork[0]?.src).toBe(ART2);
+    expect(h.created).toEqual([]); // aucune URL d'objet créée pour un résultat périmé
+    await h.settle(ART2);
+    expect(meta(ms)?.artwork[0]?.src).toBe("blob:fake/1");
+  });
+
+  it("révoque l'URL précédente au changement de piste et au désabonnement", async () => {
+    const store = createPlayerStore();
+    const ms = new FakeMediaSession();
+    const h = harness();
+    const off = bindMediaSession(store, fakeControls(), ms as unknown as MediaSession, {
+      fetchArt: h.fetchArt,
+      objectUrls: h.objectUrls,
+    });
+    store.getState().setQueue([track(1, "a"), track(2, "b", { artKey: "zzz" })], 0);
+    await h.settle(ART1);
+    store.getState().next();
+    expect(h.revoked).toEqual(["blob:fake/1"]);
+    await h.settle(ART2);
+    off();
+    expect(h.revoked).toEqual(["blob:fake/1", "blob:fake/2"]);
+  });
+
+  it("échec du chargement : l'URL du protocole reste (jamais d'exception)", async () => {
+    const store = createPlayerStore();
+    const ms = new FakeMediaSession();
+    const h = harness();
+    release = bindMediaSession(store, fakeControls(), ms as unknown as MediaSession, {
+      fetchArt: h.fetchArt,
+      objectUrls: h.objectUrls,
+    });
+    store.getState().setQueue([track(1, "a")], 0);
+    await h.settle(ART1, false);
+    expect(meta(ms)?.artwork[0]?.src).toBe(ART1);
+    expect(h.created).toEqual([]);
+  });
+
+  it("désabonné avant la fin du chargement : le résultat est ignoré", async () => {
+    const store = createPlayerStore();
+    const ms = new FakeMediaSession();
+    const h = harness();
+    const off = bindMediaSession(store, fakeControls(), ms as unknown as MediaSession, {
+      fetchArt: h.fetchArt,
+      objectUrls: h.objectUrls,
+    });
+    store.getState().setQueue([track(1, "a")], 0);
+    off();
+    await h.settle(ART1);
+    expect(ms.metadata).toBeNull();
+    expect(h.created).toEqual([]);
+  });
+});

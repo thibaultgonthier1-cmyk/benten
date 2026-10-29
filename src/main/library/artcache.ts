@@ -172,6 +172,9 @@ export async function serveArt(url: string, cacheDir: string): Promise<Response>
       status: 200,
       headers: {
         "content-type": sniffImageMime(data) ?? "application/octet-stream",
+        // Contenu public adresse par hash : lisible par `fetch` depuis le renderer (pochette des
+        // touches media servie en blob, cf. runtime/mediaSession.ts).
+        "access-control-allow-origin": "*",
         // Contenu adresse par son hash : immuable.
         "cache-control": "public, max-age=31536000, immutable",
       },

@@ -16,6 +16,26 @@ export interface ShellShortcutDeps {
   focusSearch(): void;
   player?: PlayerStore;
   ui?: UiStore;
+  /**
+   * Vrai si un dialogue modal (piège de focus) est ouvert. Défaut : `isAnyModalOpen` (aide, écran de
+   * lecture, file, ou tout `[aria-modal="true"]` visible — feuilles playlist / qualité).
+   */
+  isModalOpen?: () => boolean;
+}
+
+/**
+ * Un dialogue modal est-il ouvert ? États connus du store (aide, écran de lecture, file) + tout
+ * `[aria-modal="true"]` du DOM qui n'est pas dans un sous-arbre `aria-hidden="true"` (les feuilles
+ * fermées restent montées sous un enveloppe `aria-hidden`).
+ */
+export function isAnyModalOpen(ui: UiStore = uiStore, player: PlayerStore = playerStore): boolean {
+  if (ui.getState().shortcutsHelpOpen) return true;
+  const p = player.getState();
+  if (p.nowPlayingOpen || p.queueOpen) return true;
+  if (typeof document === "undefined") return false;
+  return Array.from(document.querySelectorAll('[aria-modal="true"]')).some(
+    (el) => el.closest('[aria-hidden="true"]') === null,
+  );
 }
 
 /**
@@ -52,6 +72,16 @@ export function createShellShortcuts(deps: ShellShortcutDeps): ShortcutHandlers 
   const { controls, focusSearch } = deps;
   const player = deps.player ?? playerStore;
   const ui = deps.ui ?? uiStore;
+  const isModalOpen = deps.isModalOpen ?? ((): boolean => isAnyModalOpen(ui, player));
+  /**
+   * Actions qui déplacent le focus ou la page : neutralisées sous un dialogue modal, pour que le
+   * focus ne sorte jamais du piège. Fermer, l'aide et le transport restent disponibles.
+   */
+  const outsideModal =
+    (fn: () => void) =>
+    (): void => {
+      if (!isModalOpen()) fn();
+    };
 
   const hasTrack = (): boolean => player.getState().currentTrack !== null;
   const seekBy = (delta: number): void => {
@@ -73,10 +103,10 @@ export function createShellShortcuts(deps: ShellShortcutDeps): ShortcutHandlers 
     },
     seekFwd: () => seekBy(SHORTCUT_SEEK_SEC),
     seekBack: () => seekBy(-SHORTCUT_SEEK_SEC),
-    search: () => {
+    search: outsideModal(() => {
       closeMenu({ restoreFocus: false });
       focusSearch();
-    },
+    }),
     favorite: () => {
       const p = player.getState();
       const t = p.currentTrack;
@@ -95,8 +125,8 @@ export function createShellShortcuts(deps: ShellShortcutDeps): ShortcutHandlers 
       const s = ui.getState();
       s.setShortcutsHelpOpen(!s.shortcutsHelpOpen);
     },
-    settings: () => ui.getState().navigate({ name: "settings" }),
-    back: () => ui.getState().back(),
-    forward: () => ui.getState().forward(),
+    settings: outsideModal(() => ui.getState().navigate({ name: "settings" })),
+    back: outsideModal(() => ui.getState().back()),
+    forward: outsideModal(() => ui.getState().forward()),
   };
 }

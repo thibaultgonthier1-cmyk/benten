@@ -36,19 +36,26 @@ export interface ToastState {
   toasts: ToastItem[];
   push(message: string, opts?: ToastOptions): number;
   dismiss(id: number): void;
-  /** Suspend l'expiration (survol / focus). */
-  pause(id: number): void;
-  /** Reprend l'expiration avec le temps restant. */
-  resume(id: number): void;
+  /**
+   * Suspend l'expiration pour une raison (`"hover"`, `"focus"`…). Les raisons se cumulent : le
+   * toast ne repart que lorsque TOUTES sont levées (quitter au survol un toast encore focalisé ne
+   * relance pas le compte à rebours).
+   */
+  pause(id: number, reason?: ToastPauseReason): void;
+  /** Lève une raison de pause ; reprend avec le temps restant quand il n'en reste aucune. */
+  resume(id: number, reason?: ToastPauseReason): void;
   clear(): void;
 }
 
 export type ToastStore = StoreApi<ToastState>;
 
+export type ToastPauseReason = "hover" | "focus" | "manual";
+
 interface TimerEntry {
   handle: ReturnType<typeof setTimeout> | null;
   remaining: number;
   startedAt: number;
+  reasons: Set<ToastPauseReason>;
 }
 
 export function createToastStore(): ToastStore {
@@ -64,7 +71,7 @@ export function createToastStore(): ToastStore {
   return createStore<ToastState>((set, get) => {
     const arm = (id: number, ms: number): void => {
       const handle = setTimeout(() => get().dismiss(id), ms);
-      timers.set(id, { handle, remaining: ms, startedAt: Date.now() });
+      timers.set(id, { handle, remaining: ms, startedAt: Date.now(), reasons: new Set() });
     };
 
     return {
@@ -92,17 +99,21 @@ export function createToastStore(): ToastStore {
         set({ toasts: toasts.filter((t) => t.id !== id) });
       },
 
-      pause(id) {
+      pause(id, reason = "manual") {
         const t = timers.get(id);
-        if (!t || t.handle === null) return;
+        if (!t) return;
+        t.reasons.add(reason);
+        if (t.handle === null) return;
         clearTimeout(t.handle);
         t.handle = null;
         t.remaining = Math.max(0, t.remaining - (Date.now() - t.startedAt));
       },
 
-      resume(id) {
+      resume(id, reason = "manual") {
         const t = timers.get(id);
-        if (!t || t.handle !== null) return;
+        if (!t) return;
+        t.reasons.delete(reason);
+        if (t.reasons.size > 0 || t.handle !== null) return;
         arm(id, t.remaining);
       },
 

@@ -19,6 +19,11 @@ const EDGE = 8;
 /** Durées (s) d'entrée / sortie d'un menu, avant `motionFor`. */
 const MENU_IN_SEC = 0.16;
 const MENU_OUT_SEC = 0.1;
+/**
+ * Intention de survol (ms) : quitter l'élément d'un sous-menu ouvert vers un voisin ne le ferme (ou
+ * ne bascule vers un autre) qu'après ce délai — le temps de rejoindre le sous-menu en diagonale.
+ */
+export const SUBMENU_INTENT_MS = 150;
 
 type Positioner = (w: number, h: number) => MenuPlacement;
 
@@ -95,6 +100,8 @@ interface MenuListProps {
   label: string;
   /** Sous-menu : ferme ce niveau et rend le focus à l'élément parent. */
   onBack?: () => void;
+  /** Sous-menu : le pointeur y entre (annule une fermeture différée du parent). */
+  onPointerEnterPanel?: () => void;
 }
 
 interface OpenSub {
@@ -103,12 +110,34 @@ interface OpenSub {
   focusFirst: boolean;
 }
 
-function MenuList({ items, position, focusFirst, label, onBack }: MenuListProps): JSX.Element {
+function MenuList({ items, position, focusFirst, label, onBack, onPointerEnterPanel }: MenuListProps): JSX.Element {
   const m = useMotion();
   const isPresent = useIsPresent();
   const panelRef = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<MenuPlacement | null>(null);
   const [sub, setSub] = useState<OpenSub | null>(null);
+
+  // Changement de sous-menu différé (intention de survol). `pendingSub` : cible planifiée
+  // (index, ou `null` = fermer) — un mouvement vers la même cible ne relance pas le délai.
+  const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSub = useRef<number | null | undefined>(undefined);
+  const cancelSubChange = (): void => {
+    if (subTimer.current !== null) clearTimeout(subTimer.current);
+    subTimer.current = null;
+    pendingSub.current = undefined;
+  };
+  const scheduleSubChange = (target: number | null): void => {
+    if (pendingSub.current === target) return;
+    cancelSubChange();
+    pendingSub.current = target;
+    subTimer.current = setTimeout(() => {
+      subTimer.current = null;
+      pendingSub.current = undefined;
+      if (target === null) setSub(null);
+      else openSub(target, false);
+    }, SUBMENU_INTENT_MS);
+  };
+  useEffect(() => cancelSubChange, []);
 
   // Mesure avant peinture : la position finale est posée avant la 1re image (pas de saut). Une
   // seule fois par panneau : chaque ouverture (ou sous-menu) est un nouveau montage (clé dédiée).
@@ -148,6 +177,7 @@ function MenuList({ items, position, focusFirst, label, onBack }: MenuListProps)
   }, [placed]);
 
   const openSub = (index: number, viaKeyboard: boolean): void => {
+    cancelSubChange();
     const btn = buttons().find((b) => Number(b.dataset.index) === index);
     if (!btn) return;
     setSub({ index, rect: btn.getBoundingClientRect(), focusFirst: viaKeyboard });
@@ -226,6 +256,7 @@ function MenuList({ items, position, focusFirst, label, onBack }: MenuListProps)
         exit={t.exit}
         onKeyDown={onKeyDown}
         onContextMenu={(e) => e.preventDefault()}
+        onPointerEnter={onPointerEnterPanel}
         onPointerLeave={() => {
           // Le pointeur quitte le menu : plus d'élément surligné (sauf sous-menu ouvert).
           if (!sub && isPresent) panelRef.current?.focus({ preventScroll: true });
@@ -253,8 +284,10 @@ function MenuList({ items, position, focusFirst, label, onBack }: MenuListProps)
                 if (!isPresent || item.disabled) return;
                 if (document.activeElement !== e.currentTarget) e.currentTarget.focus({ preventScroll: true });
                 if (item.submenu?.length) {
-                  if (sub?.index !== i) openSub(i, false);
-                } else if (sub) setSub(null);
+                  if (sub?.index === i) cancelSubChange();
+                  else if (sub) scheduleSubChange(i);
+                  else openSub(i, false);
+                } else if (sub) scheduleSubChange(null);
               }}
               onClick={(e) => activate(i, e.detail === 0)}
             >
@@ -278,7 +311,9 @@ function MenuList({ items, position, focusFirst, label, onBack }: MenuListProps)
             focusFirst={sub.focusFirst}
             label={(subItem as Exclude<MenuItem, "separator">).label}
             position={(w, h) => placeSubmenu(sub.rect, w, h)}
+            onPointerEnterPanel={cancelSubChange}
             onBack={() => {
+              cancelSubChange();
               const index = sub.index;
               setSub(null);
               focusIndex(index);

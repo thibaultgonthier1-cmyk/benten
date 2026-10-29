@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BENTEN_TRACKS_MIME,
+  DND_MAX_RAW_CHARS,
+  DND_MAX_TRACKS,
   hasDragTracks,
   readDragTracks,
   setDragTracks,
@@ -55,6 +57,23 @@ describe("dnd", () => {
       dt.setData(BENTEN_TRACKS_MIME, raw);
       expect(readDragTracks(asDt(dt))).toBeNull();
     }
+  });
+
+  it("charge plafonnée : > 10 000 ids ou > 200 000 caractères → null", () => {
+    const max = Array.from({ length: DND_MAX_TRACKS }, (_, i) => i + 1);
+    const ok = new FakeDataTransfer();
+    ok.setData(BENTEN_TRACKS_MIME, JSON.stringify(max));
+    expect(readDragTracks(asDt(ok))?.length).toBe(10_000);
+
+    const tooMany = new FakeDataTransfer();
+    tooMany.setData(BENTEN_TRACKS_MIME, JSON.stringify([...max, 10_001]));
+    expect(readDragTracks(asDt(tooMany))).toBeNull();
+
+    const tooLong = new FakeDataTransfer();
+    tooLong.setData(BENTEN_TRACKS_MIME, "[1" + " ".repeat(DND_MAX_RAW_CHARS) + "]");
+    expect(readDragTracks(asDt(tooLong))).toBeNull();
+    expect(DND_MAX_TRACKS).toBe(10_000);
+    expect(DND_MAX_RAW_CHARS).toBe(200_000);
   });
 
   it("pose aussi un repli texte lisible (déposer hors de Benten ne casse rien)", () => {
