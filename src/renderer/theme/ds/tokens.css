@@ -23,6 +23,8 @@
   --accent-press: #c22e6b;
   --accent-soft: rgba(231, 60, 130, 0.14);
   --accent-ring: rgba(231, 60, 130, 0.45);
+  /* Contenu posé sur un aplat d'accent (icône du bouton lecture, texte du primaire). */
+  --on-accent: #fff;
 
   /* Matière : dégradé discret du bouton primaire + reflet interne */
   --grad-btn: linear-gradient(180deg, #ee5592 0%, #e73c82 55%, #d93578 100%);

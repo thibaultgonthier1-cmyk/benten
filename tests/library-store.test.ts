@@ -177,93 +177,95 @@ describe("libraryStore — scan & sources", () => {
   });
 });
 
-describe("libraryStore — recherche anti-rebondée", () => {
-  it('setQuery("a") puis setQuery("ab") en < 150 ms → une seule recherche', async () => {
-    vi.useFakeTimers();
-    const benten = fakeBenten();
-    const hit = [track(1, 1)];
-    benten.library.search.mockResolvedValue(hit);
+describe("libraryStore — recherche anti-rebondée (locale, sur les pistes chargées)", () => {
+  const lib = [
+    track(1, 1, { title: "Halo", artist: "Beyoncé" }),
+    track(2, 1, { title: "Un été", artist: "X" }),
+    track(3, 2, { title: "Montagem Alluvia", artist: "Y" }),
+  ];
+
+  async function loaded(all: TrackRow[] = lib) {
+    const benten = fakeBenten(all);
     vi.stubGlobal("window", { benten });
     const store = createLibraryStore();
+    await store.getState().reload();
+    return { benten, store };
+  }
 
-    store.getState().setQuery("a");
+  it('setQuery("a") puis setQuery("ab") en < 150 ms → un seul calcul, sur le DERNIER terme', async () => {
+    vi.useFakeTimers();
+    const { store, benten } = await loaded();
+    store.getState().setQuery("be");
     await vi.advanceTimersByTimeAsync(100);
-    store.getState().setQuery("ab");
     expect(store.getState().searched).toBe(false);
+    store.getState().setQuery("beyonce");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(store.getState().searched).toBe(false); // anti-rebond : rien avant 150 ms
+    await vi.advanceTimersByTimeAsync(60);
+    expect(store.getState().results.map((t) => t.id)).toEqual([1]);
+    expect(store.getState().searched).toBe(true);
+    expect(store.getState().resultsFor).toBe("beyonce");
+    expect(benten.library.search).not.toHaveBeenCalled();
+  });
+
+  it("accents et casse Unicode : « ETE » trouve « Un été »", async () => {
+    vi.useFakeTimers();
+    const { store } = await loaded();
+    store.getState().setQuery("ETE");
     await vi.advanceTimersByTimeAsync(150);
-
-    expect(benten.library.search).toHaveBeenCalledTimes(1);
-    expect(benten.library.search).toHaveBeenCalledWith({ q: "ab", limit: 200 });
-    expect(store.getState().query).toBe("ab");
-    expect(store.getState().results).toEqual(hit);
-    expect(store.getState().searched).toBe(true);
+    expect(store.getState().results.map((t) => t.id)).toEqual([2]);
   });
 
-  it('une réponse tardive pour "a" n\'écrase pas "ab"', async () => {
+  it("un terme remplacé avant l'échéance n'écrase jamais le courant (cancelled)", async () => {
     vi.useFakeTimers();
-    const benten = fakeBenten();
-    const resolvers: Record<string, (rows: TrackRow[]) => void> = {};
-    benten.library.search.mockImplementation(
-      (args: { q: string }) =>
-        new Promise<TrackRow[]>((resolve) => {
-          resolvers[args.q] = resolve;
-        }),
-    );
-    vi.stubGlobal("window", { benten });
-    const store = createLibraryStore();
-
-    store.getState().setQuery("a");
-    await vi.advanceTimersByTimeAsync(150); // la recherche "a" part (réponse en vol)
-    store.getState().setQuery("ab");
-    await vi.advanceTimersByTimeAsync(150); // la recherche "ab" part
-    expect(benten.library.search).toHaveBeenCalledTimes(2);
-
-    resolvers["ab"]!([track(2, 1, { title: "AB" })]);
-    await vi.advanceTimersByTimeAsync(0);
-    resolvers["a"]!([track(1, 1, { title: "A" })]); // réponse obsolète, arrive en retard
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(store.getState().results.map((t) => t.title)).toEqual(["AB"]);
-    expect(store.getState().searched).toBe(true);
+    const { store } = await loaded();
+    store.getState().setQuery("halo");
+    store.getState().setQuery("montagem");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(store.getState().results.map((t) => t.id)).toEqual([3]);
+    expect(store.getState().resultsFor).toBe("montagem");
   });
 
-  it("terme vide → résultats vidés sans interroger", async () => {
+  it("terme vide → résultats vidés", async () => {
     vi.useFakeTimers();
-    const benten = fakeBenten();
-    benten.library.search.mockResolvedValue([track(1, 1)]);
-    vi.stubGlobal("window", { benten });
-    const store = createLibraryStore();
-
-    store.getState().setQuery("a");
+    const { store } = await loaded();
+    store.getState().setQuery("halo");
     await vi.advanceTimersByTimeAsync(150);
     expect(store.getState().results).toHaveLength(1);
     store.getState().setQuery("  ");
     await vi.advanceTimersByTimeAsync(300);
-    expect(benten.library.search).toHaveBeenCalledTimes(1);
     expect(store.getState().results).toEqual([]);
     expect(store.getState().searched).toBe(false);
   });
 
-  it("resultsFor = terme des résultats affichés ; revenir au dernier terme les rend AUSSITÔT (puis rafraîchit)", async () => {
+  it("bibliothèque pas encore chargée : pas de conclusion ; la recherche se fait à l'arrivée des pistes", async () => {
     vi.useFakeTimers();
-    const benten = fakeBenten();
-    const hit = [track(1, 1)];
-    benten.library.search.mockResolvedValue(hit);
+    const benten = fakeBenten(lib);
     vi.stubGlobal("window", { benten });
     const store = createLibraryStore();
-
-    store.getState().setQuery("montagem ");
-    await vi.advanceTimersByTimeAsync(150);
-    expect(store.getState().resultsFor).toBe("montagem");
-
-    store.getState().setQuery("");
-    expect(store.getState().resultsFor).toBe("");
-    // Retour par « Précédent » : aucun squelette, les résultats connus sont là tout de suite.
-    store.getState().setQuery("montagem");
+    store.getState().setQuery("halo");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(store.getState().searched).toBe(false); // jamais « Aucun résultat » sur une bibliothèque vide en chargement
+    await store.getState().reload();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().results.map((t) => t.id)).toEqual([1]);
     expect(store.getState().searched).toBe(true);
-    expect(store.getState().results).toEqual(hit);
-    expect(store.getState().resultsFor).toBe("montagem");
-    await vi.advanceTimersByTimeAsync(150);
-    expect(benten.library.search).toHaveBeenCalledTimes(2);
+  });
+
+  it("échec du chargement : `loadError` (état d'erreur), jamais un « Aucun résultat »", async () => {
+    vi.useFakeTimers();
+    const benten = fakeBenten(lib);
+    benten.library.query.mockRejectedValueOnce(new Error("boom"));
+    vi.stubGlobal("window", { benten });
+    const store = createLibraryStore();
+    await store.getState().reload();
+    expect(store.getState().loadError).toBe(true);
+    expect(store.getState().loading).toBe(false);
+    store.getState().setQuery("halo");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(store.getState().searched).toBe(false);
+    await store.getState().reload();
+    expect(store.getState().loadError).toBe(false);
   });
 });
+

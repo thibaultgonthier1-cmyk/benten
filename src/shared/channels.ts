@@ -20,6 +20,7 @@ export const CHANNELS = {
   PLAYLISTS_ADD: "playlists:add",
   PLAYLISTS_REMOVE: "playlists:remove",
   PLAYLISTS_REORDER: "playlists:reorder",
+  PLAYLISTS_INSERT_AT: "playlists:insert-at",
   STATE_GET: "state:get",
   STATE_SET: "state:set",
   /** Journal audio : le Renderer envoie des lots d'entrees, le Main les ajoute au fichier. */

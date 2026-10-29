@@ -987,8 +987,50 @@ describe("searchPhase", () => {
     expect(VM.searchPhase(" montagem ", { searched: true, resultsFor: "montagem" }, false)).toBe("empty");
   });
 
+  it("bibliothèque illisible → error (ni squelettes sans fin, ni « Aucun résultat »)", () => {
+    expect(VM.searchPhase("x", { searched: false, resultsFor: "", failed: true }, false)).toBe("error");
+    // Les playlists trouvées restent montrées même si la bibliothèque a échoué.
+    expect(VM.searchPhase("x", { searched: false, resultsFor: "", failed: true }, true)).toBe("results");
+    expect(VM.searchPhase(" ", { searched: false, resultsFor: "", failed: true }, false)).toBe("idle");
+  });
+
   it("des résultats (même ceux du terme précédent) restent affichés pendant la frappe", () => {
     expect(VM.searchPhase("monta", { searched: false, resultsFor: "mont" }, true)).toBe("results");
     expect(VM.searchPhase("monta", { searched: true, resultsFor: "monta" }, true)).toBe("results");
+  });
+});
+
+describe("searchLibrary (recherche locale, insensible aux accents / à la casse Unicode)", () => {
+  it("« beyonce » trouve « Beyoncé » ; « ETE » trouve « été » ; « ÉTÉ » aussi", () => {
+    const lib = [
+      track(1, { title: "Halo", artist: "Beyoncé" }),
+      track(2, { title: "Un été", artist: "X" }),
+      track(3, { title: "Autre", artist: "Y" }),
+    ];
+    expect(VM.searchLibrary(lib, "beyonce").map((t) => t.id)).toEqual([1]);
+    expect(VM.searchLibrary(lib, "ETE").map((t) => t.id)).toEqual([2]);
+    expect(VM.searchLibrary(lib, "ÉTÉ").map((t) => t.id)).toEqual([2]);
+    expect(VM.searchLibrary(lib, "  ")).toEqual([]);
+  });
+
+  it("classe PUIS limite : une correspondance exacte d'artiste survit à un terme large", () => {
+    const lib = [
+      ...Array.from({ length: 300 }, (_, i) => track(i + 1, { title: `Love song ${i}`, artist: "Band", album: "A" })),
+      track(999, { title: "Zzz", artist: "Lo", album: "B" }),
+    ];
+    const res = VM.searchLibrary(lib, "lo", 200);
+    expect(res).toHaveLength(200);
+    expect(res[0]!.id).toBe(999);
+  });
+
+  it("titre exact d'abord, puis préfixe, puis contient ; album et artiste d'album cherchés aussi", () => {
+    const lib = [
+      track(1, { title: "Le pardon", artist: "A", album: "X" }),
+      track(2, { title: "Pardon", artist: "B", album: "X" }),
+      track(3, { title: "Pardonne-moi", artist: "C", album: "X" }),
+      track(4, { title: "Rien", artist: "D", album: "Pardon (EP)" }),
+      track(5, { title: "Rien 2", artist: "E", album: "Y", albumArtist: "Pardon Crew" }),
+    ];
+    expect(VM.searchLibrary(lib, "pardon").map((t) => t.id)).toEqual([2, 3, 4, 5, 1]);
   });
 });

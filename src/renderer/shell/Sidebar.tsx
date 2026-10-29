@@ -2,6 +2,7 @@ import type React from "react";
 import { useEffect, useMemo, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  CircleAlert,
   Disc3,
   Download,
   Heart,
@@ -97,6 +98,7 @@ export function Sidebar(): JSX.Element {
   const route = useUi((s) => s.route);
   const rows = usePlaylists((s) => s.rows);
   const loaded = usePlaylists((s) => s.loaded);
+  const error = usePlaylists((s) => s.error);
   const playlists = useMemo(() => playlistsByCreation(rows), [rows]);
   const section = navSectionOf(route);
   // Une playlist ouverte présente dans la liste porte l'indicateur ; sinon l'entrée « Playlists ».
@@ -147,7 +149,22 @@ export function Sidebar(): JSX.Element {
         </div>
         {/* `layoutScroll` : l'indicateur partagé tient compte du défilement de cette liste. */}
         <motion.ul className="sb-pl-list" layoutScroll>
-          {loaded && playlists.length === 0 ? (
+          {loaded && error && playlists.length === 0 ? (
+            <li>
+              {/* Échec de lecture : jamais l'invitation « crée ta première playlist ». */}
+              <button
+                type="button"
+                className="sb-pl-error"
+                onClick={() => void playlistsStore.getState().refresh()}
+              >
+                <CircleAlert size={15} strokeWidth={ICON_STROKE} aria-hidden />
+                <span>
+                  <b>Playlists indisponibles</b>
+                  <small>Réessayer</small>
+                </span>
+              </button>
+            </li>
+          ) : loaded && playlists.length === 0 ? (
             <li>
               <EmptyInvite />
             </li>

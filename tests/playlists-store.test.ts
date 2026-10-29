@@ -56,14 +56,84 @@ describe("playlists store", () => {
     expect(s.getState().rev.get(id)!).toBeGreaterThan(r2);
   });
 
-  it("restoreAt (annuler un retrait) remet le titre à sa position", async () => {
-    const { api } = fakeApi();
+  it("restoreAt (annuler un retrait) passe par insertAt, atomique côté Main", async () => {
+    const { api, playlists } = fakeApi();
     const s = createPlaylistsStore(() => api);
     const id = (await s.getState().create("A"))!;
     await s.getState().add(id, [1, 2, 3]);
     await s.getState().removeAt(id, 1);
+    playlists.add.mockClear();
     expect(await s.getState().restoreAt(id, 2, 1)).toBe(true);
+    expect(playlists.insertAt).toHaveBeenCalledWith(id, 2, 1);
+    expect(playlists.add).not.toHaveBeenCalled();
     expect((await api.playlists.tracks(id)).map((t) => t.id)).toEqual([1, 2, 3]);
+  });
+
+  it("annulations successives (A puis B retirés, puis annulés) → ordre d'origine A, B", async () => {
+    const { api } = fakeApi();
+    const s = createPlaylistsStore(() => api);
+    const id = (await s.getState().create("A"))!;
+    await s.getState().add(id, [1, 2, 3]);
+    await s.getState().removeAt(id, 0); // A
+    await s.getState().removeAt(id, 0); // B
+    await s.getState().restoreAt(id, 2, 0); // annule B
+    await s.getState().restoreAt(id, 1, 0); // annule A
+    expect((await api.playlists.tracks(id)).map((t) => t.id)).toEqual([1, 2, 3]);
+  });
+
+  it("restoreAt en échec renvoie false", async () => {
+    const { api, playlists } = fakeApi();
+    const s = createPlaylistsStore(() => api);
+    const id = (await s.getState().create("A"))!;
+    playlists.insertAt.mockRejectedValueOnce(new Error("boom"));
+    expect(await s.getState().restoreAt(id, 1, 0)).toBe(false);
+  });
+
+  it("tracksOf signale l'échec (jamais une liste vide trompeuse)", async () => {
+    const { api, playlists } = fakeApi();
+    const s = createPlaylistsStore(() => api);
+    const id = (await s.getState().create("A"))!;
+    await s.getState().add(id, [1]);
+    expect(await s.getState().tracksOf(id)).toEqual({ ok: true, tracks: [expect.objectContaining({ id: 1 })] });
+    playlists.tracks.mockRejectedValueOnce(new Error("boom"));
+    expect(await s.getState().tracksOf(id)).toEqual({ ok: false });
+  });
+
+  it("premier chargement en échec : `error` (pas une liste vide « normale ») ; un succès l'efface", async () => {
+    const { api, playlists } = fakeApi();
+    const s = createPlaylistsStore(() => api);
+    playlists.list.mockRejectedValueOnce(new Error("boom"));
+    await s.getState().refresh();
+    expect(s.getState().loaded).toBe(true);
+    expect(s.getState().error).toBe(true);
+    await s.getState().refresh();
+    expect(s.getState().error).toBe(false);
+  });
+
+  it("appels concurrents de refresh : UNE seule lecture (promesse partagée)", async () => {
+    const { api, playlists } = fakeApi();
+    const s = createPlaylistsStore(() => api);
+    await Promise.all([s.getState().refresh(), s.getState().refresh(), s.getState().refresh()]);
+    expect(playlists.list).toHaveBeenCalledTimes(1);
+  });
+
+  it("une mutation pendant un refresh en vol est quand même reflétée", async () => {
+    const { api, playlists } = fakeApi();
+    const s = createPlaylistsStore(() => api);
+    const id = (await api.playlists.create("A"))!;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const realList = playlists.list.getMockImplementation()!;
+    playlists.list.mockImplementationOnce(async () => {
+      const rows = await realList();
+      await gate;
+      return rows;
+    });
+    const first = s.getState().refresh(); // lit 0 titre, bloqué
+    const added = s.getState().add(id, [5]);
+    release();
+    await Promise.all([first, added]);
+    expect(s.getState().rows[0]!.trackCount).toBe(1);
   });
 
   it("un échec IPC renvoie false / null sans lever ; la liste reste utilisable", async () => {
@@ -75,6 +145,8 @@ describe("playlists store", () => {
     expect(await s.getState().add(99, [1])).toBe(false);
     playlists.list.mockRejectedValueOnce(new Error("boom"));
     await expect(s.getState().refresh()).resolves.toBeUndefined();
+    playlists.tracks.mockRejectedValueOnce(new Error("boom"));
+    expect(await s.getState().tracksOf(1)).toEqual({ ok: false });
   });
 
   it("la mosaïque n'est relue que pour les playlists modifiées", async () => {

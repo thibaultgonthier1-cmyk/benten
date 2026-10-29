@@ -7,7 +7,7 @@ import type { Album } from "../lib/library";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
 import { setDragTracks } from "../lib/dnd";
 import { artistShowsPause, buildSearchSections, canResume, searchPhase, sameTrackList } from "../lib/viewModels";
-import { useLibrary } from "../state/library";
+import { libraryStore, useLibrary } from "../state/library";
 import { playerStore, usePlayer } from "../state/player";
 import { usePlaylists } from "../state/playlists";
 import { useSettings } from "../state/settings";
@@ -22,7 +22,7 @@ import { Skeleton } from "../ui/Skeleton";
 import { TrackRowItem } from "../ui/TrackRowItem";
 import { useMotion } from "../ui/useMotion";
 import { artistLayoutId, artistMenuItems, artistQueueOf, cachedArtistPage, playArtist } from "./artistPlay";
-import { EmptyState, PageHeader } from "./common";
+import { EmptyState, ErrorState, PageHeader } from "./common";
 import { anchorFromEvent, useViewMenus } from "./menus";
 import { PlaylistTile } from "./PlaylistsView";
 import { focusSearchField } from "./searchFocus";
@@ -64,6 +64,7 @@ export function SearchView({ q, actions }: SearchViewProps): JSX.Element {
   const results = useLibrary((s) => s.results);
   const searched = useLibrary((s) => s.searched);
   const resultsFor = useLibrary((s) => s.resultsFor);
+  const failed = useLibrary((s) => s.loadError);
   const playlists = usePlaylists((s) => s.rows);
   // Le champ est la source pendant la frappe ; la route (précédent / suivant) au premier rendu.
   const term = (query || q).trim();
@@ -71,7 +72,7 @@ export function SearchView({ q, actions }: SearchViewProps): JSX.Element {
   const sections = useMemo(() => buildSearchSections(term, results, playlists), [term, results, playlists]);
   const hasAny =
     sections.tracks.length + sections.albums.length + sections.artists.length + sections.playlists.length > 0;
-  const phase = searchPhase(term, { searched, resultsFor }, hasAny);
+  const phase = searchPhase(term, { searched, resultsFor, failed }, hasAny);
   const stale = phase === "results" && !(searched && resultsFor === term);
 
   let body: JSX.Element;
@@ -81,6 +82,14 @@ export function SearchView({ q, actions }: SearchViewProps): JSX.Element {
         icon={Search}
         title="Que veux-tu écouter ?"
         text="Tape un titre, un artiste, un album ou une playlist. Ctrl+F t'amène ici depuis n'importe quelle page."
+      />
+    );
+  } else if (phase === "error") {
+    body = (
+      <ErrorState
+        title="Recherche indisponible"
+        text="La bibliothèque n'a pas pu être chargée, la recherche ne peut donc rien conclure."
+        onRetry={() => void libraryStore.getState().reload()}
       />
     );
   } else if (phase === "loading") {

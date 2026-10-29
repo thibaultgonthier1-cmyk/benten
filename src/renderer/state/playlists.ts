@@ -14,18 +14,28 @@ import type { BentenApi, PlaylistRow, TrackRow } from "../../shared/types";
  * chaque mutation qui le touche (la page ouverte recharge ses titres).
  *
  * Les mutations ne lèvent jamais : `false` / `null` en cas d'échec IPC (l'appelant le signale).
+ * Une LECTURE en échec n'est jamais présentée comme une liste vide : `tracksOf` renvoie
+ * `{ ok: false }`, un chargement de la liste en échec pose `error` (toast : `bindErrorToasts`).
+ * `refresh()` concurrents partagent la lecture en vol ; après une écriture, la liste est relue
+ * (une lecture en vol commencée avant l'écriture est suivie d'une nouvelle).
  */
+
+/** Titres d'une playlist, ou l'échec de leur lecture (jamais confondu avec « vide »). */
+export type TracksResult = { ok: true; tracks: TrackRow[] } | { ok: false };
 
 export interface PlaylistsState {
   /** Ordre du Main : modifiées récemment d'abord (sous-menus). */
   rows: PlaylistRow[];
   /** Vrai après le premier chargement (abouti ou non). */
   loaded: boolean;
+  /** Le dernier chargement de la liste a échoué (état d'erreur ; `rows` = dernière liste connue). */
+  error: boolean;
   art: ReadonlyMap<number, readonly string[]>;
   rev: ReadonlyMap<number, number>;
+  /** Relit la liste ; des appels concurrents partagent la même lecture. */
   refresh(): Promise<void>;
-  /** Pistes d'une playlist (ordre des positions) ; `[]` en cas d'échec. */
-  tracksOf(id: number): Promise<TrackRow[]>;
+  /** Pistes d'une playlist (ordre des positions), ou `{ ok: false }` si la lecture échoue. */
+  tracksOf(id: number): Promise<TracksResult>;
   /** Crée une playlist ; renvoie son id, ou `null` (nom vide, échec). */
   create(name: string): Promise<number | null>;
   rename(id: number, name: string): Promise<boolean>;
@@ -35,7 +45,7 @@ export interface PlaylistsState {
   /** Retire la ligne à `position`. */
   removeAt(id: number, position: number): Promise<boolean>;
   reorder(id: number, from: number, to: number): Promise<boolean>;
-  /** Annule un retrait : remet `trackId` à `position` (ajout en fin puis déplacement). */
+  /** Annule un retrait : remet `trackId` à `position` (une transaction côté Main, `insertAt`). */
   restoreAt(id: number, trackId: number, position: number): Promise<boolean>;
 }
 
@@ -49,8 +59,9 @@ export function createPlaylistsStore(getApi: () => BentenApi | undefined = windo
   const pl = (): BentenApi["playlists"] | undefined => getApi()?.playlists;
   /** `updatedAt` de la dernière mosaïque lue, par playlist. */
   const artStamp = new Map<number, number>();
-  /** Rafraîchissements concurrents : seule la réponse la plus récente s'applique. */
-  let refreshSeq = 0;
+  /** Lecture de la liste en vol (partagée) ; `stale` : une écriture a eu lieu depuis son départ. */
+  let inflight: Promise<void> | null = null;
+  let stale = false;
 
   return createStore<PlaylistsState>((set, get) => {
     const bump = (id: number): void => {
@@ -69,59 +80,84 @@ export function createPlaylistsStore(getApi: () => BentenApi | undefined = windo
         return false;
       }
       bump(id);
-      await get().refresh();
+      await reloadAfterWrite();
       return true;
+    };
+
+    /** Lit la liste et les mosaïques modifiées ; un échec pose `error` (toast : `bindErrorToasts`). */
+    const load = async (): Promise<void> => {
+      const api = pl();
+      if (!api) return;
+      let rows: PlaylistRow[];
+      try {
+        rows = await api.list();
+      } catch {
+        set({ loaded: true, error: true });
+        return;
+      }
+      const prev = get().art;
+      const art = new Map<number, readonly string[]>();
+      const stamps = new Map<number, number>();
+      await Promise.all(
+        rows.map(async (r) => {
+          const known = prev.get(r.id);
+          if (known && artStamp.get(r.id) === r.updatedAt) {
+            art.set(r.id, known);
+            stamps.set(r.id, r.updatedAt);
+            return;
+          }
+          try {
+            art.set(r.id, mosaicArtKeys(await api.tracks(r.id)));
+            stamps.set(r.id, r.updatedAt);
+          } catch {
+            art.set(r.id, known ?? []);
+          }
+        }),
+      );
+      artStamp.clear();
+      for (const [id, at] of stamps) artStamp.set(id, at);
+      set({ rows, art, loaded: true, error: false });
+    };
+
+    /** Une lecture (en boucle tant qu'une écriture l'a rendue périmée), partagée par les appelants. */
+    const reload = (): Promise<void> => {
+      if (inflight) return inflight;
+      inflight = (async () => {
+        try {
+          do {
+            stale = false;
+            await load();
+          } while (stale);
+        } finally {
+          inflight = null;
+        }
+      })();
+      return inflight;
+    };
+    /** Après une écriture : une lecture déjà en vol a pu partir AVANT elle → elle repassera. */
+    const reloadAfterWrite = (): Promise<void> => {
+      if (inflight) stale = true;
+      return reload();
     };
 
     return {
       rows: [],
       loaded: false,
+      error: false,
       art: new Map(),
       rev: new Map(),
 
-      async refresh() {
-        const api = pl();
-        if (!api) return;
-        const seq = ++refreshSeq;
-        let rows: PlaylistRow[];
-        try {
-          rows = await api.list();
-        } catch {
-          if (seq === refreshSeq) set({ loaded: true });
-          return;
-        }
-        const prev = get().art;
-        const art = new Map<number, readonly string[]>();
-        const stamps = new Map<number, number>();
-        await Promise.all(
-          rows.map(async (r) => {
-            const known = prev.get(r.id);
-            if (known && artStamp.get(r.id) === r.updatedAt) {
-              art.set(r.id, known);
-              stamps.set(r.id, r.updatedAt);
-              return;
-            }
-            try {
-              art.set(r.id, mosaicArtKeys(await api.tracks(r.id)));
-              stamps.set(r.id, r.updatedAt);
-            } catch {
-              art.set(r.id, known ?? []);
-            }
-          }),
-        );
-        if (seq !== refreshSeq) return;
-        artStamp.clear();
-        for (const [id, at] of stamps) artStamp.set(id, at);
-        set({ rows, art, loaded: true });
+      refresh() {
+        return reload();
       },
 
       async tracksOf(id) {
         const api = pl();
-        if (!api) return [];
+        if (!api) return { ok: false };
         try {
-          return await api.tracks(id);
+          return { ok: true, tracks: await api.tracks(id) };
         } catch {
-          return [];
+          return { ok: false };
         }
       },
 
@@ -135,7 +171,7 @@ export function createPlaylistsStore(getApi: () => BentenApi | undefined = windo
         } catch {
           return null;
         }
-        await get().refresh();
+        await reloadAfterWrite();
         return id;
       },
 
@@ -170,12 +206,7 @@ export function createPlaylistsStore(getApi: () => BentenApi | undefined = windo
       },
 
       restoreAt(id, trackId, position) {
-        return mutate(id, async (api) => {
-          await api.add(id, [trackId]);
-          const last = (await api.tracks(id)).length - 1;
-          const to = Math.max(0, Math.min(position, last));
-          if (last !== to) await api.reorder(id, last, to);
-        });
+        return mutate(id, (api) => api.insertAt(id, trackId, Math.max(0, position)));
       },
     };
   });

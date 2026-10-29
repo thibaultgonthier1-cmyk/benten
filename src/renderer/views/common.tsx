@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { CircleAlert, RotateCw, type LucideIcon } from "lucide-react";
+import { Button } from "../ui/Button";
 import { ICON_STROKE } from "../ui/IconButton";
 import { Skeleton } from "../ui/Skeleton";
 
@@ -65,6 +66,35 @@ export function GridSkeleton({ count = 12 }: { count?: number }): JSX.Element {
           <Skeleton w="46%" h={10} radius={5} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Échec de lecture (IPC) : état d'ERREUR explicite avec « Réessayer » — jamais un état vide ni
+ * « Aucun résultat » qui ferait croire à une absence de données.
+ */
+export function ErrorState({
+  title,
+  text,
+  onRetry,
+}: {
+  title: string;
+  text: string;
+  onRetry?: () => void;
+}): JSX.Element {
+  return (
+    <div className="page-empty is-error" role="alert">
+      <span className="page-empty-icon" aria-hidden="true">
+        <CircleAlert size={24} strokeWidth={ICON_STROKE} />
+      </span>
+      <h2>{title}</h2>
+      <p>{text}</p>
+      {onRetry && (
+        <Button variant="ghost" icon={RotateCw} onClick={onRetry}>
+          Réessayer
+        </Button>
+      )}
     </div>
   );
 }

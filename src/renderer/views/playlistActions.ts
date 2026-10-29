@@ -51,10 +51,17 @@ export function createAddToPlaylist(deps: AddDeps) {
   const add = async (target: PlaylistTargetRef, tracks: readonly TrackRow[], opts: AddOptions = {}): Promise<number> => {
     const name = quoted(target.name);
     if (tracks.length === 0) return 0;
-    let ids = tracks.map((t) => t.id);
+    // Un même titre n'est jamais ajouté deux fois par UNE demande (même « Ajouter quand même »).
+    let ids = [...new Set(tracks.map((t) => t.id))];
     let dupes = 0;
     if (!opts.allowDuplicates) {
-      const existing = (await store.getState().tracksOf(target.id)).map((t) => t.id);
+      const current = await store.getState().tracksOf(target.id);
+      if (!current.ok) {
+        // Sans le contenu actuel, le tri des doublons serait faux : on n'ajoute rien.
+        toast(`Impossible d'ajouter à ${name}`, { icon: CircleAlert });
+        return 0;
+      }
+      const existing = current.tracks.map((t) => t.id);
       const split = partitionNewTracks(existing, ids);
       ids = split.fresh;
       dupes = split.dupes.length;
@@ -140,7 +147,10 @@ export const newPlaylistDialog: StoreApi<NewPlaylistDialogState> = createStore<N
 
 /** Ouvre le dialogue « Nouvelle playlist » (avec les titres à y mettre, le cas échéant). */
 export function openNewPlaylist(tracks: readonly TrackRow[] = [], origin?: { x: number; y: number }): void {
-  newPlaylistDialog.setState((s) => ({ request: { tracks: tracks.slice(), origin }, seq: s.seq + 1 }));
+  // Un titre glissé / sélectionné deux fois n'est compté (ni ajouté) qu'une fois.
+  const seen = new Set<number>();
+  const unique = tracks.filter((t) => !seen.has(t.id) && (seen.add(t.id), true));
+  newPlaylistDialog.setState((s) => ({ request: { tracks: unique, origin }, seq: s.seq + 1 }));
 }
 
 export function closeNewPlaylist(): void {

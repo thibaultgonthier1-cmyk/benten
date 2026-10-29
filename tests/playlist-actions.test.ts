@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createPlaylistsStore } from "../src/renderer/state/playlists";
 import { createPlaylistFx } from "../src/renderer/ui/playlistFx";
-import { createAddToPlaylist } from "../src/renderer/views/playlistActions";
+import { createAddToPlaylist, newPlaylistDialog, openNewPlaylist } from "../src/renderer/views/playlistActions";
 import { fakePlaylistsApi, track } from "./helpers/playlists";
 
 /**
@@ -71,11 +71,34 @@ describe("addToPlaylist", () => {
     expect(toast.mock.calls.at(-1)![0]).toBe("Impossible d'ajouter à « Nuit »");
   });
 
+  it("lecture de la playlist en échec : rien n'est ajouté, l'échec est signalé (pas de faux « nouveau »)", async () => {
+    const { store, toast, add, playlists } = setup();
+    const id = (await store.getState().create("Nuit"))!;
+    await store.getState().add(id, [1]);
+    playlists.add.mockClear();
+    playlists.tracks.mockRejectedValueOnce(new Error("boom"));
+    expect(await add({ id, name: "Nuit" }, [track(1)])).toBe(0);
+    expect(playlists.add).not.toHaveBeenCalled();
+    expect(toast.mock.calls.at(-1)![0]).toBe("Impossible d'ajouter à « Nuit »");
+  });
+
+  it("ids répétés dans une même demande : dédoublonnés, même avec allowDuplicates", async () => {
+    const { store, add, playlists } = setup();
+    const id = (await store.getState().create("Nuit"))!;
+    expect(await add({ id, name: "Nuit" }, [track(1), track(1), track(2)], { allowDuplicates: true })).toBe(2);
+    expect(playlists.add).toHaveBeenLastCalledWith(id, [1, 2]);
+  });
+
   it("sans origine : pas de vol, mais l'entrée fait « pop »", async () => {
     const { store, fx, add } = setup();
     const id = (await store.getState().create("Nuit"))!;
     await add({ id, name: "Nuit" }, [track(9)]);
     expect(fx.getState().flights).toEqual([]);
     expect(fx.getState().pops.get(id)).toBe(1);
+  });
+
+  it("dialogue « Nouvelle playlist » : titres répétés dédoublonnés (aperçu et ajout)", () => {
+    openNewPlaylist([track(1), track(1), track(2)]);
+    expect(newPlaylistDialog.getState().request!.tracks.map((t) => t.id)).toEqual([1, 2]);
   });
 });

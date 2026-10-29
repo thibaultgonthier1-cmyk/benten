@@ -67,6 +67,7 @@ describe("registerIpc", () => {
       "playlists:add",
       "playlists:create",
       "playlists:delete",
+      "playlists:insert-at",
       "playlists:list",
       "playlists:remove",
       "playlists:rename",
@@ -153,6 +154,12 @@ describe("registerIpc", () => {
     await call("playlists:remove", trusted, id, 0);
     expect(await ids()).toEqual([t1]);
 
+    // Annulation d'un retrait : remise en place atomique.
+    await call("playlists:insert-at", trusted, id, t2, 0);
+    expect(await ids()).toEqual([t2, t1]);
+    await call("playlists:remove", trusted, id, 0);
+    expect(await ids()).toEqual([t1]);
+
     await call("playlists:rename", trusted, id, "Renamed");
     const list = (await call("playlists:list", trusted)) as {
       id: number;
@@ -176,11 +183,15 @@ describe("registerIpc", () => {
     await expect(call("playlists:add", trusted, 1, "nope")).rejects.toThrow(/playlists:add/);
     await expect(call("playlists:remove", trusted, 1, 1.5)).rejects.toThrow(/playlists:remove/);
     await expect(call("playlists:reorder", trusted, 1, 0, "x")).rejects.toThrow(/playlists:reorder/);
+    await expect(call("playlists:insert-at", trusted, 1, 1, 1.5)).rejects.toThrow(/playlists:insert-at/);
+    await expect(call("playlists:insert-at", trusted, 1, "x", 0)).rejects.toThrow(/playlists:insert-at/);
+    await expect(call("playlists:insert-at", trusted, 1, 1, -1)).rejects.toThrow(/playlists:insert-at/);
 
     // Expéditeur non fiable.
     await expect(call("playlists:list", evil)).rejects.toThrow(/untrusted sender/);
     await expect(call("playlists:create", evil, "x")).rejects.toThrow(/untrusted sender/);
     await expect(call("playlists:tracks", evil, 1)).rejects.toThrow(/untrusted sender/);
+    await expect(call("playlists:insert-at", evil, 1, 1, 0)).rejects.toThrow(/untrusted sender/);
   });
 
   it("favorites:toggle persiste un favori, favorites:list le renvoie, garde l'id entier et l'expediteur fiable", async () => {

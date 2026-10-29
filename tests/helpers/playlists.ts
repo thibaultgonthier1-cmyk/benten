@@ -62,6 +62,11 @@ export function fakePlaylistsApi() {
       ids.splice(to, 0, m!);
       lists.get(id)!.updatedAt = ++clock;
     }),
+    insertAt: vi.fn(async (id: number, trackId: number, position: number) => {
+      const ids = lists.get(id)!.ids;
+      ids.splice(Math.min(position, ids.length), 0, trackId);
+      lists.get(id)!.updatedAt = ++clock;
+    }),
   };
   return { api: { playlists } as unknown as BentenApi, playlists, lists };
 }

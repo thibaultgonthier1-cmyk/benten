@@ -544,6 +544,24 @@ export function removeFromPlaylist(db: Db, id: number, position: number): void {
 }
 
 /**
+ * Insère `trackId` à `position` (annulation d'un retrait) puis re-densifie en 0..n-1 — UNE seule
+ * transaction : jamais d'état intermédiaire « ajouté en fin » visible ni de demi-annulation.
+ * `position` au-delà de la fin = ajout en fin ; négative = erreur (aucune écriture). Une piste
+ * inconnue échoue sur la clé étrangère et la transaction est annulée. Bouge `updated_at`.
+ */
+export function insertIntoPlaylist(db: Db, id: number, trackId: number, position: number): void {
+  if (!Number.isInteger(position) || position < 0) throw new Error("insertIntoPlaylist: position must be >= 0");
+  const s = stmts(db);
+  db.transaction(() => {
+    const ids = s.playlistTrackIds.all(id) as number[];
+    ids.splice(Math.min(position, ids.length), 0, trackId);
+    s.clearPlaylistTracks.run(id);
+    ids.forEach((t, i) => s.insertPlaylistTrack.run(id, t, i));
+    s.touchPlaylist.run(Date.now(), id);
+  })();
+}
+
+/**
  * Déplace la piste de l'index `from` vers l'index `to`, puis re-densifie les positions en 0..n-1.
  * Index hors bornes ou `from === to` = no-op. Transaction ; bouge `updated_at`. Même stratégie
  * sans collision que `removeFromPlaylist` (DELETE puis RE-INSERT dans le nouvel ordre).

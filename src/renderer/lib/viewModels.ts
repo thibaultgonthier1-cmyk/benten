@@ -1045,20 +1045,79 @@ export function buildSearchSections(
   return { top, tracks: rankedTracks, albums, artists, playlists: matchedPlaylists };
 }
 
-export type SearchPhase = "idle" | "loading" | "empty" | "results";
+export type SearchPhase = "idle" | "loading" | "empty" | "results" | "error";
 
 /**
  * Ce que montre la page Recherche : `idle` (terme vide), `results` dès qu'il y a quelque chose à
- * montrer (même les résultats du terme précédent, pendant la frappe), `empty` SEULEMENT quand la
- * réponse du terme courant est arrivée sans rien, sinon `loading` (squelettes).
+ * montrer (même les résultats du terme précédent, pendant la frappe), `error` si la bibliothèque
+ * n'a pas pu être lue (`failed`), `empty` SEULEMENT quand la réponse du terme courant est arrivée
+ * sans rien, sinon `loading` (squelettes).
  */
 export function searchPhase(
   query: string,
-  state: { searched: boolean; resultsFor: string },
+  state: { searched: boolean; resultsFor: string; failed?: boolean },
   hasAny: boolean,
 ): SearchPhase {
   const q = query.trim();
   if (!q) return "idle";
   if (hasAny) return "results";
+  if (state.failed) return "error";
   return state.searched && state.resultsFor === q ? "empty" : "loading";
+}
+
+/** Champs repliés d'une piste, calculés une fois par objet piste (la recherche tourne à chaque frappe). */
+const foldedCache = new WeakMap<TrackRow, { title: string; artists: string[]; album: string }>();
+function foldedFields(t: TrackRow): { title: string; artists: string[]; album: string } {
+  let f = foldedCache.get(t);
+  if (!f) {
+    f = {
+      title: normalizeText(t.title),
+      artists: [normalizeText(t.artist), normalizeText(t.albumArtist ?? "")],
+      album: normalizeText(t.album),
+    };
+    foldedCache.set(t, f);
+  }
+  return f;
+}
+
+/** Nombre max de titres renvoyés par la recherche (APRÈS classement). */
+export const SEARCH_LIMIT = 200;
+
+/**
+ * Recherche LOCALE sur toutes les pistes chargées (remplace le `LIKE … COLLATE NOCASE` de SQLite,
+ * qui ne replie ni les accents ni la casse hors ASCII) : texte replié (`normalizeText`) sur titre,
+ * artiste, album et artiste d'album. Classement, PUIS limite (un terme large ne coupe pas une
+ * correspondance exacte) : titre exact 0, nom sans suffixe de version exact 1, artiste crédité ou
+ * album exact 2, titre qui commence par 3, artiste / album qui commence par 4, titre contient 5,
+ * artiste contient 6, album contient 7. Départage : ordre de la bibliothèque. Pure.
+ */
+export function searchLibrary(tracks: readonly TrackRow[], query: string, limit = SEARCH_LIMIT): TrackRow[] {
+  const q = normalizeText(query);
+  if (!q) return [];
+  const rank = (t: TrackRow): number => {
+    const { title, artists, album } = foldedFields(t);
+    if (title === q) return 0;
+    const titleHit = title.includes(q);
+    const artistHit = artists.some((a) => a.includes(q));
+    const albumHit = album.includes(q);
+    if (!titleHit && !artistHit && !albumHit) return -1;
+    if (titleHit && versionInfo(t.title).base === q) return 1;
+    if (album === q) return 2;
+    if (artistHit) {
+      for (const field of [t.artist, t.albumArtist ?? ""]) {
+        if (creditNames(field).some((n) => normalizeText(n) === q) || normalizeText(field) === q) return 2;
+      }
+    }
+    if (title.startsWith(q)) return 3;
+    if (artists.some((a) => a.startsWith(q)) || album.startsWith(q)) return 4;
+    if (titleHit) return 5;
+    return artistHit ? 6 : 7;
+  };
+  const hits: { t: TrackRow; r: number; i: number }[] = [];
+  tracks.forEach((t, i) => {
+    const r = rank(t);
+    if (r >= 0) hits.push({ t, r, i });
+  });
+  hits.sort((a, b) => a.r - b.r || a.i - b.i);
+  return hits.slice(0, Math.max(0, limit)).map((h) => h.t);
 }

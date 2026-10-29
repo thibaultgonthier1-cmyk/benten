@@ -161,7 +161,7 @@
   height: 52px;
   border: 0;
   border-radius: 50%;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--grad-btn);
   box-shadow:
     var(--highlight-inner),

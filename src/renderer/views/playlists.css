@@ -262,7 +262,7 @@
   box-shadow:
     inset 0 0 0 1px var(--accent),
     0 0 0 3px var(--accent-soft);
-  color: #fff;
+  color: var(--text);
   font-family: var(--font-display);
   font-weight: 600;
   font-size: clamp(30px, 3.4vw, 52px);

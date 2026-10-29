@@ -240,7 +240,7 @@
   opacity: 1;
 }
 .sb-pl-item.is-drop {
-  color: #fff;
+  color: var(--text);
 }
 .sb-pl-item.is-drop .sb-pl-tile {
   transform: scale(1.08);
@@ -322,6 +322,41 @@
   margin-top: 1px;
   color: var(--text-faint);
   font-size: 11.5px;
+}
+/* Liste des playlists illisible : message + nouvel essai (jamais l'invitation « vide »). */
+.sb-pl-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.sb-pl-error svg {
+  flex: none;
+  color: var(--accent);
+}
+.sb-pl-error b {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.sb-pl-error small {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.sb-pl-error:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
 }
 :root[data-motion="reduced"] .sb-pl-item::before,
 :root[data-motion="reduced"] .sb-pl-invite::after,

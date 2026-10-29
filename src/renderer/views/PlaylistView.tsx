@@ -44,11 +44,11 @@ import { Skeleton } from "../ui/Skeleton";
 import { quoted, toast } from "../ui/toastStore";
 import { TrackRowItem } from "../ui/TrackRowItem";
 import { useMotion } from "../ui/useMotion";
-import { EmptyState } from "./common";
+import { EmptyState, ErrorState } from "./common";
 import { HeroCompactBar, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
 import { anchorBelow, anchorFromEvent, playlistMenuItem, useViewMenus } from "./menus";
 import { askDeletePlaylist, consumeRename } from "./playlistActions";
-import { playlistAlbum, playPlaylist, shufflePlaylist } from "./playlistPlay";
+import { playPlaylist, playPlaylistAt, shufflePlaylist, usePlaylistOwnsQueue } from "./playlistPlay";
 import { playlistLayoutId } from "./PlaylistsView";
 import "./views.css";
 import "./playlists.css";
@@ -78,6 +78,7 @@ const ROW_IN_SEC = 0.34;
 export function PlaylistView({ id, scrollRef, actions }: PlaylistViewProps): JSX.Element {
   const row = usePlaylists((s) => s.rows.find((r) => r.id === id) ?? null);
   const loaded = usePlaylists((s) => s.loaded);
+  const listError = usePlaylists((s) => s.error);
 
   useEffect(() => {
     if (!playlistsStore.getState().loaded) void playlistsStore.getState().refresh();
@@ -85,6 +86,14 @@ export function PlaylistView({ id, scrollRef, actions }: PlaylistViewProps): JSX
 
   if (!row) {
     if (!loaded) return <PlaylistSkeleton />;
+    if (listError)
+      return (
+        <ErrorState
+          title="Impossible de charger les playlists"
+          text="La lecture de tes playlists a échoué. Elles ne sont pas perdues : réessaie."
+          onRetry={() => void playlistsStore.getState().refresh()}
+        />
+      );
     return (
       <EmptyState
         icon={ListMusic}
@@ -116,6 +125,9 @@ function PlaylistPage({
   const rev = usePlaylists((s) => s.rev.get(id) ?? 0);
   const storeArt = usePlaylists((s) => s.art.get(id));
   const [tracks, setTracks] = useState<TrackRow[] | null>(null);
+  // Lecture des titres en échec : état d'erreur (jamais « playlist vide »), « Réessayer » relance.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
   const [entering, setEntering] = useState(false);
   const firstLoad = useRef(true);
 
@@ -125,18 +137,24 @@ function PlaylistPage({
     void playlistsStore
       .getState()
       .tracksOf(id)
-      .then((t) => {
+      .then((res) => {
         if (!alive) return;
-        setTracks(t);
+        if (!res.ok) {
+          setLoadFailed(true);
+          toast(`Impossible de lire ${quoted(row.name)}`, { icon: CircleAlert });
+          return;
+        }
+        setLoadFailed(false);
+        setTracks(res.tracks);
         if (firstLoad.current) {
           firstLoad.current = false;
-          if (m.enabled && t.length > 0) setEntering(true);
+          if (m.enabled && res.tracks.length > 0) setEntering(true);
         }
       });
     return () => {
       alive = false;
     };
-  }, [id, rev]);
+  }, [id, rev, retry]);
   useEffect(() => {
     if (!entering) return;
     const ms = staggerMs(99) + Math.round(m.d(ROW_IN_SEC) * 1000) + 80;
@@ -159,9 +177,19 @@ function PlaylistPage({
   const enter = useHeroEnter();
 
   // --- Lecture ---------------------------------------------------------------------------------
-  const isThisQueue = usePlayer((s) => tracks !== null && sameTrackList(s.queue, tracks));
-  const isPlaying = usePlayer((s) => tracks !== null && artistShowsPause(s.queue, s.status === "playing", tracks));
-  const playingIndex = usePlayer((s) => (isThisQueue ? s.currentIndex : -1));
+  // La file est celle de cette playlist : lancée d'ici (attribution par id, qui survit au retrait du
+  // titre en cours) ou identique à ses titres.
+  const owns = usePlaylistOwnsQueue(id);
+  const sameList = usePlayer((s) => tracks !== null && sameTrackList(s.queue, tracks));
+  const isThisQueue = owns || sameList;
+  const isPlaying = usePlayer(
+    (s) =>
+      tracks !== null &&
+      s.status === "playing" &&
+      (owns || artistShowsPause(s.queue, true, tracks)),
+  );
+  // Index de ligne seulement si la file a exactement ces titres ; sinon, repérage par id de titre.
+  const playingIndex = usePlayer((s) => (sameList ? s.currentIndex : -1));
   const currentId = usePlayer((s) => s.currentTrack?.id ?? null);
 
   const pulseRef = useRef<HTMLDivElement>(null);
@@ -175,12 +203,12 @@ function PlaylistPage({
   const playPause = (): void => {
     if (!tracks || tracks.length === 0) return;
     if (!isPlaying) pulse();
-    playPlaylist(row.name, tracks, actions);
+    playPlaylist(row, tracks, actions);
   };
   const shuffle = (): void => {
     if (!tracks || tracks.length === 0) return;
     pulse();
-    shufflePlaylist(row.name, tracks, actions);
+    shufflePlaylist(row, tracks, actions);
   };
 
   const tracksRef = useRef(list);
@@ -188,11 +216,11 @@ function PlaylistPage({
   const playAt = useCallback(
     (track: TrackRow, index: number): void => {
       const p = playerStore.getState();
-      const current = isThisQueue ? p.currentIndex === index : p.currentTrack?.id === track.id;
+      const current = sameList ? p.currentIndex === index : p.currentTrack?.id === track.id;
       if (current && canResume(p.status)) actions.togglePlay();
-      else actions.playAlbum(playlistAlbum(row.name, tracksRef.current), index);
+      else playPlaylistAt(row, tracksRef.current, index, actions);
     },
-    [actions, isThisQueue, row.name],
+    [actions, sameList, row],
   );
 
   // --- Sélection / focus (clés d'entrée : un titre peut figurer deux fois) ----------------------
@@ -220,12 +248,7 @@ function PlaylistPage({
   };
 
   // --- Mutations (optimistes, puis store → révision → relecture) --------------------------------
-  const reload = (): void => {
-    void playlistsStore
-      .getState()
-      .tracksOf(id)
-      .then((t) => setTracks(t));
-  };
+  const reload = (): void => setRetry((n) => n + 1);
 
   const reorderTo = (from: number, to: number): void => {
     if (!tracks || from === to || to < 0 || to >= tracks.length) return;
@@ -257,7 +280,16 @@ function PlaylistPage({
         toast(`${quoted(t.title)} retiré de ${quoted(row.name)}`, {
           icon: ListMinus,
           durationMs: 5000,
-          action: { label: "Annuler", onClick: () => void playlistsStore.getState().restoreAt(id, t.id, index) },
+          action: {
+            label: "Annuler",
+            onClick: () =>
+              void playlistsStore
+                .getState()
+                .restoreAt(id, t.id, index)
+                .then((restored) => {
+                  if (!restored) toast(`Impossible de remettre ${quoted(t.title)}`, { icon: CircleAlert });
+                }),
+          },
         });
       });
   };
@@ -420,7 +452,7 @@ function PlaylistPage({
   };
 
   const summary = tracks ? playlistSummary(tracks) : `${row.trackCount} ${row.trackCount > 1 ? "titres" : "titre"}`;
-  const heroStyle = { "--hero": tint ?? "#1c1c20", "--plv-in": `${m.d(ROW_IN_SEC)}s` } as React.CSSProperties;
+  const heroStyle = { "--hero": tint ?? "var(--surface-3)", "--plv-in": `${m.d(ROW_IN_SEC)}s` } as React.CSSProperties;
   const empty = tracks !== null && tracks.length === 0;
 
   return (
@@ -508,7 +540,13 @@ function PlaylistPage({
         />
       </motion.div>
 
-      {tracks === null ? (
+      {tracks === null && loadFailed ? (
+        <ErrorState
+          title="Impossible de lire cette playlist"
+          text="Ses titres n'ont pas pu être chargés. Ils ne sont pas perdus : réessaie."
+          onRetry={reload}
+        />
+      ) : tracks === null ? (
         <RowsSkeleton count={Math.min(8, Math.max(3, row.trackCount))} />
       ) : empty ? (
         <EmptyPlaylist name={shownName} />

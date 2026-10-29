@@ -1,7 +1,7 @@
 import type React from "react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ListEnd, ListMusic, ListStart, Pencil, Play, Plus, Shuffle, Trash2 } from "lucide-react";
+import { CircleAlert, ListEnd, ListMusic, ListStart, Pencil, Play, Plus, Shuffle, Trash2 } from "lucide-react";
 import type { PlaylistRow, TrackRow } from "../../shared/types";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
 import { playlistsByCreation } from "../lib/viewModels";
@@ -16,7 +16,7 @@ import { openMenu, type MenuItem } from "../ui/menuStore";
 import { PlaylistMosaic } from "../ui/PlaylistMosaic";
 import { quoted, toast } from "../ui/toastStore";
 import { useMotion } from "../ui/useMotion";
-import { GridSkeleton, PageHeader } from "./common";
+import { ErrorState, GridSkeleton, PageHeader } from "./common";
 import { anchorFromEvent } from "./menus";
 import { askDeletePlaylist, openNewPlaylist, renamePlaylistInPlace } from "./playlistActions";
 import { playPlaylist, shufflePlaylist } from "./playlistPlay";
@@ -48,6 +48,7 @@ export function playlistCountLabel(n: number): string {
 export function PlaylistsView({ actions }: PlaylistsViewProps): JSX.Element {
   const rows = usePlaylists((s) => s.rows);
   const loaded = usePlaylists((s) => s.loaded);
+  const error = usePlaylists((s) => s.error);
   const playlists = useMemo(() => playlistsByCreation(rows), [rows]);
   const [entering, setEntering] = useState(true);
 
@@ -61,6 +62,14 @@ export function PlaylistsView({ actions }: PlaylistsViewProps): JSX.Element {
 
   let body: JSX.Element;
   if (!loaded) body = <GridSkeleton count={6} />;
+  else if (error && playlists.length === 0)
+    body = (
+      <ErrorState
+        title="Impossible de charger les playlists"
+        text="La lecture de tes playlists a échoué. Elles ne sont pas perdues : réessaie."
+        onRetry={() => void playlistsStore.getState().refresh()}
+      />
+    );
   else if (playlists.length === 0) body = <PlaylistsEmpty />;
   else
     body = (
@@ -100,7 +109,12 @@ function NewPlaylistTile(): JSX.Element {
 
 /** Agit sur les titres d'une playlist depuis la grille (relus à la demande). */
 async function withTracks(p: PlaylistRow, run: (tracks: TrackRow[]) => void): Promise<void> {
-  const tracks = await playlistsStore.getState().tracksOf(p.id);
+  const res = await playlistsStore.getState().tracksOf(p.id);
+  if (!res.ok) {
+    toast(`Impossible de lire ${quoted(p.name)}`, { icon: CircleAlert });
+    return;
+  }
+  const tracks = res.tracks;
   if (tracks.length === 0) {
     toast(`${quoted(p.name)} est vide`, { icon: ListMusic });
     return;
@@ -113,12 +127,12 @@ export function playlistMenuItems(p: PlaylistRow, actions: RouteViewActions): Me
   const empty = p.trackCount === 0;
   const name = quoted(p.name);
   return [
-    { label: "Lire", icon: Play, disabled: empty, onSelect: () => void withTracks(p, (t) => playPlaylist(p.name, t, actions)) },
+    { label: "Lire", icon: Play, disabled: empty, onSelect: () => void withTracks(p, (t) => playPlaylist(p, t, actions)) },
     {
       label: "Aléatoire",
       icon: Shuffle,
       disabled: empty,
-      onSelect: () => void withTracks(p, (t) => shufflePlaylist(p.name, t, actions)),
+      onSelect: () => void withTracks(p, (t) => shufflePlaylist(p, t, actions)),
     },
     {
       label: "Lire ensuite",
@@ -163,7 +177,7 @@ export const PlaylistTile = memo(function PlaylistTile({
   const known = art[0] ? coverColorCache.peek(art[0]) : null;
 
   const open = useCallback((): void => uiStore.getState().navigate({ name: "playlist", id: p.id }), [p.id]);
-  const play = (): void => void withTracks(p, (t) => playPlaylist(p.name, t, actions));
+  const play = (): void => void withTracks(p, (t) => playPlaylist(p, t, actions));
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget || e.key !== "Enter") return;

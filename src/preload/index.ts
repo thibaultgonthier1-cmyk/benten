@@ -39,6 +39,7 @@ const api: BentenApi = {
     add: (id, trackIds) => invoke(CHANNELS.PLAYLISTS_ADD, id, trackIds),
     removeTrack: (id, position) => invoke(CHANNELS.PLAYLISTS_REMOVE, id, position),
     reorder: (id, from, to) => invoke(CHANNELS.PLAYLISTS_REORDER, id, from, to),
+    insertAt: (id, trackId, position) => invoke(CHANNELS.PLAYLISTS_INSERT_AT, id, trackId, position),
   },
   state: {
     get: (key) => invoke(CHANNELS.STATE_GET, key),

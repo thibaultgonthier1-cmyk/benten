@@ -41,6 +41,7 @@ import {
   removeSource,
   renamePlaylist,
   reorderPlaylist,
+  insertIntoPlaylist,
   searchTracks,
   setFavorite,
   setState,
@@ -466,6 +467,21 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
       requireInt(to, "playlists:reorder", "to"),
     );
   });
+
+  ipcMain.handle(
+    CHANNELS.PLAYLISTS_INSERT_AT,
+    (event, id: unknown, trackId: unknown, position: unknown): void => {
+      assertTrusted(event);
+      const pos = requireInt(position, "playlists:insert-at", "position");
+      if (pos < 0) throw new Error("playlists:insert-at: position must be >= 0");
+      insertIntoPlaylist(
+        db,
+        requireInt(id, "playlists:insert-at", "id"),
+        requireInt(trackId, "playlists:insert-at", "trackId"),
+        pos,
+      );
+    },
+  );
 
   ipcMain.handle(CHANNELS.STATE_GET, (event, key: unknown): string | undefined => {
     assertTrusted(event);

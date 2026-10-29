@@ -202,6 +202,8 @@ export interface BentenApi {
     removeTrack(id: number, position: number): Promise<void>;
     /** Déplace la piste de `from` vers `to`, re-densifie les positions. */
     reorder(id: number, from: number, to: number): Promise<void>;
+    /** Remet `trackId` à `position` en une transaction (annulation d'un retrait). */
+    insertAt(id: number, trackId: number, position: number): Promise<void>;
   };
   /** État applicatif persisté (magasin clé/valeur `app_state`) — reprise au lancement (Task 14A). */
   state: {

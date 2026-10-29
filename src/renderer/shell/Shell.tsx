@@ -12,6 +12,10 @@ import { FlyLayer } from "../ui/FlyLayer";
 import { PlaylistDialogs } from "../views/PlaylistDialogs";
 import { libraryStore } from "../state/library";
 import { bindSearchQuery } from "../state/searchSync";
+import { bindErrorToasts } from "../state/errorToasts";
+import { playlistsStore } from "../state/playlists";
+import { toast } from "../ui/toastStore";
+import { CircleAlert } from "lucide-react";
 import { uiStore } from "../state/ui";
 import "./shell.css";
 
@@ -63,6 +67,16 @@ export function Shell({ views, controls, player, topActions }: ShellProps): JSX.
 
   // Terme de recherche ↔ route `search` (précédent / suivant rendent le terme ; quitter vide le champ).
   useEffect(() => bindSearchQuery(uiStore, libraryStore), []);
+  // Échecs de lecture (bibliothèque, playlists) : un toast ; les pages montrent un état d'erreur.
+  useEffect(
+    () =>
+      bindErrorToasts({
+        library: libraryStore,
+        playlists: playlistsStore,
+        toast: (message) => void toast(message, { icon: CircleAlert }),
+      }),
+    [],
+  );
 
   return (
     <div className="shell">
