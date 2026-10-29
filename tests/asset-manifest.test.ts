@@ -60,7 +60,6 @@ describe("assets/manifest", () => {
       "ill.noResults",
       "ill.onboarding",
       "logo.animated",
-      "intro.gold",
     ];
     for (const id of pending) expect(assetUrl(id)).toBeNull();
   });
@@ -73,3 +72,4 @@ describe("assets/manifest", () => {
     expect(assetUrl(bad)).toBeNull();
   });
 });
+

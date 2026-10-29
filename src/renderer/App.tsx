@@ -8,6 +8,7 @@ import type { Album } from "./lib/library";
 import { Shell } from "./shell/Shell";
 import type { RouteViewActions } from "./shell/RouteView";
 import { MiniPlayer } from "./components/MiniPlayer";
+import { Intro } from "./components/Intro";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
 
@@ -127,6 +128,7 @@ export function App(): JSX.Element {
 
   return (
     <>
+      <Intro onDone={() => undefined} />
       <Shell views={views} controls={controls} player={<MiniPlayer controls={controls} />} />
 
       <NowPlaying controls={controls} />
@@ -139,3 +141,4 @@ export function App(): JSX.Element {
     </>
   );
 }
+

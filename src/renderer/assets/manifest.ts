@@ -48,10 +48,11 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
   "ill.noResults": null,
   "ill.onboarding": null,
   "logo.animated": null,
-  "intro.gold": null,
+  "intro.gold": url("./intro/gold.mp4"),
 });
 
 /** Url embarquée de la ressource, ou `null` tant qu'elle n'est pas produite (→ repli en code). */
 export function assetUrl(id: AssetId): string | null {
   return Object.prototype.hasOwnProperty.call(ASSET_MAP, id) ? ASSET_MAP[id] : null;
 }
+
