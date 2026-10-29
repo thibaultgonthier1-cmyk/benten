@@ -1,3 +1,4 @@
+import { appendFileSync, mkdirSync } from "node:fs";
 import { appendFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -71,6 +72,12 @@ export interface JournalWriter {
   append(entries: readonly DiagEntry[]): Promise<void>;
   /** Ajoute une entree du Main, horodatee maintenant. Ne rejette jamais. */
   log(entry: MainDiagEntry): Promise<void>;
+  /**
+   * Ajoute une entree du Main de facon SYNCHRONE (durable avant le retour), pour les evenements
+   * suivis d'une sortie immediate (`app.exit(1)`). Hors chaine asynchrone : une ecriture `log()`
+   * encore en vol peut atterrir apres (l'horodatage `t` fait foi). Ne leve jamais.
+   */
+  logSync(entry: MainDiagEntry): void;
   /** Chemin du fichier courant. */
   readonly file: string;
 }
@@ -125,6 +132,14 @@ export function createJournalWriter(
     file,
     append: (entries) => enqueue(entries),
     log: (entry) => enqueue([{ t: new Date().toISOString(), ...entry }]),
+    logSync: (entry) => {
+      try {
+        mkdirSync(dir, { recursive: true });
+        appendFileSync(file, JSON.stringify({ t: new Date().toISOString(), ...entry }) + "\n", "utf8");
+      } catch {
+        /* best-effort */
+      }
+    },
   };
 }
 

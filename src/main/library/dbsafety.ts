@@ -1,4 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +47,14 @@ export const BACKUP_MIN_INTERVAL_MS = 20 * 60 * 60 * 1000;
 const BACKUP_RE = /^benten-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.db$/;
 const BACKUP_ORPHAN_RE = /^benten-\d{8}-\d{6}\.db-(wal|shm)$/;
 const DB_SIDE_FILES = [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`] as const;
+/**
+ * Ordre de RETRAIT des originaux : `-wal` et `-shm` AVANT `benten.db`. Si un retrait echoue en
+ * route, il ne peut jamais rester un WAL perime qu'une base neuve/restauree rejouerait.
+ */
+const REMOVAL_ORDER = [`${DB_FILE}-wal`, `${DB_FILE}-shm`, DB_FILE] as const;
+/** Marqueur d'une copie pre-ouverture INACHEVEE (retire une fois la copie verifiee). */
+const PREOPEN_MARKER = "INCOMPLETE";
+const PREOPEN_DIR_RE = /^db-preopen-\d{8}-\d{6}(-\d+)?$/;
 
 /** Horodatage local `YYYYMMDD-HHmmss` (tri lexical = chronologique). */
 export function stamp(d: Date): string {
@@ -219,6 +237,32 @@ export interface OpenDbSafeOptions {
   openDbFn?: (path: string) => Database.Database;
   /** Injection (tests) : copie de fichier. Defaut `copyFileSync`. */
   copyFile?: CopyFile;
+  /** Injection (tests) : retrait d'un original apres sa copie verifiee. Defaut `rmSync`. */
+  removeFile?: (path: string) => void;
+}
+
+/**
+ * Supprime les copies pre-ouverture INACHEVEES (motif exact `db-preopen-<ts>` + marqueur
+ * `INCOMPLETE`) laissees par un echec de copie. Les copies COMPLETES (conservees par une
+ * recuperation : pieces a conviction) et tout dossier hors motif ne sont jamais touches.
+ */
+function cleanupPartialPreopens(userData: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(userData);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!PREOPEN_DIR_RE.test(name)) continue;
+    const dir = join(userData, name);
+    if (!existsSync(join(dir, PREOPEN_MARKER))) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 const safeLog = (log: OpenDbSafeOptions["log"], entry: DbJournalEntry): void => {
@@ -244,18 +288,24 @@ export function openDbSafe(
   const date = (opts.now ?? ((): Date => new Date()))();
   const openDbFn = opts.openDbFn ?? openDb;
   const copyFile = opts.copyFile ?? copyFileSync;
+  const removeFile = opts.removeFile ?? ((p: string): void => rmSync(p));
   const path = join(userData, DB_FILE);
 
-  // 1) Arret non propre : copie pre-ouverture sur disque, AVANT toute ouverture.
+  // 1) Arret non propre : copie pre-ouverture sur disque, AVANT toute ouverture. Le marqueur
+  //    `INCOMPLETE` est pose d'abord et retire une fois la copie verifiee.
   let preopenDir: string | null = null;
   if (existsSync(`${path}-wal`) || existsSync(`${path}-shm`)) {
     const dir = uniqueDir(userData, "db-preopen", date);
     try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, PREOPEN_MARKER), "");
       copyVerified(userData, dir, copyFile);
+      rmSync(join(dir, PREOPEN_MARKER));
       preopenDir = dir;
     } catch (err) {
-      // Copie impossible (disque plein...) : la copie partielle est laissee telle quelle ; on ouvre
-      // quand meme (la reprise WAL de SQLite est le cas nominal apres un crash) et on le consigne.
+      // Copie impossible (disque plein...) : la copie partielle reste marquee INCOMPLETE (nettoyee au
+      // prochain demarrage reussi) ; on ouvre quand meme (la reprise WAL de SQLite est le cas
+      // nominal apres un crash) et on le consigne.
       safeLog(opts.log, {
         kind: "process",
         event: "db",
@@ -281,6 +331,7 @@ export function openDbSafe(
       // Arret non propre detecte puis surmonte : consigne (correlation avec les incidents).
       safeLog(opts.log, { kind: "process", event: "db", action: "unclean-start", preopenDir, preopenCleared });
     }
+    cleanupPartialPreopens(userData); // copies inachevees d'un lancement precedent
     return { db, recovered: null };
   } catch (err) {
     if (!isRecoverable(err)) throw err;
@@ -290,9 +341,9 @@ export function openDbSafe(
   // 3) Mise a l'ecart : copie verifiee d'abord, retrait des originaux ensuite seulement.
   const corruptedDir = uniqueDir(userData, "db-corrupted", date);
   copyVerified(userData, corruptedDir, copyFile); // leve -> originaux intacts
-  for (const name of DB_SIDE_FILES) {
+  for (const name of REMOVAL_ORDER) {
     const src = join(userData, name);
-    if (existsSync(src)) rmSync(src);
+    if (existsSync(src)) removeFile(src); // leve -> abandon (aucun WAL perime ne subsiste)
   }
 
   // 4) Restauration de la sauvegarde saine la plus recente ; sinon base neuve.
@@ -379,9 +430,11 @@ export async function backupDb(
       .sort()
       .pop();
     const newestDate = newest ? parseBackupDate(newest) : null;
+    // Horloge reculee (plus recente « dans le futur », age < 0) : consideree FRAICHE — sinon on
+    // sauvegarderait a chaque lancement jusqu'a ce que l'horloge rattrape.
     const age = newestDate ? date.getTime() - newestDate.getTime() : Infinity;
     let dest: string | null = null;
-    if ((age < 0 || age >= BACKUP_MIN_INTERVAL_MS) && quickCheckOk(db)) {
+    if (age >= BACKUP_MIN_INTERVAL_MS && quickCheckOk(db)) {
       dest = join(dir, `benten-${stamp(date)}.db`);
       await db.backup(dest);
     }

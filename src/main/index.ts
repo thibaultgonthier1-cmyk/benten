@@ -103,7 +103,8 @@ app.whenReady().then(() => {
   try {
     opened = openDbSafe(userData, { log: (e) => j.log(e) }).db;
   } catch (err) {
-    void j.log({
+    // Synchrone : la ligne est sur disque AVANT `app.exit(1)` (pas de perte en vol).
+    j.logSync({
       kind: "process",
       event: "db",
       action: "fatal",

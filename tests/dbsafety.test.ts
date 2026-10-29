@@ -276,6 +276,102 @@ describe("openDbSafe — recuperation", () => {
     expect(readFileSync(join(pre, `${DB_FILE}-wal`), "utf8")).toBe("w");
   });
 
+  it("retrait des originaux : -wal et -shm AVANT benten.db (jamais de WAL perime face a une base neuve)", () => {
+    const file = join(ud, DB_FILE);
+    seedDb(file);
+    writeFileSync(`${file}-wal`, "w");
+    writeFileSync(`${file}-shm`, "s");
+    const removed: string[] = [];
+    let first = true;
+    const openDbFn = (p: string): Database.Database => {
+      if (first) {
+        first = false;
+        throw sqliteError("SQLITE_CORRUPT", "database disk image is malformed");
+      }
+      return openDb(p);
+    };
+    const removeFile = (p: string): void => {
+      removed.push(p.slice(ud.length + 1));
+      rmSync(p);
+    };
+    const { db } = openDbSafe(ud, { openDbFn, removeFile, now: at("2026-10-29T14:00:00") });
+    expect(removed).toEqual([`${DB_FILE}-wal`, `${DB_FILE}-shm`, DB_FILE]);
+    db.close();
+  });
+
+  it("echec du retrait de benten.db : -wal/-shm deja retires, base laissee en place, erreur relancee", () => {
+    const file = join(ud, DB_FILE);
+    seedDb(file);
+    writeFileSync(`${file}-wal`, "w");
+    writeFileSync(`${file}-shm`, "s");
+    const openDbFn = (): Database.Database => {
+      throw sqliteError("SQLITE_CORRUPT", "database disk image is malformed");
+    };
+    const removeFile = (p: string): void => {
+      if (p === file) throw new Error("EBUSY: locked by antivirus");
+      rmSync(p);
+    };
+    expect(() => openDbSafe(ud, { openDbFn, removeFile, now: at("2026-10-29T14:10:00") })).toThrow(/EBUSY/);
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(`${file}-wal`)).toBe(false);
+    expect(existsSync(`${file}-shm`)).toBe(false);
+    // Les trois fichiers ont bien ete copies avant tout retrait.
+    const bad = join(ud, "db-corrupted-20261029-141000");
+    expect(readdirSync(bad).sort()).toEqual([DB_FILE, `${DB_FILE}-shm`, `${DB_FILE}-wal`].sort());
+  });
+
+  it("copie pre-ouverture qui echoue mais ouverture reussie : la copie partielle est nettoyee aussitot", () => {
+    const file = join(ud, DB_FILE);
+    seedDb(file);
+    writeFileSync(`${file}-shm`, "s");
+    let n = 0;
+    const copyFile = (src: string, dest: string): void => {
+      if (dest.includes("db-preopen-") && ++n === 2) throw new Error("ENOSPC: disk full");
+      copyFileSync(src, dest);
+    };
+    const { db, recovered } = openDbSafe(ud, { copyFile, now: at("2026-10-29T15:30:00") });
+    expect(recovered).toBeNull();
+    expect(dirsStartingWith(ud, "db-preopen-")).toEqual([]);
+    db.close();
+  });
+
+  it("copie pre-ouverture partielle (echec) : marquee INCOMPLETE, puis nettoyee au prochain demarrage reussi", () => {
+    const file = join(ud, DB_FILE);
+    seedDb(file);
+    writeFileSync(`${file}-shm`, "s"); // arret non propre
+    // 1er lancement : la copie pre-ouverture echoue en route, puis l'ouverture echoue (BUSY) —
+    // le lancement avorte en laissant la copie partielle.
+    let n = 0;
+    const copyFile = (src: string, dest: string): void => {
+      if (dest.includes("db-preopen-") && ++n === 2) throw new Error("ENOSPC: disk full");
+      copyFileSync(src, dest);
+    };
+    const log = vi.fn();
+    const busy = (): Database.Database => {
+      throw sqliteError("SQLITE_BUSY");
+    };
+    expect(() =>
+      openDbSafe(ud, { copyFile, log, openDbFn: busy, now: at("2026-10-29T15:00:00") }),
+    ).toThrow("SQLITE_BUSY");
+    const partial = join(ud, "db-preopen-20261029-150000");
+    expect(existsSync(join(partial, "INCOMPLETE"))).toBe(true);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ action: "preopen-copy-failed" }));
+    // Copie pre-ouverture COMPLETE (laissee par une recuperation) et dossiers hors motif : conserves.
+    const complete = join(ud, "db-preopen-20261028-100000");
+    mkdirSync(complete);
+    writeFileSync(join(complete, DB_FILE), "forensic");
+    const odd = join(ud, "db-preopen-notes");
+    mkdirSync(odd);
+    writeFileSync(join(odd, "INCOMPLETE"), "");
+    // 2e demarrage reussi : seule la copie partielle au motif exact disparait.
+    const r2 = openDbSafe(ud, { now: at("2026-10-29T16:00:00") });
+    expect(r2.recovered).toBeNull();
+    expect(existsSync(partial)).toBe(false);
+    expect(existsSync(complete)).toBe(true);
+    expect(existsSync(odd)).toBe(true);
+    r2.db.close();
+  });
+
   it("sauvegardes douteuses ignorees (corrompue, 0 octet, souche sans table tracks) : on prend la saine", async () => {
     const file = join(ud, DB_FILE);
     seedDb(file);
@@ -359,6 +455,17 @@ describe("backupDb (sauvegardes quotidiennes)", () => {
         "notes.txt",
       ].sort(),
     );
+    db.close();
+  });
+
+  it("horloge reculee (plus recente dans le futur) : consideree fraiche, pas de sauvegarde", async () => {
+    const { db } = openDbSafe(ud);
+    const dir = join(ud, BACKUP_DIR);
+    expect(await backupDb(db, ud, { now: at("2026-11-05T08:00:00") })).not.toBeNull();
+    // L'horloge recule d'une semaine : la derniere sauvegarde parait « dans le futur ».
+    expect(await backupDb(db, ud, { now: at("2026-10-29T08:00:00") })).toBeNull();
+    expect(await backupDb(db, ud, { now: at("2026-10-30T08:00:00") })).toBeNull();
+    expect(readdirSync(dir)).toEqual(["benten-20261105-080000.db"]);
     db.close();
   });
 

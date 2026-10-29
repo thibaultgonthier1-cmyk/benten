@@ -135,6 +135,19 @@ describe("createJournalWriter (fichier + rotation)", () => {
     expect(String(cur[0]!.pad).startsWith("b")).toBe(true);
   });
 
+  it("logSync : ecriture DURABLE immediate (lisible sans attendre), jamais de levee", () => {
+    const logs = join(dir, "logs");
+    const w = createJournalWriter(logs);
+    w.logSync({ kind: "process", event: "db", action: "fatal", reason: "boom" });
+    // Aucun await : la ligne est deja sur disque (app.exit(1) peut suivre immediatement).
+    const [l] = readLines(join(logs, JOURNAL_FILE));
+    expect(l).toMatchObject({ kind: "process", event: "db", action: "fatal", reason: "boom" });
+    expect(typeof l!.t).toBe("string");
+    const blocker = join(dir, "blocked");
+    writeFileSync(blocker, "x");
+    expect(() => createJournalWriter(join(blocker, "logs")).logSync({ kind: "power", event: "x" })).not.toThrow();
+  });
+
   it("une erreur d'ecriture n'est jamais propagee", async () => {
     // Un FICHIER a la place du dossier de logs : mkdir/append echouent.
     const blocker = join(dir, "blocked");
