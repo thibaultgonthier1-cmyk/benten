@@ -13,6 +13,8 @@ import { execFile } from "node:child_process";
  * et rejette.
  */
 
+export type JobState = "queued" | "downloading" | "converting" | "done" | "error";
+
 const HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
 const SHORT_HOST = "youtu.be";
 const ID = /^[A-Za-z0-9_-]{11}$/;
@@ -153,4 +155,5 @@ export async function readYtDlpVersion(
 export async function readSumsFile(path: string): Promise<string> {
   return readFile(path, "utf8");
 }
+
 
