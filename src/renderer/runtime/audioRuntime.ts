@@ -25,8 +25,12 @@ export interface AudioRuntimeDeps {
 export interface AudioRuntime {
   engine: AudioEngine;
   controls: PlayerControls;
-  /** Arrête la boucle, détache le store, sauvegarde une dernière fois. Idempotent. */
-  dispose(): void;
+  /**
+   * Arrête la boucle, détache le store, sauvegarde une dernière fois. Idempotent. `closeContext`
+   * ferme aussi l'`AudioContext` courant (remplacement du runtime au HMR : jamais deux contextes
+   * vivants) ; sans lui, le contexte reste ouvert comme dans l'ancien nettoyage de l'App.
+   */
+  dispose(opts?: { closeContext?: boolean }): void;
 }
 
 const defaultCreateContext = (opts?: AudioContextOptions): AudioContext =>
@@ -43,6 +47,12 @@ const win = (): (Window & { __benten?: unknown }) | undefined =>
  * Runtime audio de l'application : UN SEUL moteur (AudioContext reel + NativeDecoder), branche sur
  * le store de lecture, pompe par une boucle rAF unique. Logique deplacee telle quelle depuis
  * l'effet d'`App.tsx` (Phase 3, Tache 2) — l'App doit l'appeler UNE seule fois.
+ *
+ * Pourquoi pas un effet React : le demarrage cree l'`AudioContext`, or un effet est rejoue
+ * (montage -> demontage -> montage) sous StrictMode, et le double rendu initial de React 18
+ * re-cree les refs. L'App l'appelle donc pendant le rendu, derriere un singleton de module
+ * (`ensureAudioRuntime`, qui gere aussi le HMR) : le runtime est cree exactement une fois et vit
+ * aussi longtemps que la page.
  */
 export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   const createContext = deps.createContext ?? defaultCreateContext;
@@ -164,7 +174,7 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
   }, SAVE_POSITION_THROTTLE_MS);
 
   let disposed = false;
-  const dispose = (): void => {
+  const dispose = (opts?: { closeContext?: boolean }): void => {
     if (disposed) return;
     disposed = true;
     cancelFrame(raf);
@@ -178,6 +188,9 @@ export function startAudioRuntime(deps: AudioRuntimeDeps = {}): AudioRuntime {
     const wd = win();
     if (import.meta.env.DEV && wd) {
       delete wd.__benten;
+    }
+    if (opts?.closeContext) {
+      void engine.getContext().close?.(); // un seul contexte vivant : le remplaçant créera le sien
     }
   };
 

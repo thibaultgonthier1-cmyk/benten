@@ -28,11 +28,37 @@ import { AddToPlaylistSheet } from "./components/AddToPlaylistSheet";
 let appRuntime: AudioRuntime | null = null;
 const ensureAudioRuntime = (): AudioRuntime => (appRuntime ??= startAudioRuntime());
 
+/**
+ * HMR (dev uniquement ; `import.meta.hot` est absent en production). Une re-execution de ce module
+ * remettrait la garde a zero et demarrerait un SECOND runtime (deux boucles tick(), deux
+ * `AudioContext`, deux ecrivains de « player »). Le runtime vivant est donc transmis au nouveau
+ * module via `hot.data` :
+ *  - meme `startAudioRuntime` (seul App.tsx a change) : on le REPREND tel quel — la lecture
+ *    continue, aucun contexte n'est cree ;
+ *  - `audioRuntime.ts` (ou une de ses dependances, ex. le store) a ete recharge : l'ancien est
+ *    dispose ET son contexte ferme AVANT que le nouveau ne soit cree au rendu suivant.
+ */
+interface HotRuntime {
+  runtime: AudioRuntime;
+  start: typeof startAudioRuntime;
+}
+const HOT_RUNTIME_KEY = "bentenAudioRuntime";
+const carried = import.meta.hot?.data[HOT_RUNTIME_KEY] as HotRuntime | undefined;
+if (carried) {
+  if (carried.start === startAudioRuntime) appRuntime = carried.runtime;
+  else carried.runtime.dispose({ closeContext: true });
+}
+import.meta.hot?.dispose((data) => {
+  data[HOT_RUNTIME_KEY] = appRuntime
+    ? ({ runtime: appRuntime, start: startAudioRuntime } satisfies HotRuntime)
+    : undefined;
+});
+
 export function App(): JSX.Element {
-  // UN SEUL moteur (AudioContext reel + NativeDecoder), cree une fois par le runtime audio.
-  const runtimeRef = useRef<AudioRuntime>();
-  if (!runtimeRef.current) runtimeRef.current = ensureAudioRuntime();
-  const { engine, controls } = runtimeRef.current;
+  // UN SEUL moteur (AudioContext reel + NativeDecoder), cree une fois par le runtime audio. Lu a
+  // chaque rendu (idempotent) plutot que fige dans un ref : apres un HMR qui remplace le runtime,
+  // un ref preserve par Fast Refresh pointerait encore vers l'ancien moteur dispose.
+  const { engine, controls } = ensureAudioRuntime();
 
   const albums = useLibrary((s) => s.albums);
   const loading = useLibrary((s) => s.loading);

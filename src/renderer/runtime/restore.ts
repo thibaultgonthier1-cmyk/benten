@@ -7,6 +7,11 @@ import { PLAYER_STATE_KEY } from "./audioRuntime";
 /** Garde « une seule fois » (au niveau du module : survit au double montage de StrictMode). */
 let restoreStarted = false;
 
+/** Tests uniquement : réarme la garde « une seule fois ». */
+export function __resetRestoreForTests(): void {
+  restoreStarted = false;
+}
+
 /**
  * Reprise de l'état de lecture au lancement (Task 14A) — EN PAUSE, sans aucun son automatique.
  * Ne s'exécute qu'une fois. Applique d'abord les préférences scalaires (volume/aléatoire/

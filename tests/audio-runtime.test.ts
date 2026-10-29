@@ -135,6 +135,19 @@ describe("startAudioRuntime", () => {
     expect(h.caf).toHaveBeenCalledTimes(1);
   });
 
+  it("dispose() garde le contexte ouvert par défaut ; dispose({closeContext}) le ferme", () => {
+    const h1 = harness();
+    const r1 = startAudioRuntime(h1);
+    r1.dispose();
+    expect(h1.contexts[0]!.closed).toBe(0);
+
+    const h2 = harness();
+    runtime = startAudioRuntime(h2);
+    runtime.dispose({ closeContext: true });
+    runtime.dispose({ closeContext: true }); // idempotent : une seule fermeture
+    expect(h2.contexts[0]!.closed).toBe(1);
+  });
+
   it("changement de qualité : nouveau contexte à la fréquence du mode, l'ANCIEN est fermé", async () => {
     const h = harness();
     runtime = startAudioRuntime(h);
