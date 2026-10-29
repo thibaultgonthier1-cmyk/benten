@@ -35,8 +35,34 @@ describe("assets/manifest", () => {
     }
   });
 
-  it("DA2 : rien n'est encore branché (null partout, DA4 remplira la carte)", () => {
-    for (const id of ASSET_IDS) expect(assetUrl(id)).toBeNull();
+  it("DA4 : les effets et textures validés sont branchés", () => {
+    const wired: readonly AssetId[] = [
+      "tex.goldLeaf",
+      "tex.lacquer",
+      "tex.seigaihaDisc",
+      "fx.pluck",
+      "fx.inkVeil",
+      "fx.goldFlakes",
+      "fx.ripple",
+    ];
+    for (const id of wired) {
+      const url = assetUrl(id);
+      expect(typeof url).toBe("string");
+      expect(url).not.toBe("");
+    }
+  });
+
+  it("DA4 : ce qui n'est pas encore approuvé garde son repli (null)", () => {
+    const pending: readonly AssetId[] = [
+      "tex.washi",
+      "ill.emptyLibrary",
+      "ill.emptyPlaylist",
+      "ill.noResults",
+      "ill.onboarding",
+      "logo.animated",
+      "intro.gold",
+    ];
+    for (const id of pending) expect(assetUrl(id)).toBeNull();
   });
 
   it("identifiant inconnu : rejeté au typage, et null à l'exécution", () => {

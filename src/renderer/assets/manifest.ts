@@ -3,9 +3,10 @@
  * effet vidéo, illustration, logo, intro). Chaque composant signature demande son url ici et, tant
  * qu'elle vaut `null`, rend son repli dessiné en code (permanent : c'est aussi la version Réduit).
  *
- * DA2 : rien n'est branché — toutes les entrées valent `null`. DA4 remplit la carte avec les
- * ressources validées (embarquées, hors-ligne). Les effets `fx.*` sont rendus sur fond noir
- * OPAQUE et composés par le CSS `mix-blend-mode: screen` (pas d'alpha VP9).
+ * DA4 : les effets et les textures validés sont branchés (4,98 Mo au total, très en dessous du
+ * plafond de 20 Mo). Les illustrations et l'intro restent `null` tant qu'elles ne sont pas
+ * approuvées. Les effets `fx.*` sont rendus sur fond noir OPAQUE et composés par le CSS
+ * `mix-blend-mode: screen` (pas d'alpha VP9).
  */
 
 export const ASSET_IDS = [
@@ -27,15 +28,21 @@ export const ASSET_IDS = [
 
 export type AssetId = (typeof ASSET_IDS)[number];
 
+/**
+ * `new URL(..., import.meta.url)` : Vite résout l'asset au build et laisse passer en dev.
+ * Les fichiers vivent sous `src/renderer/assets/` et sont donc embarqués, hors-ligne.
+ */
+const url = (relative: string): string => new URL(relative, import.meta.url).href;
+
 const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
-  "tex.goldLeaf": null,
-  "tex.lacquer": null,
-  "tex.seigaihaDisc": null,
+  "tex.goldLeaf": url("./tex/gold-leaf.png"),
+  "tex.lacquer": url("./tex/lacquer.png"),
+  "tex.seigaihaDisc": url("./tex/seigaiha-disc.png"),
   "tex.washi": null,
-  "fx.pluck": null,
-  "fx.inkVeil": null,
-  "fx.goldFlakes": null,
-  "fx.ripple": null,
+  "fx.pluck": url("./fx/pluck.webm"),
+  "fx.inkVeil": url("./fx/inkveil.webm"),
+  "fx.goldFlakes": url("./fx/goldflakes.webm"),
+  "fx.ripple": url("./fx/ripple.webm"),
   "ill.emptyLibrary": null,
   "ill.emptyPlaylist": null,
   "ill.noResults": null,
