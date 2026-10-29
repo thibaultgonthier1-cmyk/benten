@@ -5,7 +5,7 @@ import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme } from "./artprotocol";
 import { registerDiagnosticsIpc, registerIpc } from "./ipc";
 import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
-import { openDb } from "./library/db";
+import { backupDb, openDbSafe, wireDbClose } from "./library/dbsafety";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
 import { createWatcher, type WatchFactory, type WatcherHandle } from "./library/watcher";
@@ -27,7 +27,7 @@ if (process.env["ELECTRON_RENDERER_URL"]) {
 /** Journal audio (cree a `whenReady`, une fois `userData` connu). */
 let journal: JournalWriter | null = null;
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -55,11 +55,35 @@ function createWindow(): void {
   } else {
     void win.loadFile(join(__dirname, "../renderer/index.html"));
   }
+  return win;
 }
+
+/** Delai apres l'affichage de la fenetre avant la sauvegarde de la base (demarrage jamais ralenti). */
+const BACKUP_DELAY_MS = 5000;
 
 app.whenReady().then(() => {
   registerArtProtocol();
-  const db = openDb(join(app.getPath("userData"), "benten.db"));
+  const userData = app.getPath("userData");
+
+  // ── Journal audio (diagnostic des micro-coupures) ──────────────────────────────────────────
+  // `userData/logs/audio-journal.log` (+ un seul ancien `.1.log` apres 1 Mo). Le Renderer y
+  // ajoute ses entrees via `diagnostics:append` ; le Main y consigne lui-meme les evenements
+  // processus (service audio Chromium, renderer, fenetre, veille/reprise, recuperation de base).
+  // Cree AVANT l'ouverture de la base pour qu'une recuperation y soit consignee.
+  const j = createJournalWriter(join(userData, "logs"));
+  journal = j;
+  registerDiagnosticsIpc(j, {
+    appVersion: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+  });
+  attachMainJournal({ app, powerMonitor, log: (e) => j.log(e) });
+
+  // ── Base de bibliotheque crash-safe ────────────────────────────────────────────────────────
+  // Ouverture verifiee (quick_check) ; base corrompue -> fichiers mis a l'ecart dans
+  // `db-corrupted-<horodatage>/`, restauration de la derniere sauvegarde saine (ou base neuve),
+  // `app_state.dbRecovered`, entree de journal. L'app demarre normalement : la veille re-indexe.
+  const { db } = openDbSafe(userData, { log: (e) => j.log(e) });
 
   // ── Veille de dossiers (Task 14B) ────────────────────────────────────────────────────────────
   // Un seul watcher a la fois, pose sur l'ENSEMBLE des sources persistees. A chaque lot de re-scan
@@ -97,20 +121,14 @@ app.whenReady().then(() => {
 
   registerIpc(db, { onSourcesChanged: startWatcher });
 
-  // ── Journal audio (diagnostic des micro-coupures) ──────────────────────────────────────────
-  // `userData/logs/audio-journal.log` (+ un seul ancien `.1.log` apres 1 Mo). Le Renderer y
-  // ajoute ses entrees via `diagnostics:append` ; le Main y consigne lui-meme les evenements
-  // processus (service audio Chromium, renderer, fenetre, veille/reprise).
-  const j = createJournalWriter(join(app.getPath("userData"), "logs"));
-  journal = j;
-  registerDiagnosticsIpc(j, {
-    appVersion: app.getVersion(),
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
+  const win = createWindow();
+  // Sauvegarde tournante, UNE fois par lancement, apres l'affichage de la fenetre (asynchrone,
+  // differee) : `userData/db-backups/benten-<horodatage>.db`, 3 plus recentes gardees.
+  win.once("show", () => {
+    setTimeout(() => {
+      void backupDb(db, userData);
+    }, BACKUP_DELAY_MS);
   });
-  attachMainJournal({ app, powerMonitor, log: (e) => j.log(e) });
-
-  createWindow();
   // Demarre la veille sur les sources deja persistees (apres la creation de la fenetre).
   startWatcher();
 
@@ -120,6 +138,9 @@ app.whenReady().then(() => {
     watcher = null;
     if (previous) void previous.close();
   });
+  // Puis fermeture ORDONNEE de la base (checkpoint WAL final propre) — enregistree APRES la veille
+  // pour que celle-ci soit arretee d'abord.
+  wireDbClose(app, db);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
