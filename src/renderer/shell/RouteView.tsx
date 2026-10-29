@@ -1,5 +1,5 @@
 import type React from "react";
-import { useInsertionEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useInsertionEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion, type TargetAndTransition } from "framer-motion";
 import { Construction, FolderOpen } from "lucide-react";
 import { routeKey, sameRoute, uiStore, useUi, type Route } from "../state/ui";
@@ -10,8 +10,9 @@ import { libraryStore, useLibrary } from "../state/library";
 import { pageTransition } from "../theme/ds/motion";
 import type { Album } from "../lib/library";
 import { BentenMark } from "../ui/BentenMark";
+import { fxHostMounted, requestFx } from "../ui/FxOverlay";
 import { Button } from "../ui/Button";
-import { useMotion } from "../ui/useMotion";
+import { useMotion, useMotionLevel } from "../ui/useMotion";
 import { AlbumsView } from "../views/AlbumsView";
 import { AlbumView } from "../views/AlbumView";
 import { ArtistsView } from "../views/ArtistsView";
@@ -62,6 +63,7 @@ interface PageProps {
 export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX.Element {
   const route = useUi((s) => s.route);
   const m = useMotion();
+  const level = useMotionLevel();
   const t = pageTransition(m);
   const key = routeKey(route);
   const prevRef = useRef<Route>(route);
@@ -94,6 +96,13 @@ export function RouteView({ scrollRef, actions }: Omit<PageProps, "route">): JSX
     prevRef.current = route;
   }, [key]);
 
+  // Voile d'encre à la transition de page : niveau Complet uniquement (rien en Sobre ni en Réduit).
+  useEffect(() => {
+    if (level.fx !== "full") return;
+    if (!fxHostMounted()) return;
+    requestFx("inkVeil", { x: window.innerWidth / 2, y: window.innerHeight * 0.3 }, { level });
+    // Volontairement sur `key` : un changement de page, pas un changement de niveau.
+  }, [key]);
   // La page quittée s'efface d'un coup quand la pochette voyage OU quand le défilement change
   // (sinon elle sauterait pendant son fondu) ; la page album n'entre pas en fondu global.
   const variants = useMemo(
@@ -280,3 +289,5 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
+
