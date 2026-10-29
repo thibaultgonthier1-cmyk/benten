@@ -4,6 +4,8 @@ import { formatTime } from "../lib/library";
 import { Cover } from "./Cover";
 import { QualityBadge } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
+import { GoldMedallion } from "../ui/GoldMedallion";
+import { BiwaString } from "../ui/BiwaString";
 
 /** Pas de deplacement clavier du scrubber, en secondes. */
 const SEEK_STEP_SEC = 5;
@@ -88,17 +90,7 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
             <path d="M7 6v12M20 6L9 12l11 6z" />
           </svg>
         </button>
-        <button
-          className="play-btn"
-          type="button"
-          title={playing ? "Pause" : "Lecture"}
-          aria-label={playing ? "Pause" : "Lecture"}
-          onClick={controls.toggle}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            {playing ? <path d="M8 5h4v14H8zM14 5h4v14h-4z" /> : <path d="M8 5v14l11-7z" />}
-          </svg>
-        </button>
+                <GoldMedallion playing={playing} size="md" onToggle={controls.toggle} title={playing ? "Pause" : "Lecture"} />
         <button className="ic" type="button" title="Suivant" aria-label="Morceau suivant" onClick={controls.next}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M17 6v12M4 6l11 6L4 18z" />
@@ -146,27 +138,20 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
           </svg>
         </button>
         <span className="mp-time">{formatTime(positionSec)}</span>
-        <div
-          className="mp-bar"
-          role="slider"
-          tabIndex={0}
-          aria-label="Progression"
-          aria-valuemin={0}
-          aria-valuemax={Math.round(dur)}
-          aria-valuenow={Math.round(positionSec)}
-          aria-valuetext={`${formatTime(positionSec)} sur ${formatTime(dur)}`}
-          style={{ "--p": `${pct}%` } as React.CSSProperties}
-          onKeyDown={onBarKey}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            controls.seekFraction((e.clientX - r.left) / r.width);
-          }}
-        >
-          <i />
-        </div>
+                <BiwaString
+          className="mp-biwa"
+          value={frac}
+          onSeek={(fraction) => controls.seekFraction(fraction)}
+          playing={playing}
+          trackKey={trackId}
+          duration={dur}
+          label="Progression"
+        />
         <span className="mp-time">{formatTime(dur)}</span>
         <QualityBadge track={track} variant="pill" />
       </div>
     </div>
   );
 }
+
+
