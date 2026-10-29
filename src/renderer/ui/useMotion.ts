@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useReducedMotion } from "framer-motion";
 import { motionFor, type ResolvedMotion } from "../theme/ds/motion";
-import { useSettings } from "../state/settings";
+import { settingsStore, useSettings } from "../state/settings";
+import { motionLevel, type MotionLevel } from "../lib/motionLevel";
 
 /**
  * Mouvement effectif pour un composant : réglage d'intensité (store de réglages) combiné à
@@ -29,4 +30,23 @@ export function useSpringPress(disabled?: boolean): {
   const m = useMotion();
   if (!m.enabled || disabled) return {};
   return { whileHover: { scale: HOVER_SCALE }, whileTap: { scale: TAP_SCALE }, transition: m.spring };
+}
+
+/**
+ * Niveau de mouvement DA « Biwa & Or » (effets, éclats, vibration, rotation, ambiance) pour un
+ * composant signature : réglage d'intensité + `prefers-reduced-motion`, réactif aux deux.
+ */
+export function useMotionLevel(): MotionLevel {
+  const intensity = useSettings((s) => s.motionIntensity);
+  const prefersReduced = useReducedMotion() ?? false;
+  return motionLevel(intensity, prefersReduced);
+}
+
+/** Même résolution hors React (déclencheurs d'effets impératifs : `requestFx`). */
+export function currentMotionLevel(): MotionLevel {
+  const osReduced =
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+  return motionLevel(settingsStore.getState().motionIntensity, osReduced);
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo } from "react";
 import "./theme/tokens.css";
 import { playerStore } from "./state/player";
 import { libraryStore } from "./state/library";
@@ -10,6 +10,12 @@ import type { RouteViewActions } from "./shell/RouteView";
 import { MiniPlayer } from "./components/MiniPlayer";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
+
+/**
+ * Vitrine DEV-ONLY des composants signature DA2 (`window.__benten.signature.show()`). Chargée
+ * paresseusement derrière `import.meta.env.DEV` : absente du build de production.
+ */
+const SignatureShowcase = import.meta.env.DEV ? lazy(() => import("./dev/SignatureShowcase")) : null;
 
 /**
  * Runtime audio de la page : demarre UNE SEULE fois (garde au niveau du module). Sous StrictMode,
@@ -125,6 +131,11 @@ export function App(): JSX.Element {
 
       <NowPlaying controls={controls} />
       <QueuePanel />
+      {SignatureShowcase && (
+        <Suspense fallback={null}>
+          <SignatureShowcase engine={engine} controls={controls} />
+        </Suspense>
+      )}
     </>
   );
 }
