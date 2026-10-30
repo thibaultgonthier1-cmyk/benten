@@ -68,6 +68,16 @@ describe("buildYtDlpArgs — ffmpeg", () => {
     expect(args).toContain("mp3");
   });
 
+  it("déclare un runtime JS quand node est fourni (pas d''avertissement par titre)", () => {
+    const args = buildYtDlpArgs("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "C:\\out", null, "C:\\nodejs\\node.exe");
+    expect(args[args.indexOf("--js-runtimes") + 1]).toBe("node:C:\\nodejs\\node.exe");
+  });
+
+  it("n''ajoute rien quand node est introuvable", () => {
+    const args = buildYtDlpArgs("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "C:\\out", null, null);
+    expect(args).not.toContain("--js-runtimes");
+  });
+
   it("accepte un chemin réel", () => {
     const args = buildYtDlpArgs("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "C:\\out", "C:\\ffmpeg.exe");
     expect(args[args.indexOf("--ffmpeg-location") + 1]).toBe("C:\\ffmpeg.exe");
@@ -146,4 +156,5 @@ describe("ensureYtDlp", () => {
     expect(checksumFor(text, "missing.exe")).toBeNull();
   });
 });
+
 

@@ -22,7 +22,7 @@ const RELEASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
 const BINARY = "yt-dlp.exe";
 const SUMS = "SHA2-256SUMS";
 
-export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath?: string | null): string[] {
+export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath?: string | null, jsRuntimePath?: string | null): string[] {
   // `--ffmpeg-location` n''accepte QU''UN chemin réel : passer le mot « ffmpeg » produit
   // « ffmpeg-location ffmpeg does not exist » et laisse des .webm sans conversion. Quand le
   // chemin est inconnu, on omet l''option : yt-dlp trouve alors ffmpeg dans le PATH.
@@ -38,6 +38,9 @@ export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath?: string 
     "--newline",
   ];
   if (ffmpegPath && ffmpegPath.trim().length > 0) args.push("--ffmpeg-location", ffmpegPath);
+  // yt-dlp a besoin d'un runtime JS pour déchiffrer les signatures YouTube. Sans lui, un
+  // avertissement apparaît à chaque titre et certains formats deviennent inaccessibles.
+  if (jsRuntimePath && jsRuntimePath.trim().length > 0) args.push("--js-runtimes", `node:${jsRuntimePath}`);
   args.push("-o", join(outDir, "%(artist,uploader)s - %(title)s.%(ext)s"), url);
   return args;
 }
@@ -115,6 +118,7 @@ export async function readYtDlpVersion(
 export async function readSumsFile(path: string): Promise<string> {
   return readFile(path, "utf8");
 }
+
 
 
 

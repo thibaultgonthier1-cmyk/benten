@@ -188,10 +188,24 @@ app.whenReady().then(() => {
     }
   })();
   journal?.log({ kind: "process", event: "youtube.ffmpeg", path: ffmpegPath });
+
+  // Runtime JS pour yt-dlp : node, s'il est installé. Sans lui, chaque titre porte
+  // « No supported JavaScript runtime could be found » et certains formats sont limités.
+  const jsRuntimePath = (() => {
+    try {
+      const found = execFileSync("where.exe", ["node"], { encoding: "utf8", timeout: 8000 })
+        .split(/\r?\n/)[0]
+        ?.trim();
+      return found && existsSync(found) ? found : null;
+    } catch {
+      return null;
+    }
+  })();
   const youtubeManager = new YoutubeManager({
     binaryPath: ytBin,
     outputDir: youtubeDir,
     ffmpegPath,
+    jsRuntimePath,
     onProgress: (job) => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send(CHANNELS.YOUTUBE_PROGRESS, job);
     },
@@ -476,6 +490,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

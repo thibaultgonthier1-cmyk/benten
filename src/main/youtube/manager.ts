@@ -32,6 +32,8 @@ export interface YoutubeManagerOptions {
   outputDir: string;
   /** Chemin réel de ffmpeg ; absent → yt-dlp le cherche dans le PATH. */
   ffmpegPath?: string | null;
+  /** Chemin de node pour `--js-runtimes` ; absent → avertissement à chaque titre. */
+  jsRuntimePath?: string | null;
   spawnImpl?: typeof spawn;
   listFiles?: (dir: string) => Promise<string[]>;
   onProgress?: (job: YoutubeJob) => void;
@@ -106,7 +108,7 @@ export class YoutubeManager {
   }
 
   private async run(job: YoutubeJob): Promise<void> {
-    const { binaryPath, outputDir, ffmpegPath } = this.options;
+    const { binaryPath, outputDir, ffmpegPath, jsRuntimePath } = this.options;
     const list = this.options.listFiles ?? defaultListFiles;
     const before = new Set(await list(outputDir));
 
@@ -115,7 +117,7 @@ export class YoutubeManager {
     this.options.onProgress?.({ ...job });
 
     await new Promise<void>((resolve) => {
-      const child = (this.options.spawnImpl ?? spawn)(binaryPath, buildYtDlpArgs(job.url, outputDir, ffmpegPath), {
+      const child = (this.options.spawnImpl ?? spawn)(binaryPath, buildYtDlpArgs(job.url, outputDir, ffmpegPath, jsRuntimePath), {
         shell: false,
         windowsHide: true,
       });
@@ -199,5 +201,6 @@ async function pickNewest(dir: string, names: string[]): Promise<string | null> 
   }
   return best ? best.name : null;
 }
+
 
 
