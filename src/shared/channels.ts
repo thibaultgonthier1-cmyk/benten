@@ -20,12 +20,48 @@ export const CHANNELS = {
   PLAYLISTS_ADD: "playlists:add",
   PLAYLISTS_REMOVE: "playlists:remove",
   PLAYLISTS_REORDER: "playlists:reorder",
+  PLAYLISTS_INSERT_AT: "playlists:insert-at",
   STATE_GET: "state:get",
   STATE_SET: "state:set",
   /** Journal audio : le Renderer envoie des lots d'entrees, le Main les ajoute au fichier. */
   DIAGNOSTICS_APPEND: "diagnostics:append",
   /** Push Main -> Renderer (une voie) : la bibliotheque a change (veille de dossiers, Task 14B). */
   LIBRARY_CHANGED: "library:changed",
+  /** T15 — téléchargeur YouTube → MP3. */
+  YOUTUBE_ENQUEUE: "youtube:enqueue",
+  YOUTUBE_JOBS: "youtube:jobs",
+  YOUTUBE_STATUS: "youtube:status",
+  YOUTUBE_UPDATE: "youtube:update",
+  /** Playlists YouTube : aperçu et téléchargement des titres manquants. */
+  YOUTUBE_PLAYLIST_PREVIEW: "youtube:playlist-preview",
+  YOUTUBE_PLAYLIST_START: "youtube:playlist-start",
+  /** Cookies YouTube (playlists privées). */
+  YOUTUBE_SAVE_COOKIES: "youtube:save-cookies",
+  /** Source des cookies YouTube : fichier exporté ou lecture directe du navigateur. */
+  YOUTUBE_COOKIE_SOURCE: "youtube:cookie-source",
+  /** T16 — import d'une playlist Apple (aperçu puis création). */
+  IMPORT_PREVIEW: "import:preview",
+  IMPORT_COMMIT: "import:commit",
+  DIALOG_PICK_FILE: "dialog:pick-file",
+  /** Apple Music : cookies, aperçu d''une playlist, téléchargement. */
+  APPLE_STATUS: "apple:status",
+  APPLE_SAVE_COOKIES: "apple:save-cookies",
+  APPLE_PREVIEW: "apple:preview",
+  APPLE_START: "apple:start",
+  APPLE_CANCEL: "apple:cancel",
+  /** Push Main -> Renderer : avancement du téléchargement Apple. */
+  APPLE_PROGRESS: "apple:progress",
+  /** T17 — mode compact (fenêtre 420×132, toujours au premier plan). */
+  WINDOW_SET_COMPACT: "window:set-compact",
+  /** Push Main -> Renderer : un travail a changé d'état. */
+  YOUTUBE_PROGRESS: "youtube:progress",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
+
+
+
+
+
+

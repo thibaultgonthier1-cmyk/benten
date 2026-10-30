@@ -165,6 +165,9 @@ describe("artcache", () => {
       const res = await serveArt(`benten-art://${key}?size=256`, cacheDir);
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toBe("image/png");
+      // CORS ouvert (contenu public, adressé par hash) : le renderer peut le `fetch` (pochette des
+      // touches média servie en blob).
+      expect(res.headers.get("access-control-allow-origin")).toBe("*");
       expect(Buffer.from(await res.arrayBuffer()).equals(png)).toBe(true);
     });
 

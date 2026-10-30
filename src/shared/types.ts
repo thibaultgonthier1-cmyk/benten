@@ -68,10 +68,18 @@ export interface TrackRow {
   mtimeMs: number | null;
   /** Taille du fichier en octets (indexation incrémentale) ; `null` si inconnue. */
   sizeBytes: number | null;
+  /**
+   * Date d'ajout (ms epoch) = création du fichier (birthtime, repli mtime), figée à la première
+   * indexation : l'ordre d'ajout réel de la bibliothèque. `null` si inconnue.
+   */
+  addedAtMs: number | null;
 }
 
-/** Piste à insérer / mettre à jour (clé naturelle : `path`). */
-export type TrackInput = Omit<TrackRow, "id" | "albumId">;
+/**
+ * Piste à insérer / mettre à jour (clé naturelle : `path`). `addedAtMs` est facultatif : il n'est
+ * pris qu'à l'insertion (ou pour compléter une valeur NULL), jamais pour réécrire une date connue.
+ */
+export type TrackInput = Omit<TrackRow, "id" | "albumId" | "addedAtMs"> & { addedAtMs?: number | null };
 
 export interface AlbumRow {
   id: number;
@@ -141,6 +149,105 @@ export interface AudioDeviceInfo {
 export type QualityMode = "max" | "balanced" | "economy";
 
 /** API exposée au Renderer sous `window.benten` (contextBridge). */
+/** T15 — vue d'un travail de téléchargement YouTube côté Renderer. */
+export interface YoutubeJobView {
+  id: string;
+  url: string;
+  playlistId: number | null;
+  state: "queued" | "downloading" | "converting" | "done" | "error";
+  percent: number;
+  stage: "queue" | "download" | "convert";
+  error: string | null;
+  filePath: string | null;
+  addedAt: number;
+}
+
+/** T16 — élément d'aperçu d'import : titre de l'export et piste locale trouvée (ou non). */
+export interface ImportPreviewItem {
+  title: string;
+  artist: string;
+  matchedTrackId: number | null;
+  score: number;
+}
+
+/** T16 — résultat d'aperçu d'un export de playlist. */
+export interface ImportPreview {
+  items: ImportPreviewItem[];
+}
+
+/** YouTube — piste d''une playlist, avec son sort dans la bibliothèque locale. */
+export interface YoutubePlaylistItem {
+  title: string;
+  artist: string;
+  duration: number;
+  url: string;
+  inLibrary: boolean;
+  matchedTrackId: number | null;
+}
+
+/** YouTube — aperçu d''une playlist. */
+export interface YoutubePlaylistPreview {
+  ok: boolean;
+  name: string;
+  reason: string;
+  total: number;
+  missing: number;
+  items: YoutubePlaylistItem[];
+}
+
+/** Apple Music — état des prérequis (cookies + gamdl). */
+export interface AppleStatusView {
+  cookies: boolean;
+  cookiesUpdatedAt: number | null;
+  cookieEntries: number;
+  gamdl: boolean;
+  gamdlVersion: string | null;
+}
+
+/** Apple Music — piste d'une playlist, avec son sort dans la bibliothèque locale. */
+export interface ApplePreviewItem {
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  url: string;
+  /** Piste locale déjà présente (rien à télécharger). */
+  inLibrary: boolean;
+  matchedTrackId: number | null;
+}
+
+/** Apple Music — aperçu d'une playlist. */
+export interface ApplePreview {
+  ok: boolean;
+  name: string;
+  reason: string;
+  total: number;
+  missing: number;
+  items: ApplePreviewItem[];
+}
+
+/** Apple Music — avancement du téléchargement. */
+export interface AppleProgressView {
+  running: boolean;
+  done: number;
+  total: number;
+  workers: number;
+  error: string;
+}
+/** T15 — état du binaire yt-dlp. */
+/** Source des cookies YouTube (playlists privées). */
+export interface YoutubeCookieSourceView {
+  mode: "none" | "file" | "browser";
+  browser: string;
+  file: boolean;
+}
+
+export interface YoutubeStatusView {
+  installed: boolean;
+  version: string | null;
+  /** Cookies YouTube présents (playlists privées). */
+  cookies?: boolean;
+}
 export interface BentenApi {
   ping(): Promise<"pong">;
   library: {
@@ -194,6 +301,8 @@ export interface BentenApi {
     removeTrack(id: number, position: number): Promise<void>;
     /** Déplace la piste de `from` vers `to`, re-densifie les positions. */
     reorder(id: number, from: number, to: number): Promise<void>;
+    /** Remet `trackId` à `position` en une transaction (annulation d'un retrait). */
+    insertAt(id: number, trackId: number, position: number): Promise<void>;
   };
   /** État applicatif persisté (magasin clé/valeur `app_state`) — reprise au lancement (Task 14A). */
   state: {
@@ -217,6 +326,41 @@ export interface BentenApi {
    * fonction de désabonnement.
    */
   onLibraryChanged(cb: () => void): () => void;
+  apple: {
+    status(): Promise<AppleStatusView>;
+    saveCookies(text: string): Promise<AppleStatusView>;
+    preview(url: string): Promise<ApplePreview>;
+    start(urls: readonly string[]): Promise<AppleProgressView>;
+    cancel(): Promise<void>;
+    onProgress(cb: (progress: AppleProgressView) => void): () => void;
+  };
+  window: {
+    setCompact(on: boolean): Promise<{ compact: boolean }>;
+  };
+  importer: {
+    pickFile(): Promise<string | null>;
+    preview(path: string): Promise<ImportPreview>;
+    /**
+     * `playlistId` fourni → on AJOUTE à cette playlist en ignorant les titres déjà présents
+     * (re-import d'un export Apple après avoir ajouté des titres). Sinon → nouvelle playlist.
+     */
+    commit(args: {
+      name: string;
+      trackIds: readonly number[];
+      playlistId?: number | null;
+    }): Promise<{ playlistId: number; added: number; skipped: number }>;
+  };  youtube: {
+    enqueue(url: string): Promise<YoutubeJobView | null>;
+    jobs(): Promise<YoutubeJobView[]>;
+    status(): Promise<YoutubeStatusView>;
+    update(): Promise<YoutubeStatusView>;
+    playlistPreview(url: string): Promise<YoutubePlaylistPreview>;
+    playlistStart(urls: readonly string[]): Promise<YoutubeStatusView | { queued: number }>;
+    saveCookies(text: string): Promise<{ entries: number }>;
+    cookieSource(): Promise<YoutubeCookieSourceView>;
+    setCookieSource(value: { mode: "none" | "file" | "browser"; browser?: string }): Promise<YoutubeCookieSourceView>;
+    onProgress(cb: (job: YoutubeJobView) => void): () => void;
+  };
 }
 
 declare global {
@@ -224,3 +368,12 @@ declare global {
     benten: BentenApi;
   }
 }
+
+
+
+
+
+
+
+
+

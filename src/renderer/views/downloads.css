@@ -1,0 +1,300 @@
+/* Écran Téléchargements (T15) — or sur noir, cohérent avec la DA « Biwa & Or ». */
+.downloads-view {
+  padding: 34px 40px 48px;
+  max-width: 900px;
+}
+
+.dl-eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.85;
+}
+
+.downloads-view h1 {
+  margin: 6px 0 8px;
+  font-size: clamp(26px, 3vw, 34px);
+  letter-spacing: -0.02em;
+  color: var(--ivory);
+}
+
+.downloads-view p {
+  margin: 0 0 20px;
+  color: rgba(243, 239, 232, 0.62);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.downloads-view code {
+  font-size: 12.5px;
+  color: var(--gold-light);
+  background: rgba(240, 211, 138, 0.08);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+
+.dl-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.dl-form:focus-within {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 3px rgba(240, 211, 138, 0.14);
+}
+
+.dl-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.dl-form__icon {
+  color: rgba(240, 211, 138, 0.75);
+  flex: none;
+}
+
+.dl-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ivory);
+  font-size: 13.5px;
+  padding: 8px 0;
+  outline: none;
+}
+
+.dl-input.is-invalid {
+  color: rgba(255, 170, 160, 0.95);
+}
+
+.dl-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 2px 0;
+  font-size: 12px;
+}
+
+.dl-hint--bad {
+  color: #e08b7f;
+}
+
+.dl-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 2px 22px;
+  font-size: 12px;
+  color: rgba(243, 239, 232, 0.55);
+}
+
+.dl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.dl-dot.is-on {
+  background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(212, 170, 80, 0.16);
+}
+
+.dl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.dl-empty {
+  color: rgba(243, 239, 232, 0.4);
+  font-size: 13px;
+  padding: 18px 2px;
+}
+
+.dl-job {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 140px 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.dl-job.is-done {
+  border-color: rgba(212, 170, 80, 0.32);
+  background: linear-gradient(180deg, rgba(212, 170, 80, 0.08), rgba(212, 170, 80, 0.02));
+}
+
+.dl-job.is-error {
+  border-color: rgba(184, 40, 27, 0.45);
+  background: linear-gradient(180deg, rgba(184, 40, 27, 0.1), rgba(184, 40, 27, 0.03));
+}
+
+.dl-job__icon {
+  display: grid;
+  place-items: center;
+  color: var(--gold-light);
+}
+
+.dl-job.is-error .dl-job__icon {
+  color: #e0705f;
+}
+
+.dl-job__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dl-job__copy strong {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ivory);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-job__copy small {
+  font-size: 11.5px;
+  color: rgba(243, 239, 232, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-job__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.dl-job__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-deep), var(--gold), var(--gold-light));
+  transition: width 220ms ease;
+}
+
+.dl-job__pct {
+  font-size: 11.5px;
+  text-align: right;
+  color: rgba(243, 239, 232, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.is-spinning {
+  animation: dl-spin 900ms linear infinite;
+}
+
+@keyframes dl-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning { animation: none; }
+  .dl-job__bar i { transition: none; }
+}
+
+
+
+/* Playlists YouTube : bandeau d'aperçu (même langage que l'écran Apple). */
+.dl-playlist {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(240, 211, 138, 0.2);
+  background: linear-gradient(120deg, rgba(212, 170, 80, 0.08), rgba(212, 170, 80, 0.02));
+}
+
+.dl-playlist__copy strong {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ivory);
+}
+
+.dl-playlist__copy small {
+  font-size: 11.5px;
+  color: rgba(243, 239, 232, 0.55);
+}
+
+.dl-playlist__done {
+  font-size: 11.5px;
+  color: #5eead4;
+}
+
+/* Cookies YouTube : même logique que côté Apple, en plus discret. */
+.dl-cookies-line {
+  margin: 10px 2px 0;
+  font-size: 11.5px;
+  color: rgba(243, 239, 232, 0.45);
+}
+
+.dl-link {
+  border: 0;
+  background: none;
+  color: rgba(240, 211, 138, 0.8);
+  font-size: 11.5px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.dl-cookies {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.dl-textarea {
+  min-height: 84px;
+  resize: vertical;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--ivory);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+}
+
+.dl-cookies-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dl-select {
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #12100e;
+  color: var(--ivory);
+  font-size: 11.5px;
+}

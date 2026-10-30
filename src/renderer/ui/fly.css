@@ -1,0 +1,42 @@
+/* ============================================================
+   BENTEN — Pochette en vol vers la barre latérale (ajout à une playlist) + compteur roulant.
+   ============================================================ */
+
+.fly-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+/* Porteur du vol (FlyLayer) : position + transformation seulement. */
+.fly-cover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+/* Visuel en vol (FlightVisual) — point d'échange unique (futures paillettes d'or). */
+.fly-visual {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow:
+    0 12px 30px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 26px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Compteur roulant : chiffres empilés dans une fenêtre d'une ligne. */
+.roll {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+  vertical-align: top;
+}
+.roll__v {
+  display: inline-block;
+}

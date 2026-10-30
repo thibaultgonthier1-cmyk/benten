@@ -1,0 +1,571 @@
+/* ============================================================
+   BENTEN — Tuiles d'album, lignes de titre, pochettes, équaliseur (Phase 3, Tâche 6)
+   Fond noir ; la couleur vit sur les pochettes et les contrôles. Seuls transform/opacity
+   sont animés. Le réglage d'intensité (`data-motion` sur <html>) et prefers-reduced-motion
+   coupent transitions et cascades.
+   ============================================================ */
+
+/* ---------- Pochette « blur-up » ---------- */
+.cover-art {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    radial-gradient(120% 90% at 30% 20%, rgba(255, 255, 255, 0.06), transparent 60%),
+    var(--cover-ph, var(--surface-2));
+}
+.cover-art__img,
+.cover-art__blur,
+.cover-art__gen,
+.cover-art__gen svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* Copie floutée STATIQUE (pas d'animation de filtre) : elle n'existe que le temps de la révélation. */
+.cover-art__blur {
+  filter: blur(14px) saturate(1.15);
+  transform: scale(1.12);
+}
+.cover-art__img {
+  opacity: 0;
+  transform: scale(1.04);
+  transition:
+    opacity 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s,
+    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s;
+}
+.cover-art.is-reveal .cover-art__img,
+.cover-art.is-done .cover-art__img {
+  opacity: 1;
+  transform: none;
+}
+.cover-art.is-done .cover-art__img {
+  transition: none;
+}
+
+/* ---------- Équaliseur ---------- */
+.eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 15px;
+  height: 13px;
+  flex: none;
+}
+.eq i {
+  flex: 1;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--accent);
+  transform-origin: 50% 100%;
+  transform: scaleY(0.35);
+  animation: eq-wave 0.95s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+  will-change: transform;
+}
+.eq i:nth-child(2) {
+  animation-duration: 0.7s;
+  animation-delay: -0.35s;
+}
+.eq i:nth-child(3) {
+  animation-duration: 1.1s;
+  animation-delay: -0.6s;
+}
+.eq i:nth-child(4) {
+  animation-duration: 0.82s;
+  animation-delay: -0.2s;
+}
+@keyframes eq-wave {
+  from {
+    transform: scaleY(0.22);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+/* En pause (ou tout statut autre que « playing ») : les barres s'arrêtent et se posent bas, à
+   des hauteurs fixes — l'équaliseur ne mime plus une lecture en cours. */
+.eq.is-paused i {
+  animation: none;
+  transform: scaleY(0.3);
+}
+.eq.is-paused i:nth-child(2) {
+  transform: scaleY(0.5);
+}
+.eq.is-paused i:nth-child(3) {
+  transform: scaleY(0.22);
+}
+.eq.is-paused i:nth-child(4) {
+  transform: scaleY(0.4);
+}
+
+/* ---------- Tuile d'album ---------- */
+.album-tile {
+  --tile-r: 12px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  cursor: pointer;
+  outline: none;
+  border-radius: var(--tile-r);
+  -webkit-user-drag: element;
+}
+.album-tile__lift {
+  position: relative;
+  aspect-ratio: 1;
+  transition: transform 0.38s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+/* Halo à la couleur de la pochette : révélé au survol (opacité seule). */
+.album-tile__glow {
+  position: absolute;
+  inset: 14% 10% -4%;
+  border-radius: 50%;
+  filter: blur(26px);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+  pointer-events: none;
+}
+.album-tile__art {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--tile-r);
+  background: var(--surface-2);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 10px 28px rgba(0, 0, 0, 0.55);
+  isolation: isolate;
+}
+/* Ombre de survol plus profonde : un calque dont seule l'opacité change. */
+.album-tile__art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.38));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.album-tile__zoom {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: inherit;
+  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+.album-tile:hover .album-tile__lift,
+.album-tile:focus-visible .album-tile__lift {
+  transform: translateY(-6px);
+}
+.album-tile:hover .album-tile__zoom {
+  transform: scale(1.05);
+}
+.album-tile:hover .album-tile__glow,
+.album-tile:focus-visible .album-tile__glow {
+  opacity: 0.42;
+}
+.album-tile:hover .album-tile__art::after,
+.album-tile.is-playing .album-tile__art::after {
+  opacity: 1;
+}
+.album-tile:focus-visible .album-tile__art {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--focus-ring),
+    0 10px 28px rgba(0, 0, 0, 0.55);
+}
+
+/* Bouton lecture : monte et apparaît au survol ; reste visible sur l'album en cours. */
+.album-tile__play {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0 0 0 2px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--on-accent);
+  background: var(--grad-btn);
+  box-shadow:
+    var(--highlight-inner),
+    0 6px 18px rgba(212, 170, 80, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(10px) scale(0.88);
+  transition:
+    opacity 0.22s ease,
+    transform 0.32s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.album-tile__play.is-current {
+  padding-left: 0;
+}
+.album-tile:hover .album-tile__play,
+.album-tile:focus-visible .album-tile__play,
+.album-tile__play.is-current {
+  opacity: 1;
+  transform: none;
+}
+.album-tile__play:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+.album-tile__play:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.album-tile__play:disabled {
+  display: none;
+}
+
+/* Pastille équaliseur de l'album en cours. */
+.album-tile__eq {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.album-tile__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  height: 46px;
+  padding-top: 12px;
+  box-sizing: content-box;
+}
+.album-tile__title,
+.album-tile__artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.album-tile__title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0.005em;
+}
+.album-tile.is-playing .album-tile__title {
+  color: var(--accent);
+}
+.album-tile__artist {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.album-tile__artist:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.album-tile__artist.is-empty {
+  color: var(--text-faint);
+  cursor: inherit;
+}
+
+/* Cascade d'entrée (première page de la grille seulement). */
+.album-tile.is-entering {
+  animation: tile-enter 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--enter-delay, 0ms);
+}
+@keyframes tile-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- Ligne de titre ---------- */
+.track-row {
+  --row-cols: 40px minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) 40px 56px;
+  display: grid;
+  grid-template-columns: var(--row-cols);
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 12px 0 8px;
+  border-radius: var(--radius-m);
+  color: var(--text-dim);
+  font-size: 13.5px;
+  cursor: default;
+  outline: none;
+  transition: background-color 0.15s ease;
+}
+.track-row.no-album {
+  --row-cols: 40px minmax(0, 2fr) minmax(0, 1fr) 40px 56px;
+}
+.track-row:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+.track-row.is-selected {
+  background: rgba(255, 255, 255, 0.075);
+}
+.track-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring);
+}
+.track-row.is-unplayable {
+  opacity: 0.45;
+}
+
+.track-row__num {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 32px;
+  color: var(--text-faint);
+  font-size: 13.5px;
+}
+.track-row__n,
+.track-row__eq {
+  transition: opacity 0.12s ease;
+}
+.track-row__play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0 0 0 1px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity 0.15s ease,
+    transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.track-row__play:hover {
+  color: #fff;
+  background: var(--accent-soft);
+}
+.track-row:hover .track-row__play,
+.track-row:focus-visible .track-row__play {
+  opacity: 1;
+  transform: none;
+}
+.track-row:hover .track-row__n,
+.track-row:hover .track-row__eq,
+.track-row:focus-visible .track-row__n,
+.track-row:focus-visible .track-row__eq {
+  opacity: 0;
+}
+.track-row.is-playing .track-row__play {
+  color: var(--accent);
+}
+
+.track-row__title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+.track-row.is-playing .track-row__title {
+  color: var(--accent);
+}
+.track-row__artist,
+.track-row__album {
+  min-width: 0;
+  overflow: hidden;
+}
+.track-row__link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.track-row__link:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.track-row__fav {
+  display: grid;
+  place-items: center;
+}
+.track-row__heart {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease,
+    transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.track-row:hover .track-row__heart,
+.track-row:focus-visible .track-row__heart,
+.track-row__heart.is-on {
+  opacity: 1;
+}
+.track-row__heart:hover {
+  color: var(--text);
+}
+.track-row__heart:active {
+  transform: scale(0.86);
+}
+.track-row__heart.is-on {
+  color: var(--favorite);
+}
+.track-row__dur {
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: right;
+}
+
+/* ---------- Mouvement réduit ---------- */
+:root[data-motion="reduced"] .cover-art__img,
+:root[data-motion="reduced"] .album-tile__lift,
+:root[data-motion="reduced"] .album-tile__zoom,
+:root[data-motion="reduced"] .album-tile__play,
+:root[data-motion="reduced"] .track-row__play {
+  transition: none;
+}
+:root[data-motion="reduced"] .album-tile:hover .album-tile__lift,
+:root[data-motion="reduced"] .album-tile:focus-visible .album-tile__lift,
+:root[data-motion="reduced"] .album-tile:hover .album-tile__zoom {
+  transform: none;
+}
+:root[data-motion="reduced"] .eq i {
+  animation: none;
+}
+:root[data-motion="reduced"] .eq i:nth-child(1) {
+  transform: scaleY(0.55);
+}
+:root[data-motion="reduced"] .eq i:nth-child(2) {
+  transform: scaleY(0.9);
+}
+:root[data-motion="reduced"] .eq i:nth-child(3) {
+  transform: scaleY(0.4);
+}
+:root[data-motion="reduced"] .eq i:nth-child(4) {
+  transform: scaleY(0.7);
+}
+:root[data-motion="subtle"] .album-tile.is-entering {
+  animation-duration: 0.3s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cover-art__img,
+  .album-tile__lift,
+  .album-tile__zoom,
+  .album-tile__play,
+  .track-row__play {
+    transition: none;
+  }
+  .album-tile:hover .album-tile__lift,
+  .album-tile:focus-visible .album-tile__lift,
+  .album-tile:hover .album-tile__zoom {
+    transform: none;
+  }
+  .eq i {
+    animation: none;
+    transform: scaleY(0.6);
+  }
+}
+
+/* ---------- Mosaïque de playlist (Tâche 9) ---------- */
+.pl-mosaic {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--surface-2);
+}
+.pl-mosaic.is-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.pl-mosaic__cell {
+  position: relative;
+  overflow: hidden;
+}
+/* Playlist sans pochette : aplat « matière » teinté de l'accent, icône au trait. */
+.pl-mosaic.is-empty {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.55);
+  background:
+    radial-gradient(90% 80% at 28% 18%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 62%),
+    radial-gradient(70% 70% at 85% 90%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--surface-3), var(--surface-1));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/* DA3 — le bouton lecture des tuiles et des lignes est désormais le médaillon d'or
+   (`GoldMedallion size="sm"`). L'ancien fond rond est neutralisé : c'est le médaillon
+   qui porte la matière, pas son conteneur. */
+.album-tile__play,
+.track-row__play {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  color: inherit;
+  border: 0;
+}
+
+.album-tile__play {
+  width: 32px;
+  height: 32px;
+}
+
+.album-tile__play.is-current {
+  padding-left: 0;
+}

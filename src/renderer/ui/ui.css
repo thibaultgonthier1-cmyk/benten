@@ -1,0 +1,178 @@
+/* ============================================================
+   BENTEN — Briques du design system (Button, IconButton, Skeleton)
+   Matière douce : dégradé discret, reflet interne, ombre — jamais de relief 3D.
+   Les réactions (survol/appui) n'animent que transform (framer-motion) et opacity (calques).
+   ============================================================ */
+
+/* ---------- Button ---------- */
+.ui-btn {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  will-change: transform;
+}
+.ui-btn--s {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  gap: 6px;
+}
+/* Calque de survol : seule son opacité change. */
+.ui-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  z-index: -1;
+  pointer-events: none;
+}
+.ui-btn:hover:not(:disabled)::before {
+  opacity: 1;
+}
+.ui-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ui-btn__icon {
+  flex: none;
+}
+
+.ui-btn--primary {
+  color: var(--on-accent);
+  font-weight: 700;
+  background: var(--grad-btn);
+  box-shadow:
+    var(--highlight-inner),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 6px 18px rgba(212, 170, 80, 0.22);
+}
+.ui-btn--ghost {
+  color: var(--text);
+  background: var(--grad-surface), var(--surface-2);
+  box-shadow:
+    var(--highlight-inner),
+    inset 0 0 0 1px var(--line),
+    var(--shadow-1);
+}
+.ui-btn--subtle {
+  color: var(--text-dim);
+  background: transparent;
+}
+.ui-btn--subtle::before {
+  background: rgba(255, 255, 255, 0.06);
+}
+.ui-btn--subtle:hover:not(:disabled) {
+  color: var(--text);
+}
+
+/* ---------- IconButton ---------- */
+.ui-icon-btn {
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  will-change: transform;
+  transition: color 0.15s ease;
+}
+.ui-icon-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.07);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  z-index: -1;
+}
+.ui-icon-btn:hover:not(:disabled) {
+  color: var(--text);
+}
+.ui-icon-btn:hover:not(:disabled)::before {
+  opacity: 1;
+}
+.ui-icon-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.ui-icon-btn:disabled {
+  color: var(--text-faint);
+  opacity: 0.55;
+  cursor: default;
+}
+.ui-icon-btn.is-active {
+  color: var(--accent);
+}
+.ui-icon-btn--solid {
+  background: var(--grad-surface), var(--surface-2);
+  box-shadow:
+    var(--highlight-inner),
+    inset 0 0 0 1px var(--line);
+}
+
+/* ---------- Skeleton ---------- */
+.ui-skel {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.ui-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.055) 45%,
+    rgba(255, 255, 255, 0.055) 55%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: ui-shimmer 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes ui-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+:root[data-motion="reduced"] .ui-skel::after {
+  animation: none;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-skel::after {
+    animation: none;
+    opacity: 0;
+  }
+}

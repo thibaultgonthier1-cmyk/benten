@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import type Database from "better-sqlite3";
 import type { ScanSummary, TrackInput } from "../../shared/types";
+import { addedAtFromStat } from "./addedAt";
 import { getOrCreateArt } from "./artcache";
 import { readMetadata as defaultReadMetadata } from "./metadata";
 import { getTrackStat, upsertTracks } from "./repository";
@@ -32,14 +33,15 @@ export interface IndexOptions {
   /** Extraction/cache de pochette (injectable pour les tests) ; defaut : `getOrCreateArt`. */
   getArt?: (path: string) => Promise<string | null>;
   /** Stat du fichier (injectable pour les tests) ; defaut : `fs.promises.stat`. */
-  stat?: (path: string) => Promise<{ mtimeMs: number; size: number }>;
+  stat?: StatFn;
   concurrency?: number;
   batchSize?: number;
 }
 
 type ReadFn = (path: string) => Promise<TrackInput>;
 type ArtFn = (path: string) => Promise<string | null>;
-type StatFn = (path: string) => Promise<{ mtimeMs: number; size: number }>;
+/** `birthtimeMs` : date de creation (date d'ajout) ; absente / 0 → repli sur mtime. */
+type StatFn = (path: string) => Promise<{ mtimeMs: number; size: number; birthtimeMs?: number }>;
 
 /** Resout les options injectables une seule fois (lecture metadonnees / pochette / stat). */
 function resolveDeps(options: IndexOptions): { read: ReadFn; getArt: ArtFn; stat: StatFn } {
@@ -83,10 +85,14 @@ async function resolveTrack(
   // et la comparaison de saut doit porter sur la meme valeur.
   let mtimeMs: number | null = null;
   let sizeBytes: number | null = null;
+  // Date d'ajout = creation du fichier ; prise a l'insertion seulement (l'upsert garde une date
+  // deja connue : un re-tag ne change jamais l'ordre d'ajout).
+  let addedAtMs: number | null = null;
   try {
     const st = await stat(track.path);
     mtimeMs = Math.round(st.mtimeMs);
     sizeBytes = st.size;
+    addedAtMs = addedAtFromStat(st);
   } catch {
     // Stat indisponible : on laisse null (la pochette sera (re)lue).
   }
@@ -110,7 +116,7 @@ async function resolveTrack(
       artKey = null;
     }
   }
-  return { status: "ok", track: { ...track, artKey, mtimeMs, sizeBytes } };
+  return { status: "ok", track: { ...track, artKey, mtimeMs, sizeBytes, addedAtMs } };
 }
 
 /**

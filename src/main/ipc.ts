@@ -22,6 +22,10 @@ import type {
 } from "../shared/types";
 import { defaultOutputDevice, listOutputDevices } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
+import { parseImportFile } from "./importer/applePlaylist";
+import { matchTracks } from "./importer/matcher";
+import { onlyNewTrackIds } from "./importer/incremental";
+import type { AppleStatusView } from "../shared/types";
 import { validateDiagEntries, type JournalWriter } from "./journal";
 import {
   addSource,
@@ -41,6 +45,7 @@ import {
   removeSource,
   renamePlaylist,
   reorderPlaylist,
+  insertIntoPlaylist,
   searchTracks,
   setFavorite,
   setState,
@@ -330,10 +335,168 @@ export function registerDiagnosticsIpc(writer: JournalWriter, versions: Diagnost
 export interface IpcHooks {
   /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
   onSourcesChanged?: () => void;
+  /** Apple Music : prérequis, aperçu d'une playlist, téléchargement. Absent dans les tests. */
+  apple?: {
+    status(): Promise<AppleStatusView>;
+    saveCookies(text: string): Promise<AppleStatusView>;
+    preview(url: string): Promise<unknown>;
+    start(urls: readonly string[]): Promise<unknown>;
+    cancel(): Promise<void>;
+  };
+  /** T17 — passage en mode compact (fenêtre). Absent dans les tests. */
+  setCompact?: (on: boolean) => void;
+  /** T15 — téléchargeur YouTube. Fourni par le Main, absent dans les tests. */
+  youtube?: {
+    playlistPreview(url: unknown): Promise<unknown>;
+    playlistStart(urls: readonly string[]): Promise<unknown>;
+    saveCookies(text: string): Promise<{ entries: number }>;
+    cookieSource(): Promise<unknown>;
+    setCookieSource(value: unknown): Promise<unknown>;
+    enqueue(url: unknown): unknown;
+    jobs(): unknown;
+    status(): unknown;
+    update(): Promise<unknown>;
+  };
 }
 
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
+  // ── Apple Music : prérequis, aperçu, téléchargement ─────────────────────────────────────────
+  ipcMain.handle(CHANNELS.APPLE_STATUS, (event) => {
+    assertTrusted(event);
+    return hooks?.apple?.status() ?? { cookies: false, cookiesUpdatedAt: null, cookieEntries: 0, gamdl: false, gamdlVersion: null };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_SAVE_COOKIES, (event, text: unknown) => {
+    assertTrusted(event);
+    if (typeof text !== "string" || text.trim().length === 0) {
+      throw new Error("apple:save-cookies: le contenu des cookies est vide");
+    }
+    return hooks?.apple?.saveCookies(text) ?? { cookies: false, cookiesUpdatedAt: null, cookieEntries: 0, gamdl: false, gamdlVersion: null };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_PREVIEW, (event, url: unknown) => {
+    assertTrusted(event);
+    if (typeof url !== "string" || url.trim().length === 0) {
+      throw new Error("apple:preview: lien manquant");
+    }
+    return hooks?.apple?.preview(url) ?? { ok: false, name: "", reason: "indisponible", total: 0, missing: 0, items: [] };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_START, (event, urls: unknown) => {
+    assertTrusted(event);
+    if (!Array.isArray(urls) || urls.length === 0) throw new Error("apple:start: aucune piste à télécharger");
+    const clean = urls.map((value) => String(value));
+    return hooks?.apple?.start(clean) ?? { running: false, done: 0, total: 0, workers: 0, error: "indisponible" };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_CANCEL, async (event) => {
+    assertTrusted(event);
+    await hooks?.apple?.cancel();
+  });
+  // ── T17 — mode compact ───────────────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.WINDOW_SET_COMPACT, (event, on: unknown) => {
+    assertTrusted(event);
+    // Refus net d'un non-booléen : la fenêtre ne change jamais d'état sur une entrée douteuse.
+    if (typeof on !== "boolean") throw new Error("window:set-compact: on must be a boolean");
+    hooks?.setCompact?.(on);
+    return { compact: on };
+  });
+
+  // ── T16 — import d'une playlist Apple ────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.DIALOG_PICK_FILE, async (event): Promise<string | null> => {
+    assertTrusted(event);
+    const result = await dialog.showOpenDialog({
+      title: "Choisir un export de playlist",
+      properties: ["openFile"],
+      filters: [
+        { name: "Exports de playlist", extensions: ["txt", "m3u", "m3u8", "xml", "csv"] },
+        { name: "Tous les fichiers", extensions: ["*"] },
+      ],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(CHANNELS.IMPORT_PREVIEW, async (event, filePath: unknown) => {
+    assertTrusted(event);
+    const path = String(filePath ?? "");
+    if (!path) throw new Error("import:preview — chemin manquant");
+    const buffer = await readFile(path);
+    const parsed = parseImportFile(path, buffer);
+    const library = queryLibrary(db, { view: "tracks", limit: 5000 });
+    // `rows` porte les colonnes de la vue « titres » : c'est exactement ce que le matcher attend.
+    const matched = matchTracks(parsed, library.rows as never);
+    return {
+      items: matched.map((entry) => ({
+        title: entry.imported.title,
+        artist: entry.imported.artist,
+        matchedTrackId: entry.track ? entry.track.id : null,
+        score: entry.score,
+      })),
+    };
+  });
+
+  ipcMain.handle(CHANNELS.IMPORT_COMMIT, (event, payload: unknown) => {
+    assertTrusted(event);
+    const input = (payload ?? {}) as { name?: unknown; trackIds?: unknown; playlistId?: unknown };
+    const ids = requireIntArray(input.trackIds, "import:commit");
+    const target = input.playlistId;
+
+    // Ajout à une playlist existante : on ne réinsère que les titres absents. C'est ce qui permet
+    // de ré-exporter depuis Apple Music après avoir ajouté des titres, sans créer de doublon.
+    if (typeof target === "number" && Number.isInteger(target)) {
+      const existing = getPlaylistTracks(db, target).map((track) => track.id);
+      const fresh = onlyNewTrackIds(ids, existing);
+      if (fresh.length > 0) addToPlaylist(db, target, fresh);
+      return { playlistId: target, added: fresh.length, skipped: ids.length - fresh.length };
+    }
+
+    const name = requireName(input.name, "import:commit");
+    const playlistId = createPlaylist(db, name);
+    if (ids.length > 0) addToPlaylist(db, playlistId, ids);
+    return { playlistId, added: ids.length, skipped: 0 };
+  });
+  // ── T15 — YouTube → MP3 ──────────────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.YOUTUBE_ENQUEUE, (event, url: unknown) => {
+    assertTrusted(event);
+    return hooks?.youtube?.enqueue(url) ?? null;
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_PLAYLIST_PREVIEW, (event, url: unknown) => {
+    assertTrusted(event);
+    if (typeof url !== "string" || url.trim().length === 0) throw new Error("youtube:playlist-preview: lien manquant");
+    return (
+      hooks?.youtube?.playlistPreview(url) ?? { ok: false, name: "", reason: "indisponible", total: 0, missing: 0, items: [] }
+    );
+  });
+
+  ipcMain.handle(CHANNELS.YOUTUBE_PLAYLIST_START, (event, urls: unknown) => {
+    assertTrusted(event);
+    if (!Array.isArray(urls) || urls.length === 0) throw new Error("youtube:playlist-start: aucune piste");
+    return hooks?.youtube?.playlistStart(urls.map((value) => String(value))) ?? { queued: 0 };
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_COOKIE_SOURCE, async (event, value?: unknown) => {
+    assertTrusted(event);
+    if (value === undefined) return hooks?.youtube?.cookieSource() ?? { mode: "none", browser: "chrome", file: false };
+    return hooks?.youtube?.setCookieSource(value) ?? { mode: "none", browser: "chrome" };
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_SAVE_COOKIES, (event, text: unknown) => {
+    assertTrusted(event);
+    if (typeof text !== "string" || text.trim().length === 0) throw new Error("youtube:save-cookies: contenu vide");
+    return hooks?.youtube?.saveCookies(text) ?? { entries: 0 };
+  });
+
+  ipcMain.handle(CHANNELS.YOUTUBE_JOBS, (event) => {
+    assertTrusted(event);
+    return hooks?.youtube?.jobs() ?? [];
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_STATUS, (event) => {
+    assertTrusted(event);
+    return hooks?.youtube?.status() ?? { installed: false, version: null };
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_UPDATE, async (event) => {
+    assertTrusted(event);
+    return (await hooks?.youtube?.update()) ?? { installed: false, version: null };
+  });
   ipcMain.handle(CHANNELS.PING, (event): "pong" => {
     assertTrusted(event);
     return "pong";
@@ -467,6 +630,21 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     );
   });
 
+  ipcMain.handle(
+    CHANNELS.PLAYLISTS_INSERT_AT,
+    (event, id: unknown, trackId: unknown, position: unknown): void => {
+      assertTrusted(event);
+      const pos = requireInt(position, "playlists:insert-at", "position");
+      if (pos < 0) throw new Error("playlists:insert-at: position must be >= 0");
+      insertIntoPlaylist(
+        db,
+        requireInt(id, "playlists:insert-at", "id"),
+        requireInt(trackId, "playlists:insert-at", "trackId"),
+        pos,
+      );
+    },
+  );
+
   ipcMain.handle(CHANNELS.STATE_GET, (event, key: unknown): string | undefined => {
     assertTrusted(event);
     if (typeof key !== "string") throw new Error("state:get: key must be a string");
@@ -480,3 +658,13 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
+
+
+
+
+
+
+
+
+

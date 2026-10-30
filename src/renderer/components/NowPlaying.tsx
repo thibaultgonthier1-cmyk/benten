@@ -4,6 +4,7 @@ import { usePlayer, playerStore } from "../state/player";
 import { describeQuality, formatTime } from "../lib/library";
 import { useFocusTrap } from "../lib/focusTrap";
 import { coverAccent, Cover } from "./Cover";
+import { LacquerDisc } from "../ui/LacquerDisc";
 import { QualityBadge } from "./QualityBadge";
 import { QualitySheet } from "./QualitySheet";
 import type { PlayerControls } from "./controls";
@@ -118,6 +119,7 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
 
       <div className="np-body">
         <div className="np-stage">
+          <LacquerDisc artKey={null} tint={accent} playing={playing} className="np-disc" />
           <div className={"np-ring" + (playing ? " spin" : "")} aria-hidden="true" />
           <div className={"np-cover" + (playing ? " beat" : "")}>
             <Cover artKey={track.artKey} seed={seed} size={256} alt={track.album} />
@@ -273,3 +275,4 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
     </div>
   );
 }
+

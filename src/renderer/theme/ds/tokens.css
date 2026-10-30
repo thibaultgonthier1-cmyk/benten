@@ -1,0 +1,87 @@
+/* ============================================================
+   BENTEN — Design system Phase 3 : tokens
+   Fond noir pur ; toute la couleur vit sur le contenu. DA « Biwa & Or » : or pour
+   l'interactif et l'état, rouge laque en touche rare (favori actif, danger).
+   « Matière » douce : léger dégradé, reflet interne, ombre douce — jamais de 3D.
+   Chargé AVANT l'ancien theme/tokens.css (qui reste la source des composants existants
+   jusqu'à leur migration) ; les noms ci-dessous ne le recouvrent pas, sauf --line (même valeur).
+   ============================================================ */
+
+:root {
+  /* Couleur — fond et surfaces neutres (aucune teinte : la couleur est sur le contenu) */
+  --bg: #000;
+  --surface-1: #0b0b0d;
+  --surface-2: #131316;
+  --surface-3: #1c1c20;
+  --line: rgba(236, 233, 224, 0.1);
+  --line-strong: rgba(236, 233, 224, 0.18);
+  --text: #ece9e4;
+  --text-dim: #9b96a6;
+  --text-faint: #67626f;
+
+  /* DA « Biwa & Or » — or (interactif, état, focus), rouge laque (touches rares), ivoire */
+  --gold: #d4aa50;
+  --gold-light: #f0d38a;
+  --gold-deep: #8a6420;
+  --lacquer-red: #b8281b;
+  --lacquer-red-deep: #8e1e14;
+  --ivory: #f3efe8;
+
+  /* Accent de marque — l'or */
+  --accent: var(--gold);
+  --accent-press: #b8913f;
+  --accent-soft: rgba(212, 170, 80, 0.14);
+  /* Halo doux (lueurs, survols) : jamais comme indicateur de focus (trop faible sur noir). */
+  --accent-ring: rgba(212, 170, 80, 0.45);
+  /* Anneau de focus : or PLEIN, ≥ 3:1 sur #000 (WCAG 1.4.11). */
+  --focus-ring: var(--gold);
+  /* Favori actif (cœur) : rouge laque éclairci, ≥ 3:1 sur #000 ; --lacquer-red reste aux aplats. */
+  --favorite: #d9442f;
+  /* Texte « danger » (menus) : vermillon clair, ≥ 4.5:1 sur la surface du menu (WCAG 1.4.3). */
+  --danger-text: #f07a60;
+  /* Contenu posé sur un aplat d'or (icône du bouton lecture, texte du primaire) : jamais de blanc. */
+  --on-accent: #1a1206;
+
+  /* Matière : dégradé discret du bouton primaire (feuille d'or) + reflet interne */
+  --grad-btn: linear-gradient(180deg, #f0d38a 0%, #d4aa50 55%, #b8862f 100%);
+  --grad-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015));
+  --highlight-inner: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  /* Ombres douces (sur noir : profondeur suggérée, jamais de relief) */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 20px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 6px 16px rgba(0, 0, 0, 0.5), 0 18px 44px rgba(0, 0, 0, 0.5);
+
+  /* Rayons */
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --radius-xl: 24px;
+
+  /* Espacements (échelle 4 px) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Typographie embarquée (@fontsource, hors-ligne) */
+  --font-display: "Shippori Mincho", "Hiragino Mincho ProN", Georgia, serif;
+  --font-ui: "Zen Kaku Gothic New", "Helvetica Neue", Arial, system-ui, sans-serif;
+
+  /* Plans d'empilement */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-nav: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-menu: 60;
+  --z-toast: 70;
+  --z-intro: 100;
+
+  color-scheme: dark;
+}

@@ -1,6 +1,7 @@
 import type { AudioEngine } from "../audio/engine";
 import type { PlayerStore } from "../state/player";
 import type { Album } from "../lib/library";
+import type { TrackRow } from "../../shared/types";
 
 /**
  * Commandes de transport exposees a l'UI. Elles pilotent le moteur (source de verite du son) et
@@ -9,6 +10,8 @@ import type { Album } from "../lib/library";
 export interface PlayerControls {
   /** Charge et joue un album depuis `index`. */
   playAlbum(album: Album, index?: number): void;
+  /** Charge et joue une file arbitraire (aléatoire total, imports) depuis `index`. */
+  playTracks(tracks: readonly TrackRow[], index?: number): void;
   /** Lecture/pause selon l'etat courant. */
   toggle(): void;
   next(): void;
@@ -22,6 +25,11 @@ export function createControls(engine: AudioEngine, store: PlayerStore): PlayerC
     playAlbum(album, index = 0) {
       store.getState().setQueue(album.tracks, index);
       void engine.setQueue(album.tracks, index).then(() => engine.play());
+    },
+    playTracks(tracks, index = 0) {
+      if (tracks.length === 0) return;
+      store.getState().setQueue([...tracks], index);
+      void engine.setQueue([...tracks], index).then(() => engine.play());
     },
     toggle() {
       if (store.getState().status === "playing") engine.pause();
@@ -44,3 +52,4 @@ export function createControls(engine: AudioEngine, store: PlayerStore): PlayerC
     },
   };
 }
+

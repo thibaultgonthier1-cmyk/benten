@@ -2,10 +2,11 @@ import { useRef } from "react";
 import { usePlayer, playerStore } from "../state/player";
 import { artUrl, formatTime } from "../lib/library";
 import { useFocusTrap } from "../lib/focusTrap";
+import { jumpWithOrigin } from "../runtime/transportJournal";
 
 /**
  * Panneau « File d'attente » (DA Benten, feuille modale focus-trapped — meme ossature que la feuille
- * qualite). Montre la file : pistes PASSEES grisees, piste COURANTE surlignee (magenta), pistes A
+ * qualite). Montre la file : pistes PASSEES grisees, piste COURANTE surlignee (or), pistes A
  * VENIR. Actions par ligne : jouer (clic sur la ligne -> `jumpTo`, saut anti-clic), retirer (✕),
  * monter / descendre. Les mutations futures passent par le store, qui pilote le moteur SANS couper
  * la lecture courante (`updateQueue({keepCurrent:true})`).
@@ -22,9 +23,8 @@ export function QueuePanel(): JSX.Element {
   const close = (): void => playerStore.getState().setQueueOpen(false);
   useFocusTrap(ref, { active: open, onEscape: close });
 
-  const jump = (i: number): void => {
-    playerStore.getState().jumpTo(i);
-  };
+  // Consigné dans le journal audio (origine « ui ») puis exécuté tel quel.
+  const jump = (i: number): void => jumpWithOrigin(playerStore, i, "ui");
 
   return (
     <div className={"sheet-wrap queue-wrap" + (open ? " open" : "")} aria-hidden={!open}>

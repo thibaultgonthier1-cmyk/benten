@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Icône Benten : soleil d'or derrière un torii, sur laque noire. Dessinée pour rester
+       lisible à 16 px : deux formes seulement, contrastes francs, aucune fioriture. -->
+  <defs>
+    <radialGradient id="sun" cx="50%" cy="42%" r="58%">
+      <stop offset="0%" stop-color="#f7dfa0" />
+      <stop offset="55%" stop-color="#d4aa50" />
+      <stop offset="100%" stop-color="#a97f2e" />
+    </radialGradient>
+    <linearGradient id="lacquer" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#141210" />
+      <stop offset="100%" stop-color="#070606" />
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#lacquer)" />
+
+  <!-- Soleil -->
+  <circle cx="512" cy="470" r="290" fill="url(#sun)" />
+
+  <!-- Torii : kasagi courbé, shimaki, nuki, deux piliers -->
+  <g stroke="#f3efe8" stroke-linecap="round" fill="none">
+    <path d="M150 300 Q512 372 874 300" stroke-width="88" />
+    <path d="M232 430 H792" stroke-width="46" />
+    <path d="M196 600 H828" stroke-width="58" />
+    <path d="M300 470 V838" stroke-width="74" />
+    <path d="M724 470 V838" stroke-width="74" />
+  </g>
+</svg>

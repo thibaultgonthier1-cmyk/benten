@@ -20,6 +20,7 @@ import {
   getTrackByPath,
   getTracksByAlbum,
   getTracksByIds,
+  insertIntoPlaylist,
   isFavorite,
   removeFromPlaylist,
   removeSource,
@@ -411,6 +412,33 @@ describe("repository", () => {
     expect(positions(id).map((p) => p.position)).toEqual([0, 1, 2]);
   });
 
+  it("insertIntoPlaylist remet une piste à une position (transaction unique, positions denses, bornée)", () => {
+    const [t1, t2, t3] = seedTrackIds();
+    const id = createPlaylist(db, "P");
+    addToPlaylist(db, id, [t1, t2, t3]);
+    // Retraits successifs de A (t1) puis B (t2), annulés dans l'ordre inverse → A, B, C.
+    removeFromPlaylist(db, id, 0);
+    removeFromPlaylist(db, id, 0);
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t3]);
+    insertIntoPlaylist(db, id, t2, 0);
+    insertIntoPlaylist(db, id, t1, 0);
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t1, t2, t3]);
+    expect(positions(id).map((p) => p.position)).toEqual([0, 1, 2]);
+    // Au-delà de la fin : ajout en fin ; négatif : refusé sans écriture.
+    insertIntoPlaylist(db, id, t2, 99);
+    expect(getPlaylistTracks(db, id).map((t) => t.id)).toEqual([t1, t2, t3, t2]);
+    expect(() => insertIntoPlaylist(db, id, t2, -1)).toThrow();
+    expect(getPlaylistTracks(db, id)).toHaveLength(4);
+  });
+
+  it("insertIntoPlaylist : piste inconnue → échec, playlist inchangée (rollback)", () => {
+    const [t1] = seedTrackIds();
+    const id = createPlaylist(db, "P");
+    addToPlaylist(db, id, [t1]);
+    expect(() => insertIntoPlaylist(db, id, 999_999, 0)).toThrow();
+    expect(positions(id)).toEqual([{ trackId: t1, position: 0 }]);
+  });
+
   it("deletePlaylist cascades playlist_tracks (no orphan rows)", () => {
     const [t1, t2] = seedTrackIds();
     const id = createPlaylist(db, "P");
@@ -487,7 +515,7 @@ describe("repository", () => {
   });
 
   it("migrates by user_version and is reopenable", () => {
-    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    expect(db.pragma("user_version", { simple: true })).toBe(3);
     upsertTracks(db, records());
     const path = db.name;
     db.close();

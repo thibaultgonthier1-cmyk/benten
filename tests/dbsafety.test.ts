@@ -91,7 +91,7 @@ describe("openDbSafe — ouverture", () => {
   it("premier lancement (aucun fichier) : base neuve, pas une recuperation", () => {
     const { db, recovered } = openDbSafe(ud);
     expect(recovered).toBeNull();
-    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    expect(db.pragma("user_version", { simple: true })).toBe(3); // schema v3 (Phase 3 : tracks.added_at_ms)
     db.close();
   });
 
@@ -242,7 +242,7 @@ describe("openDbSafe — recuperation", () => {
     const { db, recovered } = openDbSafe(ud, { now: at("2026-10-29T12:00:00") });
     expect(recovered).not.toBeNull();
     expect(recovered!.restoredFrom).toBeNull(); // aucune sauvegarde : base neuve
-    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    expect(db.pragma("user_version", { simple: true })).toBe(3); // schema v3 (Phase 3 : tracks.added_at_ms)
     expect(getSources(db)).toEqual([]);
     const pre = join(ud, "db-preopen-20261029-120000");
     expect(recovered!.preopenDir).toBe(pre);

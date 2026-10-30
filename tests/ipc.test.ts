@@ -51,15 +51,34 @@ describe("registerIpc", () => {
   const call = (ch: string, event: unknown, ...args: unknown[]) =>
     Promise.resolve().then(() => handlers.get(ch)!(event, ...args));
 
+  it("window:set-compact refuse un non-booléen et n'appelle pas le hook", async () => {
+    const calls: boolean[] = [];
+    handlers.clear();
+    const fresh = openDb(join(dir, "compact.db"));
+    registerIpc(fresh, { setCompact: (on) => calls.push(on) });
+    await expect(call("window:set-compact", trusted, "yes")).rejects.toThrow(/boolean/);
+    expect(calls).toEqual([]);
+    await expect(call("window:set-compact", trusted, true)).resolves.toEqual({ compact: true });
+    expect(calls).toEqual([true]);
+    fresh.close();
+  });
   it("enregistre ping, library:*, audio:*, dialog:pick-folder, sources:*, favorites:* et playlists:*", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
+      "apple:cancel",
+      "apple:preview",
+      "apple:save-cookies",
+      "apple:start",
+      "apple:status",
       "audio:default-device",
       "audio:list-devices",
       "audio:read-file",
+      "dialog:pick-file",
       "dialog:pick-folder",
       "favorites:list",
       "favorites:toggle",
+      "import:commit",
+      "import:preview",
       "library:query",
       "library:scan",
       "library:search",
@@ -67,6 +86,7 @@ describe("registerIpc", () => {
       "playlists:add",
       "playlists:create",
       "playlists:delete",
+      "playlists:insert-at",
       "playlists:list",
       "playlists:remove",
       "playlists:rename",
@@ -76,6 +96,15 @@ describe("registerIpc", () => {
       "sources:remove",
       "state:get",
       "state:set",
+      "window:set-compact",
+      "youtube:cookie-source",
+      "youtube:enqueue",
+      "youtube:jobs",
+      "youtube:playlist-preview",
+      "youtube:playlist-start",
+      "youtube:save-cookies",
+      "youtube:status",
+      "youtube:update",
     ]);
   });
 
@@ -153,6 +182,12 @@ describe("registerIpc", () => {
     await call("playlists:remove", trusted, id, 0);
     expect(await ids()).toEqual([t1]);
 
+    // Annulation d'un retrait : remise en place atomique.
+    await call("playlists:insert-at", trusted, id, t2, 0);
+    expect(await ids()).toEqual([t2, t1]);
+    await call("playlists:remove", trusted, id, 0);
+    expect(await ids()).toEqual([t1]);
+
     await call("playlists:rename", trusted, id, "Renamed");
     const list = (await call("playlists:list", trusted)) as {
       id: number;
@@ -176,11 +211,15 @@ describe("registerIpc", () => {
     await expect(call("playlists:add", trusted, 1, "nope")).rejects.toThrow(/playlists:add/);
     await expect(call("playlists:remove", trusted, 1, 1.5)).rejects.toThrow(/playlists:remove/);
     await expect(call("playlists:reorder", trusted, 1, 0, "x")).rejects.toThrow(/playlists:reorder/);
+    await expect(call("playlists:insert-at", trusted, 1, 1, 1.5)).rejects.toThrow(/playlists:insert-at/);
+    await expect(call("playlists:insert-at", trusted, 1, "x", 0)).rejects.toThrow(/playlists:insert-at/);
+    await expect(call("playlists:insert-at", trusted, 1, 1, -1)).rejects.toThrow(/playlists:insert-at/);
 
     // Expéditeur non fiable.
     await expect(call("playlists:list", evil)).rejects.toThrow(/untrusted sender/);
     await expect(call("playlists:create", evil, "x")).rejects.toThrow(/untrusted sender/);
     await expect(call("playlists:tracks", evil, 1)).rejects.toThrow(/untrusted sender/);
+    await expect(call("playlists:insert-at", evil, 1, 1, 0)).rejects.toThrow(/untrusted sender/);
   });
 
   it("favorites:toggle persiste un favori, favorites:list le renvoie, garde l'id entier et l'expediteur fiable", async () => {
@@ -560,3 +599,13 @@ describe("normalizePage / validateScanPaths", () => {
     expect(validateScanPaths([FIX])).toEqual([FIX]);
   });
 });
+
+
+
+
+
+
+
+
+
+

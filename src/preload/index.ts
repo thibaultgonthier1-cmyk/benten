@@ -39,6 +39,7 @@ const api: BentenApi = {
     add: (id, trackIds) => invoke(CHANNELS.PLAYLISTS_ADD, id, trackIds),
     removeTrack: (id, position) => invoke(CHANNELS.PLAYLISTS_REMOVE, id, position),
     reorder: (id, from, to) => invoke(CHANNELS.PLAYLISTS_REORDER, id, from, to),
+    insertAt: (id, trackId, position) => invoke(CHANNELS.PLAYLISTS_INSERT_AT, id, trackId, position),
   },
   state: {
     get: (key) => invoke(CHANNELS.STATE_GET, key),
@@ -50,7 +51,46 @@ const api: BentenApi = {
   // Abonnement au push « library:changed » (Task 14B). On enveloppe un listener qui ignore les
   // arguments IPC (event/payload) et n'expose au Renderer qu'un callback sans argument. La valeur
   // de retour est une fonction de desabonnement (retire le listener).
-  onLibraryChanged: (cb) => {
+  apple: {
+    status: () => invoke(CHANNELS.APPLE_STATUS),
+    saveCookies: (text) => invoke(CHANNELS.APPLE_SAVE_COOKIES, text),
+    preview: (url) => invoke(CHANNELS.APPLE_PREVIEW, url),
+    start: (urls) => invoke(CHANNELS.APPLE_START, urls),
+    cancel: () => invoke(CHANNELS.APPLE_CANCEL),
+    onProgress: (cb) => {
+      const listener = (_e: unknown, progress: Parameters<typeof cb>[0]): void => cb(progress);
+      ipcRenderer.on(CHANNELS.APPLE_PROGRESS, listener);
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.APPLE_PROGRESS, listener);
+      };
+    },
+  },
+  window: {
+    setCompact: (on) => invoke(CHANNELS.WINDOW_SET_COMPACT, on),
+  },
+  importer: {
+    pickFile: () => invoke(CHANNELS.DIALOG_PICK_FILE),
+    preview: (path) => invoke(CHANNELS.IMPORT_PREVIEW, path),
+    commit: (args) => invoke(CHANNELS.IMPORT_COMMIT, args),
+  },
+  youtube: {
+    enqueue: (url) => invoke(CHANNELS.YOUTUBE_ENQUEUE, url),
+    jobs: () => invoke(CHANNELS.YOUTUBE_JOBS),
+    status: () => invoke(CHANNELS.YOUTUBE_STATUS),
+    update: () => invoke(CHANNELS.YOUTUBE_UPDATE),
+    playlistPreview: (url) => invoke(CHANNELS.YOUTUBE_PLAYLIST_PREVIEW, url),
+    playlistStart: (urls) => invoke(CHANNELS.YOUTUBE_PLAYLIST_START, urls),
+    saveCookies: (text) => invoke(CHANNELS.YOUTUBE_SAVE_COOKIES, text),
+    cookieSource: () => invoke(CHANNELS.YOUTUBE_COOKIE_SOURCE),
+    setCookieSource: (value) => invoke(CHANNELS.YOUTUBE_COOKIE_SOURCE, value),
+    onProgress: (cb) => {
+      const listener = (_e: unknown, job: Parameters<typeof cb>[0]): void => cb(job);
+      ipcRenderer.on(CHANNELS.YOUTUBE_PROGRESS, listener);
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.YOUTUBE_PROGRESS, listener);
+      };
+    },
+  },  onLibraryChanged: (cb) => {
     const listener = (): void => cb();
     ipcRenderer.on(CHANNELS.LIBRARY_CHANGED, listener);
     return () => {
@@ -60,3 +100,10 @@ const api: BentenApi = {
 };
 
 contextBridge.exposeInMainWorld("benten", api);
+
+
+
+
+
+
+

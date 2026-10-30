@@ -5,6 +5,8 @@ export interface CdpArgs {
   port: number;
   timeout: number;
   expr?: string;
+  /** Chemin du PNG à écrire via `Page.captureScreenshot` (option `--screenshot`). */
+  screenshot?: string;
 }
 
 export function parseArgs(argv: string[]): CdpArgs;

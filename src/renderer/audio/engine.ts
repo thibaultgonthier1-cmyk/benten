@@ -107,6 +107,8 @@ const PREV_RESTART_SEC = 3;
 /** Duree du fondu de gain anti-clic lors d'un changement manuel (next/prev/replay). */
 const FADE_SEC = 0.005;
 
+const EQ_FREQUENCIES = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
+
 export class AudioEngine {
   // NON `readonly` : `rebuildContext` (Task 13) echange le contexte + le decodeur et reconstruit le
   // graphe sur le nouveau contexte. L'INSTANCE du moteur, elle, ne change jamais (le pont dev et le
@@ -121,6 +123,9 @@ export class AudioEngine {
   private gain!: GainNode;
   private analyser!: AnalyserNode;
   private volumeGain!: GainNode;
+  // Egaliseur (T17B) : chaine de 10 BiquadFilter entre le volume et la destination. Isoles du
+  // `gain` (fondus anti-clic) et de l'`analyser` (lecture seule) : rien d'autre ne les touche.
+  private eqFilters: BiquadFilterNode[] = [];
   /** Volume utilisateur [0,1], conserve hors graphe pour etre reapplique apres un rebuild. */
   private userVolume = 1;
   /** Piste courante (ligne complete) : necessaire pour la recharger lors d'un rebuild de contexte. */
@@ -212,10 +217,64 @@ export class AudioEngine {
     this.volumeGain = this.context.createGain();
     this.gain.connect(this.analyser);
     this.analyser.connect(this.volumeGain);
-    this.volumeGain.connect(this.context.destination);
+    this.buildEq();
     this.applyVolumeToNode();
   }
 
+  /**
+   * Construit la chaîne d'égalisation (T17B) : `volumeGain -> f0 -> … -> f9 -> destination`.
+   * Les filtres existent TOUJOURS (gain 0 dB au départ) : activer l'égaliseur ne recolle jamais le
+   * graphe, donc aucun clic et aucun risque de couper le son par erreur.
+   */
+  private buildEq(): void {
+    // Contexte simulé sans fabrique de filtres (bancs de test anciens) : on se contente de relier
+    // le volume à la destination, comme avant l'égaliseur. Chromium fournit toujours la fabrique.
+    if (typeof this.context.createBiquadFilter !== "function") {
+      this.eqFilters = [];
+      this.volumeGain.connect(this.context.destination);
+      return;
+    }
+    this.eqFilters = EQ_FREQUENCIES.map((frequency: number, index: number) => {
+      const filter = this.context.createBiquadFilter();
+      // Bande 0 : shelving bas ; dernière : shelving haut ; au centre : cloches.
+      filter.type = index === 0 ? "lowshelf" : index === EQ_FREQUENCIES.length - 1 ? "highshelf" : "peaking";
+      filter.frequency.value = frequency;
+      filter.Q.value = 1.1;
+      filter.gain.value = 0;
+      return filter;
+    });
+    // Chaîne STRICTE : volume -> f0 -> f1 -> … -> f9 -> destination. Aucun chemin parallèle, donc
+    // aucun contournement de l'égaliseur (une sortie directe vers la destination réintroduirait le
+    // signal non égalisé et doublerait le son).
+    let node: AudioNode = this.volumeGain;
+    for (const filter of this.eqFilters) {
+      node.connect(filter);
+      node = filter;
+    }
+    node.connect(this.context.destination);
+  }
+
+  /** Gains des 10 bandes en dB (bornés à ±12). `null`/vide → tout à 0. */
+  setEqGains(gainsDb: readonly number[]): void {
+    const values = EQ_FREQUENCIES.map((_: number, index: number) => {
+      const value = Number(gainsDb[index] ?? 0);
+      return clamp(Number.isFinite(value) ? value : 0, -12, 12);
+    });
+    this.eqFilters.forEach((filter, index) => {
+      const target = values[index]!;
+      const gp = filter.gain;
+      if (typeof gp.setValueAtTime === "function" && typeof gp.value === "number") {
+        gp.setValueAtTime(target, this.context.currentTime);
+      } else if (typeof gp.value === "number") {
+        gp.value = target;
+      }
+    });
+  }
+
+  /** Gains courants (dB), pour l'UI et les tests. */
+  getEqGains(): number[] {
+    return this.eqFilters.map((filter) => (typeof filter.gain.value === "number" ? filter.gain.value : 0));
+  }
   /** Nœud d'analyse (spectre / VU-metre), pour l'UI. */
   getAnalyser(): AnalyserNode {
     return this.analyser;
@@ -1110,6 +1169,31 @@ export class AudioEngine {
     this.applyVolumeToNode();
   }
 
+  /**
+   * Rampe LINEAIRE du volume vers `to01` en `seconds` (T17 — minuteur de sommeil).
+   *
+   * Isolation stricte : on ne touche QUE `volumeGain` (jamais `gain`, jamais une source, jamais
+   * le graphe). Le fondu du minuteur ne peut donc ni creer de clic, ni perturber un changement de
+   * piste. La valeur memorisee suit la cible, ce qui evite un saut au reglage suivant.
+   */
+  rampVolume(to01: number, seconds: number): void {
+    const target = clamp(Number.isFinite(to01) ? to01 : 0, 0, 1);
+    const duration = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+    const gp = this.volumeGain.gain;
+    const now = this.context.currentTime;
+    if (
+      typeof gp.cancelScheduledValues === "function" &&
+      typeof gp.setValueAtTime === "function" &&
+      typeof gp.linearRampToValueAtTime === "function"
+    ) {
+      gp.cancelScheduledValues(now);
+      gp.setValueAtTime(typeof gp.value === "number" ? gp.value : this.userVolume, now);
+      gp.linearRampToValueAtTime(target, now + duration);
+    } else if (typeof gp.value === "number") {
+      gp.value = target;
+    }
+    this.userVolume = target;
+  }
   /** Volume utilisateur courant [0,1], lu depuis le noeud dedie (source de verite du graphe). */
   getVolume(): number {
     const v = this.volumeGain.gain.value;
@@ -1194,3 +1278,8 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+
+
+
+
+

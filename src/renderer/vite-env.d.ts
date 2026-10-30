@@ -7,6 +7,12 @@ interface ImportMetaEnv {
   readonly PROD: boolean;
   readonly MODE: string;
 }
+/** Sous-ensemble de l'API HMR de Vite (`import.meta.hot`, absent en production et en tests). */
+interface ViteHotContext {
+  readonly data: Record<string, unknown>;
+  dispose(cb: (data: Record<string, unknown>) => void): void;
+}
 interface ImportMeta {
   readonly env: ImportMetaEnv;
+  readonly hot?: ViteHotContext;
 }

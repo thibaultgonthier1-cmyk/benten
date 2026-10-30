@@ -4,6 +4,14 @@ import { formatTime } from "../lib/library";
 import { Cover } from "./Cover";
 import { QualityBadge } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
+import { GoldMedallion } from "../ui/GoldMedallion";
+import { BiwaString } from "../ui/BiwaString";
+import { SleepTimerMenu } from "./SleepTimerMenu";
+import { EqualizerPanel } from "./EqualizerPanel";
+import { useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
+import { Shuffle, Minimize2 } from "lucide-react";
+import { uiStore } from "../state/ui";
 
 /** Pas de deplacement clavier du scrubber, en secondes. */
 const SEEK_STEP_SEC = 5;
@@ -15,6 +23,7 @@ const SEEK_STEP_SEC = 5;
  * au clavier (fleches / Debut / Fin).
  */
 export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Element | null {
+  const [eqOpen, setEqOpen] = useState(false);
   const track = usePlayer((s) => s.currentTrack);
   const status = usePlayer((s) => s.status);
   const positionSec = usePlayer((s) => s.positionSec);
@@ -88,17 +97,7 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
             <path d="M7 6v12M20 6L9 12l11 6z" />
           </svg>
         </button>
-        <button
-          className="play-btn"
-          type="button"
-          title={playing ? "Pause" : "Lecture"}
-          aria-label={playing ? "Pause" : "Lecture"}
-          onClick={controls.toggle}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            {playing ? <path d="M8 5h4v14H8zM14 5h4v14h-4z" /> : <path d="M8 5v14l11-7z" />}
-          </svg>
-        </button>
+                <GoldMedallion playing={playing} size="md" onToggle={controls.toggle} title={playing ? "Pause" : "Lecture"} />
         <button className="ic" type="button" title="Suivant" aria-label="Morceau suivant" onClick={controls.next}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M17 6v12M4 6l11 6L4 18z" />
@@ -121,7 +120,38 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
           {repeat === "one" && <span className="rep-one" aria-hidden="true">1</span>}
         </button>
       </div>
-      <div className="mp-right">
+      <div className="mp-extras">
+        <button className="ic" type="button" title="Égaliseur" aria-label="Ouvrir l'égaliseur" onClick={() => setEqOpen(true)}>
+          <SlidersHorizontal size={16} strokeWidth={1.75} aria-hidden />
+        </button>
+        <button
+          className="ic"
+          type="button"
+          title="Aléatoire total"
+          aria-label="Lecture aléatoire de toute la bibliothèque"
+          onClick={() => void window.benten?.library.query({ view: "tracks", limit: 20000 }).then((result) => {
+            const tracks = result.rows as unknown as Parameters<PlayerControls["playTracks"]>[0];
+            if (!tracks || tracks.length === 0) return;
+            playerStore.getState().setShuffle(true);
+            controls.playTracks(tracks, Math.floor(Math.random() * tracks.length));
+          })}
+        >
+          <Shuffle size={16} strokeWidth={1.75} aria-hidden />
+        </button>
+        <SleepTimerMenu />
+        <button
+          className="ic"
+          type="button"
+          title="Mode compact"
+          aria-label="Passer en mode compact"
+          onClick={() => {
+            uiStore.getState().setCompact(true);
+            void window.benten?.window.setCompact(true);
+          }}
+        >
+          <Minimize2 size={16} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>      <div className="mp-right">
         <button
           className="ic"
           type="button"
@@ -146,27 +176,24 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
           </svg>
         </button>
         <span className="mp-time">{formatTime(positionSec)}</span>
-        <div
-          className="mp-bar"
-          role="slider"
-          tabIndex={0}
-          aria-label="Progression"
-          aria-valuemin={0}
-          aria-valuemax={Math.round(dur)}
-          aria-valuenow={Math.round(positionSec)}
-          aria-valuetext={`${formatTime(positionSec)} sur ${formatTime(dur)}`}
-          style={{ "--p": `${pct}%` } as React.CSSProperties}
-          onKeyDown={onBarKey}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect();
-            controls.seekFraction((e.clientX - r.left) / r.width);
-          }}
-        >
-          <i />
-        </div>
+                <BiwaString
+          className="mp-biwa"
+          value={frac}
+          onSeek={(fraction) => controls.seekFraction(fraction)}
+          playing={playing}
+          trackKey={trackId}
+          duration={dur}
+          label="Progression"
+        />
         <span className="mp-time">{formatTime(dur)}</span>
         <QualityBadge track={track} variant="pill" />
       </div>
+      {eqOpen && <EqualizerPanel onClose={() => setEqOpen(false)} />}
     </div>
   );
 }
+
+
+
+
+

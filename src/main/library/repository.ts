@@ -29,7 +29,8 @@ const TRACK_COLUMNS = `
   t.album_id AS albumId, t.track_no AS trackNo, t.disc_no AS discNo,
   t.duration_sec AS durationSec, t.format,
   t.sample_rate AS sampleRate, t.bit_depth AS bitDepth, t.playable,
-  t.art_key AS artKey, t.mtime_ms AS mtimeMs, t.size_bytes AS sizeBytes`;
+  t.art_key AS artKey, t.mtime_ms AS mtimeMs, t.size_bytes AS sizeBytes,
+  t.added_at_ms AS addedAtMs`;
 
 interface RawTrack extends Omit<TrackRow, "playable"> {
   playable: number;
@@ -49,11 +50,11 @@ function statements(db: Db) {
       INSERT INTO tracks
         (path, title, artist, album, album_artist, artist_id, album_id, track_no,
          disc_no, duration_sec, format, sample_rate, bit_depth, playable, art_key,
-         mtime_ms, size_bytes)
+         mtime_ms, size_bytes, added_at_ms)
       VALUES
         (@path, @title, @artist, @album, @albumArtist, @artistId, @albumId, @trackNo,
          @discNo, @durationSec, @format, @sampleRate, @bitDepth, @playable, @artKey,
-         @mtimeMs, @sizeBytes)
+         @mtimeMs, @sizeBytes, @addedAtMs)
       ON CONFLICT(path) DO UPDATE SET
         title = excluded.title, artist = excluded.artist, album = excluded.album,
         album_artist = excluded.album_artist,
@@ -63,7 +64,9 @@ function statements(db: Db) {
         format = excluded.format, sample_rate = excluded.sample_rate,
         bit_depth = excluded.bit_depth, playable = excluded.playable,
         art_key = excluded.art_key, mtime_ms = excluded.mtime_ms,
-        size_bytes = excluded.size_bytes`),
+        size_bytes = excluded.size_bytes,
+        -- Date d'ajout figée : une ré-indexation (re-tag…) ne change jamais l'ordre d'ajout.
+        added_at_ms = COALESCE(tracks.added_at_ms, excluded.added_at_ms)`),
     tracksByAlbum: db.prepare(`
       SELECT ${TRACK_COLUMNS} FROM tracks t
       WHERE t.album_id = ?
@@ -290,6 +293,7 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
         artKey: t.artKey,
         mtimeMs: t.mtimeMs,
         sizeBytes: t.sizeBytes,
+        addedAtMs: t.addedAtMs ?? null,
       });
     }
   })(tracks);
@@ -301,8 +305,9 @@ export function upsertTracks(db: Db, tracks: readonly TrackInput[]): void {
  * (`favoritesOnly` via jointure `favorites`, `losslessOnly` via `bit_depth IS NOT NULL`). Les parties
  * dynamiques du SQL sont exclusivement des constantes en liste blanche (voir `buildAlbumsQuery`).
  *
- * NB (chemin de tri) : la vue albums du Renderer ne passe PAS par ce tri — `App.tsx` regroupe les
- * albums côté client depuis la requête `tracks` et les trie via `sortFilterAlbums` (`localeCompare`,
+ * NB (chemin de tri) : la vue albums du Renderer ne passe PAS par ce tri — le store bibliothèque
+ * regroupe les albums côté client depuis la requête `tracks` et les trie via `arrangeAlbums`
+ * (`lib/viewModels.ts`, `localeCompare`,
  * sensible aux accents), qui est le chemin UI voulu pour une bibliothèque accentuée. Ce tri backend
  * sert le chemin IPC / la vue `tracks` (et un futur câblage direct de la vue albums). Il s'appuie sur
  * `COLLATE NOCASE` + départage `al.id`, ce qui PEUT ordonner les titres accentués différemment de
@@ -534,6 +539,24 @@ export function removeFromPlaylist(db: Db, id: number, position: number): void {
     ids.splice(position, 1);
     s.clearPlaylistTracks.run(id);
     ids.forEach((trackId, i) => s.insertPlaylistTrack.run(id, trackId, i));
+    s.touchPlaylist.run(Date.now(), id);
+  })();
+}
+
+/**
+ * Insère `trackId` à `position` (annulation d'un retrait) puis re-densifie en 0..n-1 — UNE seule
+ * transaction : jamais d'état intermédiaire « ajouté en fin » visible ni de demi-annulation.
+ * `position` au-delà de la fin = ajout en fin ; négative = erreur (aucune écriture). Une piste
+ * inconnue échoue sur la clé étrangère et la transaction est annulée. Bouge `updated_at`.
+ */
+export function insertIntoPlaylist(db: Db, id: number, trackId: number, position: number): void {
+  if (!Number.isInteger(position) || position < 0) throw new Error("insertIntoPlaylist: position must be >= 0");
+  const s = stmts(db);
+  db.transaction(() => {
+    const ids = s.playlistTrackIds.all(id) as number[];
+    ids.splice(Math.min(position, ids.length), 0, trackId);
+    s.clearPlaylistTracks.run(id);
+    ids.forEach((t, i) => s.insertPlaylistTrack.run(id, t, i));
     s.touchPlaylist.run(Date.now(), id);
   })();
 }

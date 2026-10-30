@@ -20,6 +20,14 @@ import { dirname, join } from "node:path";
  */
 
 /** Taille cible par defaut (cote le plus long, en px). */
+/**
+ * Taille cible par défaut (côté le plus long, en px).
+ *
+ * ATTENTION : cette valeur entre dans la clé de hash de la pochette (`indexer`), stockée en base
+ * dans `tracks.art_key`. La changer invalide TOUTES les clés existantes : les pochettes
+ * deviennent introuvables jusqu'à une ré-indexation complète. Passer à 1024 demande donc une
+ * migration (recalcul des clés + purge du cache), pas un simple changement de constante.
+ */
 export const DEFAULT_ART_SIZE = 512;
 /** Une image plus grosse n'est pas lue (fichier de dossier aberrant). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -162,16 +170,38 @@ const NOT_FOUND = (): Response => new Response(null, { status: 404 });
  * absente (le Renderer affiche alors son repli generatif). `size` est accepte mais ignore :
  * une seule taille est cachee en Phase 1.
  */
-export async function serveArt(url: string, cacheDir: string): Promise<Response> {
+/**
+ * `resolveSource` : facultatif. Quand la pochette demandée n''est pas encore en cache (premier
+ * affichage, ou cache vidé à la main), on la RÉ-EXTRAIT à la demande au lieu de renvoyer 404.
+ * Sans cela, vider `art-cache` rendait toutes les pochettes définitivement génératives : le cache
+ * n''était rempli qu''au moment de l''indexation.
+ */
+export async function serveArt(
+  url: string,
+  cacheDir: string,
+  resolveSource?: (artKey: string) => Promise<string | null> | string | null,
+): Promise<Response> {
   try {
     const key = new URL(url).hostname;
-    const file = resolveArtFile(key, cacheDir);
+    let file = resolveArtFile(key, cacheDir);
+    if (!file && resolveSource) {
+      const sourcePath = await resolveSource(key);
+      if (sourcePath) {
+        // `getOrCreateArt` recalcule la même clé (taille + contenu) : le nom de fichier doit
+        // correspondre, sinon on servirait une vignette pour une autre clé.
+        await getOrCreateArt({ path: sourcePath }, { cacheDir });
+        file = resolveArtFile(key, cacheDir);
+      }
+    }
     if (!file) return NOT_FOUND();
     const data = await readFile(file);
     return new Response(new Uint8Array(data), {
       status: 200,
       headers: {
         "content-type": sniffImageMime(data) ?? "application/octet-stream",
+        // Contenu public adresse par hash : lisible par `fetch` depuis le renderer (pochette des
+        // touches media servie en blob, cf. runtime/mediaSession.ts).
+        "access-control-allow-origin": "*",
         // Contenu adresse par son hash : immuable.
         "cache-control": "public, max-age=31536000, immutable",
       },
@@ -180,3 +210,6 @@ export async function serveArt(url: string, cacheDir: string): Promise<Response>
     return NOT_FOUND();
   }
 }
+
+
+

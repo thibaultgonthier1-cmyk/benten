@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Variante PETITES TAILLES (16-32 px) : deux formes seulement, traits épais, soleil plus
+       petit pour que le torii se détache sur le noir. Sans elle, les poutres se soudent. -->
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f2d68f" />
+      <stop offset="100%" stop-color="#c69a3f" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="200" fill="#0a0908" />
+  <circle cx="512" cy="470" r="250" fill="url(#gold)" />
+  <g stroke="#f3efe8" stroke-linecap="round" fill="none">
+    <path d="M150 268 Q512 350 874 268" stroke-width="112" />
+    <path d="M170 596 H854" stroke-width="104" />
+    <path d="M296 380 V846" stroke-width="106" />
+    <path d="M728 380 V846" stroke-width="106" />
+  </g>
+</svg>

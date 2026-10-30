@@ -71,6 +71,13 @@ class FakeAudioBuffer {
     return Math.round(this.duration * this.sampleRate);
   }
 }
+/** Filtre passe-bande/biquad simulé : les tests vérifient type, fréquence et gain de chaque bande. */
+class FakeBiquadFilter extends FakeNode {
+  type = "peaking";
+  frequency = { value: 1000 };
+  Q = { value: 1 };
+  gain = new FakeGainParam();
+}
 class FakeAudioContext {
   currentTime = 0;
   state: "running" | "suspended" | "closed" = "running";
@@ -88,6 +95,12 @@ class FakeAudioContext {
   createAnalyser(): FakeAnalyser {
     this.analyserCount++;
     return new FakeAnalyser();
+  }
+  eqFilters: FakeBiquadFilter[] = [];
+  createBiquadFilter(): FakeBiquadFilter {
+    const filter = new FakeBiquadFilter();
+    this.eqFilters.push(filter);
+    return filter;
   }
   createBufferSource(): FakeBufferSource {
     this.createdSources++;
@@ -120,6 +133,7 @@ const track = (over: Partial<TrackRow> = {}): TrackRow => ({
   artKey: null,
   mtimeMs: null,
   sizeBytes: null,
+  addedAtMs: null,
   ...over,
 });
 
@@ -184,7 +198,28 @@ describe("AudioEngine", () => {
     expect(analyser).toBeInstanceOf(FakeAnalyser);
     const volume = analyser.connectedTo as FakeGain;
     expect(volume).toBeInstanceOf(FakeGain);
-    expect(volume.connectedTo).toBe(ctx.destination);
+
+    // T17B : entre le volume et la destination, dix filtres chaînés (égaliseur). Aucun chemin
+    // parallèle — sinon le signal non égalisé reviendrait et doublerait le son.
+    expect(ctx.eqFilters).toHaveLength(10);
+    expect(volume.connectedTo).toBe(ctx.eqFilters[0]);
+    for (let i = 0; i < ctx.eqFilters.length - 1; i += 1) {
+      expect(ctx.eqFilters[i]!.connectedTo).toBe(ctx.eqFilters[i + 1]);
+    }
+    expect(ctx.eqFilters[9]!.connectedTo).toBe(ctx.destination);
+  });
+
+  it("l'égaliseur borne les gains à ±12 dB et laisse le nœud anti-clic intact", () => {
+    const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(10)));
+    engine.setEqGains([6, -3, 99, -99, 0, 0, 0, 0, 0, 0]);
+    const gains = engine.getEqGains();
+    expect(gains[0]).toBe(6);
+    expect(gains[1]).toBe(-3);
+    expect(gains[2]).toBe(12);
+    expect(gains[3]).toBe(-12);
+    const antiClick = (engine as unknown as { gain: FakeGain }).gain;
+    expect(antiClick.gain.ramps).toHaveLength(0);
+    expect(antiClick.gain.value).toBe(1);
   });
 
   it("la position derive de currentTime puis se fige au pause", async () => {
@@ -389,6 +424,23 @@ describe("AudioEngine", () => {
       expect(engine.getVolume()).toBeCloseTo(0.5, 5);
     });
 
+    it("rampVolume programme une rampe sur le noeud de volume uniquement", () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      const volumeNode = (engine as unknown as { volumeGain: FakeGain }).volumeGain;
+      const antiClick = (engine as unknown as { gain: FakeGain }).gain;
+      volumeNode.gain.ramps.length = 0;
+      antiClick.gain.ramps.length = 0;
+
+      engine.rampVolume(0.2, 8);
+
+      // Une seule rampe, sur `volumeGain`, vers la cible.
+      expect(volumeNode.gain.ramps).toHaveLength(1);
+      expect(volumeNode.gain.ramps[0]!.to).toBeCloseTo(0.2, 5);
+      // Le nœud des fondus anti-clic n'est pas touché.
+      expect(antiClick.gain.ramps).toHaveLength(0);
+      // La valeur mémorisée suit la cible (pas de saut au réglage suivant).
+      expect(engine.getVolume()).toBeCloseTo(0.2, 5);
+    });
     it("borne le volume dans [0,1]", () => {
       const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
       engine.setVolume(2);
@@ -467,3 +519,6 @@ describe("AudioEngine", () => {
     });
   });
 });
+
+
+

@@ -84,6 +84,15 @@ const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+
+  // v3 : additif (Phase 3). Date d'ajout réelle d'une piste = création du fichier (birthtime,
+  // repli mtime), posée à l'insertion et jamais réécrite ensuite ; NULL sur les lignes existantes
+  // jusqu'au rattrapage au démarrage (backfillAddedAt). Index pour le tri « Ajouté ».
+  // NB : la Tâche 11 prévoyait v3 pour play_history ; elle devient v4.
+  `
+  ALTER TABLE tracks ADD COLUMN added_at_ms INTEGER;
+  CREATE INDEX idx_tracks_added_at ON tracks(added_at_ms);
+  `,
 ];
 
 function migrate(db: Database.Database): void {

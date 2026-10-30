@@ -114,6 +114,7 @@ const track = (over: Partial<TrackRow> = {}): TrackRow => ({
   artKey: null,
   mtimeMs: null,
   sizeBytes: null,
+  addedAtMs: null,
   ...over,
 });
 

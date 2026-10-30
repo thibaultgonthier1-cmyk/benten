@@ -1,0 +1,90 @@
+/* Mode compact (T17) : la fenêtre ne fait que 420×132, tout doit tenir sans défilement. */
+.compact {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  height: 100vh;
+  padding: 10px 12px;
+  background: #000;
+  color: var(--ivory);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.compact__art {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.9);
+}
+
+.compact__body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.compact__title {
+  font-size: 12.5px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact__artist {
+  font-size: 11px;
+  color: rgba(243, 239, 232, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact__bar {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.compact__bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-deep), var(--gold-light));
+}
+
+.compact__times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: rgba(243, 239, 232, 0.4);
+  font-variant-numeric: tabular-nums;
+}
+
+.compact__controls {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.compact__exit {
+  width: 24px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(243, 239, 232, 0.6);
+  cursor: pointer;
+}
+
+.compact__exit:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--ivory);
+}
