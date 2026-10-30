@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { buildYtDlpArgs, parseProgress, validateYoutubeUrl, type JobState } from "./ytdlp";
+import { execFile } from "node:child_process";
+import { extname } from "node:path";
 
 /**
  * File de téléchargement YouTube → MP3.
@@ -168,7 +170,23 @@ export class YoutubeManager {
           this.options.onError?.({ ...job });
           return resolve();
         }
-        job.filePath = join(outputDir, newest);
+        // Filet de sécurité : si yt-dlp n'a pas pu convertir (ffmpeg absent de son PATH), il laisse
+        // un .webm. Le scanner de bibliothèque ne connaît pas cette extension : le fichier
+        // n'apparaîtrait JAMAIS dans l'app. On convertit ici, ou on le dit clairement.
+        let produced = newest;
+        if (!AUDIO_OUTPUTS.has(extname(produced).toLowerCase())) {
+          job.state = "converting";
+          this.options.onProgress?.({ ...job });
+          const converted = await convertToMp3(ffmpegPath, join(outputDir, produced));
+          if (!converted) {
+            job.state = "error";
+            job.error = "conversion MP3 impossible (ffmpeg introuvable) — fichier laissé tel quel";
+            this.options.onError?.({ ...job });
+            return resolve();
+          }
+          produced = converted;
+        }
+        job.filePath = join(outputDir, produced);
         job.state = "done";
         job.percent = 100;
         this.options.onProgress?.({ ...job });
@@ -201,6 +219,26 @@ async function pickNewest(dir: string, names: string[]): Promise<string | null> 
   }
   return best ? best.name : null;
 }
+/** Extensions que la bibliothèque sait indexer : au-delà, il faut convertir. */
+const AUDIO_OUTPUTS: ReadonlySet<string> = new Set([".mp3", ".m4a", ".flac", ".wav", ".ogg", ".opus", ".aac", ".aiff"]);
 
-
-
+/**
+ * Convertit un fichier produit par yt-dlp en MP3, si ffmpeg est disponible.
+ *
+ * @returns le nom du fichier MP3 produit, ou `null` si la conversion n'a pas pu aboutir.
+ */
+async function convertToMp3(ffmpegPath: string | null | undefined, input: string): Promise<string | null> {
+  const output = input.replace(/\.[^./\\]+$/, ".mp3");
+  const binary = ffmpegPath && ffmpegPath.trim() ? ffmpegPath : "ffmpeg";
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(binary, ["-y", "-i", input, "-vn", "-c:a", "libmp3lame", "-q:a", "2", output], (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+    return output;
+  } catch {
+    return null;
+  }
+}
