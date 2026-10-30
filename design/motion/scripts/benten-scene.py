@@ -1,27 +1,28 @@
-/*
- * BENTEN — scène 3D du fond animé, générée par script Blender (bpy, Python 3).
- *
- * PRÉREQUIS
- *   Blender 4.x installé. Aucun addon, aucune texture externe : tout est construit en code.
- *
- * UTILISATION
- *   Blender ouvert ▸ onglet Scripting ▸ Ouvrir ▸ ce fichier ▸ Exécuter (Alt+P).
- *   Ou en ligne de commande (recommandé, ça rend tout seul) :
- *     blender --background --python benten-scene.py
- *
- * CE QUE ÇA PRODUIT
- *   1920×1080, 30 i/s, 6 s (180 images), dans %USERPROFILE%\Desktop\benten-scene\ :
- *     - un torii sur l'eau, soleil d'or derrière, anneaux concentriques qui s'ouvrent ;
- *     - caméra en orbite lente (mouvement perpétuel du fond, jamais deux fois le même angle) ;
- *     - éclairage chaud (or) + reflets ; rendu EEVEE pour rester rapide.
- *
- * CE QUE ÇA DONNE DANS L'APP
- *   Un WebM par catégorie, à la place des images fixes du fond animé. Même emplacement
- *   (`ViewBackdrop`), mêmes transitions : on garde l'orchestration, on change la source.
- *
- * APRÈS LE RENDU (convertir en WebM, boucle propre) :
- *   ffmpeg -framerate 30 -i frame_%04d.png -c:v libvpx-vp9 -b:v 0 -crf 34 -an benten-scene.webm
- */
+# 
+#  * BENTEN — scène 3D du fond animé, générée par script Blender (bpy, Python 3).
+#  *
+#  * PRÉREQUIS
+#  *   Blender 4.x installé. Aucun addon, aucune texture externe : tout est construit en code.
+#  *
+#  * UTILISATION
+#  *   Blender ouvert ▸ onglet Scripting ▸ Ouvrir ▸ ce fichier ▸ Exécuter (Alt+P).
+#  *   Ou en ligne de commande (recommandé, ça rend tout seul) :
+#  *     blender --background --python benten-scene.py
+#  *
+#  * CE QUE ÇA PRODUIT
+#  *   1920×1080, 30 i/s, 6 s (180 images), dans %USERPROFILE%\Desktop\benten-scene\ :
+#  *     - un torii sur l'eau, soleil d'or derrière, anneaux concentriques qui s'ouvrent ;
+#  *     - caméra en orbite lente (mouvement perpétuel du fond, jamais deux fois le même angle) ;
+#  *     - éclairage chaud (or) + reflets ; rendu EEVEE pour rester rapide.
+#  *
+#  * CE QUE ÇA DONNE DANS L'APP
+#  *   Un WebM par catégorie, à la place des images fixes du fond animé. Même emplacement
+#  *   (`ViewBackdrop`), mêmes transitions : on garde l'orchestration, on change la source.
+#  *
+#  * APRÈS LE RENDU (convertir en WebM, boucle propre) :
+#  *   ffmpeg -framerate 30 -i frame_%04d.png -c:v libvpx-vp9 -b:v 0 -crf 34 -an benten-scene.webm
+# 
+
 
 import bpy
 import math
@@ -102,11 +103,11 @@ def build_scene():
     scene.world = world
 
     or_mat = make_material("or", GOLD, emission=1.6, roughness=0.35, metallic=0.4)
-    ivoire_mat = make_material("ivoire", IVORY, emission=0.15, roughness=0.5)
-    eau_mat = make_material("eau", (0.02, 0.02, 0.028, 1), roughness=0.08, metallic=0.7)
+    ivoire_mat = make_material("ivoire", IVORY, emission=0.55, roughness=0.42)
+    eau_mat = make_material("eau", (0.012, 0.011, 0.014, 1), roughness=0.06, metallic=0.85)
 
     # Soleil : sphère émissive derrière le torii.
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=2.6, location=(0, 3.2, 2.6))
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.9, location=(0, 4.2, 2.15))
     soleil = bpy.context.active_object
     soleil.name = "soleil"
     soleil.data.materials.append(or_mat)
@@ -168,7 +169,7 @@ def build_scene():
     # Éclairage d'appoint : une lumière chaude de face, très douce.
     bpy.ops.object.light_add(type="AREA", location=(3, -6, 6))
     lampe = bpy.context.active_object
-    lampe.data.energy = 220
+    lampe.data.energy = 160
     lampe.data.color = (1.0, 0.86, 0.62)
     lampe.data.size = 6
 
@@ -185,3 +186,5 @@ if __name__ == "__main__":
         '  ffmpeg -framerate 30 -i "%s" -c:v libvpx-vp9 -b:v 0 -crf 34 -an benten-scene.webm'
         % os.path.join(OUT_DIR, "frame_%04d.png")
     )
+
+
