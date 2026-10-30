@@ -35,6 +35,8 @@ export const CHANNELS = {
   /** Playlists YouTube : aperçu et téléchargement des titres manquants. */
   YOUTUBE_PLAYLIST_PREVIEW: "youtube:playlist-preview",
   YOUTUBE_PLAYLIST_START: "youtube:playlist-start",
+  /** Cookies YouTube (playlists privées). */
+  YOUTUBE_SAVE_COOKIES: "youtube:save-cookies",
   /** T16 — import d'une playlist Apple (aperçu puis création). */
   IMPORT_PREVIEW: "import:preview",
   IMPORT_COMMIT: "import:commit",
@@ -54,6 +56,7 @@ export const CHANNELS = {
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
 
 
 

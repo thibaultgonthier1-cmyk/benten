@@ -38,6 +38,9 @@ export function DownloadsView(): JSX.Element {
   const [playlist, setPlaylist] = useState<YoutubePlaylistPreview | null>(null);
   const [playlistBusy, setPlaylistBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [cookieOpen, setCookieOpen] = useState(false);
+  const [cookieText, setCookieText] = useState("");
+  const [cookieNote, setCookieNote] = useState<string | null>(null);
   const m = useMotion();
 
   const api = typeof window !== "undefined" ? window.benten?.youtube : undefined;
@@ -99,6 +102,20 @@ export function DownloadsView(): JSX.Element {
       setPlaylistBusy(false);
     }
   }, [api, playlist]);
+  const saveCookies = useCallback(async () => {
+    if (!api || cookieText.trim().length === 0) return;
+    try {
+      const result = await api.saveCookies(cookieText);
+      setCookieNote(`Cookies enregistrés (${result.entries} entrées) — relance l'analyse.`);
+      setCookieText("");
+      setCookieOpen(false);
+      const next = await api.status();
+      setStatus(next);
+    } catch (e) {
+      setCookieNote(e instanceof Error ? e.message : "Cookies refusés");
+    }
+  }, [api, cookieText]);
+
   const install = useCallback(async () => {
     if (!api) return;
     setBusy(true);
@@ -166,6 +183,30 @@ export function DownloadsView(): JSX.Element {
       </div>
 
       {linkError && <p className="dl-hint dl-hint--bad">{linkError}</p>}
+      {cookieNote && <p className="dl-hint">{cookieNote}</p>}
+
+      <p className="dl-cookies-line">
+        {status.cookies ? "Cookies YouTube enregistrés — les playlists privées sont lisibles." : "Playlist privée ?"}
+        {" "}
+        <button className="dl-link" type="button" onClick={() => setCookieOpen((open) => !open)}>
+          {status.cookies ? "Mettre à jour" : "Ajouter mes cookies YouTube"}
+        </button>
+      </p>
+
+      {cookieOpen && (
+        <div className="dl-cookies">
+          <textarea
+            className="dl-textarea"
+            value={cookieText}
+            spellCheck={false}
+            placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;0&#9;SID&#9;…"
+            onChange={(e) => setCookieText(e.target.value)}
+          />
+          <Button variant="primary" size="s" disabled={cookieText.trim().length === 0} onClick={() => void saveCookies()}>
+            Enregistrer les cookies
+          </Button>
+        </div>
+      )}
 
       {playlist?.ok && (
         <>
@@ -232,6 +273,7 @@ export function DownloadsView(): JSX.Element {
     </div>
   );
 }
+
 
 
 

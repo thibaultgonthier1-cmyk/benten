@@ -61,10 +61,13 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 export function resolveYoutubePlaylist(
   binaryPath: string,
   listUrl: string,
-  options: { spawnImpl?: typeof spawn; maxEntries?: number } = {},
+  options: { spawnImpl?: typeof spawn; maxEntries?: number; cookiesPath?: string | null } = {},
 ): Promise<YoutubePlaylistTrack[]> {
   const spawnImpl = options.spawnImpl ?? spawn;
-  const args = ["--flat-playlist", "-J", "--no-warnings", "--no-call-home", listUrl];
+  const args = ["--flat-playlist", "-J", "--no-warnings", "--no-call-home"];
+  // Cookies : indispensable pour une playlist PRIVÉE (les siennes) ; inutile pour une publique.
+  if (options.cookiesPath) args.push("--cookies", options.cookiesPath);
+  args.push(listUrl);
   return new Promise((resolve, reject) => {
     let out = "";
     let err = "";
@@ -82,7 +85,17 @@ export function resolveYoutubePlaylist(
     child.on("error", (error) => reject(error));
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(err.trim().split(/\r?\n/).pop() || `yt-dlp a quitté avec le code ${code}`));
+        const detail = err.trim().split(/\r?\n/).pop() || `yt-dlp a quitté avec le code ${code}`;
+        // Message actionnable : « playlist does not exist » veut presque toujours dire « privée ».
+        if (/playlist does not exist|does not exist/i.test(detail)) {
+          reject(
+            new Error(
+              "Playlist introuvable : elle est probablement privée. Rends-la « non répertoriée » sur YouTube, ou ajoute tes cookies YouTube dans cette app.",
+            ),
+          );
+          return;
+        }
+        reject(new Error(detail));
         return;
       }
       try {
@@ -95,5 +108,6 @@ export function resolveYoutubePlaylist(
     });
   });
 }
+
 
 

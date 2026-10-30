@@ -238,6 +238,8 @@ export interface AppleProgressView {
 export interface YoutubeStatusView {
   installed: boolean;
   version: string | null;
+  /** Cookies YouTube présents (playlists privées). */
+  cookies?: boolean;
 }
 export interface BentenApi {
   ping(): Promise<"pong">;
@@ -347,6 +349,7 @@ export interface BentenApi {
     update(): Promise<YoutubeStatusView>;
     playlistPreview(url: string): Promise<YoutubePlaylistPreview>;
     playlistStart(urls: readonly string[]): Promise<YoutubeStatusView | { queued: number }>;
+    saveCookies(text: string): Promise<{ entries: number }>;
     onProgress(cb: (job: YoutubeJobView) => void): () => void;
   };
 }
@@ -356,6 +359,7 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 
 

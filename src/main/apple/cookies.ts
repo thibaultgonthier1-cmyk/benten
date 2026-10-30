@@ -18,6 +18,19 @@ export interface CookiesStatus {
 }
 
 /** Un export Netscape valide : des lignes `domaine\tflag\tchemin\t…\tname\tvalue`. */
+/**
+ * Même contrôle, sans exiger un domaine précis : sert aux cookies YouTube, dont le fichier est
+ * produit par la même extension mais ne contient pas `apple.com`.
+ */
+export function looksLikeNetscapeCookiesAny(text: string, host?: string): boolean {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+  if (lines.length === 0) return false;
+  return lines.some((line) => line.split("\t").length >= 7 && (!host || new RegExp(host, "i").test(line)));
+}
+
 export function looksLikeNetscapeCookies(text: string): boolean {
   const lines = String(text ?? "")
     .split(/\r?\n/)
@@ -81,5 +94,28 @@ async function statusFor(userDataDir: string): Promise<CookiesStatus> {
 /** Chemin utilisable par `gamdl`, ou `null`. */
 export function existingCookiesPath(userDataDir: string): string | null {
   const target = cookiesPath(userDataDir);
+  return existsSync(target) ? target : null;
+}
+
+/**
+ * Écrit un fichier de cookies générique (YouTube). Refusé si le format n'est pas Netscape.
+ * Le contenu n'est jamais journalisé.
+ */
+export async function saveCookieFile(userDataDir: string, fileName: string, text: string): Promise<number> {
+  const content = String(text ?? "").replace(/\r\n/g, "\n");
+  if (!looksLikeNetscapeCookiesAny(content)) {
+    throw new Error(
+      "Format non reconnu : un export Netscape contient des lignes séparées par des tabulations.",
+    );
+  }
+  const target = join(userDataDir, fileName);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, content, "utf8");
+  return countCookieEntries(content);
+}
+
+/** Chemin d'un fichier de cookies générique, s'il existe. */
+export function existingCookieFile(userDataDir: string, fileName: string): string | null {
+  const target = join(userDataDir, fileName);
   return existsSync(target) ? target : null;
 }

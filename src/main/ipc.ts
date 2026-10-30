@@ -349,6 +349,7 @@ export interface IpcHooks {
   youtube?: {
     playlistPreview(url: unknown): Promise<unknown>;
     playlistStart(urls: readonly string[]): Promise<unknown>;
+    saveCookies(text: string): Promise<{ entries: number }>;
     enqueue(url: unknown): unknown;
     jobs(): unknown;
     status(): unknown;
@@ -471,6 +472,12 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     if (!Array.isArray(urls) || urls.length === 0) throw new Error("youtube:playlist-start: aucune piste");
     return hooks?.youtube?.playlistStart(urls.map((value) => String(value))) ?? { queued: 0 };
   });
+  ipcMain.handle(CHANNELS.YOUTUBE_SAVE_COOKIES, (event, text: unknown) => {
+    assertTrusted(event);
+    if (typeof text !== "string" || text.trim().length === 0) throw new Error("youtube:save-cookies: contenu vide");
+    return hooks?.youtube?.saveCookies(text) ?? { entries: 0 };
+  });
+
   ipcMain.handle(CHANNELS.YOUTUBE_JOBS, (event) => {
     assertTrusted(event);
     return hooks?.youtube?.jobs() ?? [];
@@ -644,6 +651,7 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
 
 
 

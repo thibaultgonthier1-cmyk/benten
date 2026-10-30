@@ -8,7 +8,7 @@ import { registerArtProtocol, registerArtScheme, setArtSourceResolver } from "./
 import { registerDiagnosticsIpc, registerIpc } from "./ipc";
 import { YoutubeManager } from "./youtube/manager";
 import { AppleRunner, resolveCollection } from "./apple/index";
-import { existingCookiesPath, saveCookies, cookiesStatus } from "./apple/cookies";
+import { existingCookiesPath, saveCookies, cookiesStatus, saveCookieFile, existingCookieFile } from "./apple/cookies";
 import { matchTracks } from "./importer/matcher";
 import { queryLibrary } from "./ipc";
 import { ensureYtDlp, readYtDlpVersion } from "./youtube/ytdlp";
@@ -302,7 +302,7 @@ app.whenReady().then(() => {
       return { ok: false, name: "", reason: "Ce lien n'est pas une playlist YouTube.", total: 0, missing: 0, items: [] };
     }
     if (!existsSync(ytBin)) await ensureYtDlp(join(userData, "bin"));
-    const tracks = await resolveYoutubePlaylist(ytBin, link.url);
+    const tracks = await resolveYoutubePlaylist(ytBin, link.url, { cookiesPath: existingCookieFile(userData, "youtube-cookies.txt") });
     const library = queryLibrary(db, { view: "tracks", limit: 20000 });
     const matched = matchTracks(
       tracks.map((track) => ({ title: track.title, artist: track.artist, durationSec: track.duration || undefined })),
@@ -381,6 +381,7 @@ app.whenReady().then(() => {
     youtube: {
       playlistPreview: youtubePlaylistPreview,
       playlistStart: youtubePlaylistStart,
+      saveCookies: async (text: string) => ({ entries: await saveCookieFile(userData, "youtube-cookies.txt", text) }),
       enqueue: (url: unknown) => youtubeManager.enqueue(String(url ?? "")),
       jobs: () => youtubeManager.jobsList(),
       status: () => ({ installed: existsSync(ytBin), version: null }),
@@ -431,6 +432,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

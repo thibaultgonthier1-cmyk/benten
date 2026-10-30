@@ -83,7 +83,7 @@ describe("resolveYoutubePlaylist", () => {
     expect(tracks[0]?.title).toBe("Titre");
   });
 
-  it("rejette avec le dernier message d'erreur de yt-dlp", async () => {
+  it("traduit « playlist does not exist » en message actionnable (playlist privée)", async () => {
     const spawnImpl = (() => {
       const child = new FakeChild();
       setTimeout(() => {
@@ -95,6 +95,43 @@ describe("resolveYoutubePlaylist", () => {
 
     await expect(
       resolveYoutubePlaylist("yt-dlp.exe", "https://www.youtube.com/playlist?list=x", { spawnImpl }),
-    ).rejects.toThrow(/Playlist does not exist/);
+    ).rejects.toThrow(/privée/);
+  });
+
+  it("transmet les cookies à yt-dlp quand ils sont fournis", async () => {
+    let captured: string[] = [];
+    const spawnImpl = ((_bin: string, args: string[]) => {
+      captured = args;
+      const child = new FakeChild();
+      setTimeout(() => {
+        child.stdout.emit("data", Buffer.from(JSON.stringify({ entries: [] })));
+        child.emit("close", 0);
+      }, 0);
+      return child as unknown as ReturnType<typeof import("node:child_process").spawn>;
+    }) as unknown as typeof import("node:child_process").spawn;
+
+    await resolveYoutubePlaylist("yt-dlp.exe", "https://www.youtube.com/playlist?list=x", {
+      spawnImpl,
+      cookiesPath: "C:/data/youtube-cookies.txt",
+    });
+    expect(captured).toContain("--cookies");
+    expect(captured[captured.indexOf("--cookies") + 1]).toBe("C:/data/youtube-cookies.txt");
+  });
+
+  it("n'ajoute pas --cookies quand il n'y en a pas", async () => {
+    let captured: string[] = [];
+    const spawnImpl = ((_bin: string, args: string[]) => {
+      captured = args;
+      const child = new FakeChild();
+      setTimeout(() => {
+        child.stdout.emit("data", Buffer.from(JSON.stringify({ entries: [] })));
+        child.emit("close", 0);
+      }, 0);
+      return child as unknown as ReturnType<typeof import("node:child_process").spawn>;
+    }) as unknown as typeof import("node:child_process").spawn;
+
+    await resolveYoutubePlaylist("yt-dlp.exe", "https://www.youtube.com/playlist?list=x", { spawnImpl });
+    expect(captured).not.toContain("--cookies");
   });
 });
+
