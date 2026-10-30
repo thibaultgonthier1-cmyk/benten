@@ -3,7 +3,7 @@ import { existsSync, promises as fs } from "node:fs";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
-import { registerArtProtocol, registerArtScheme } from "./artprotocol";
+import { registerArtProtocol, registerArtScheme, setArtSourceResolver } from "./artprotocol";
 import { registerDiagnosticsIpc, registerIpc } from "./ipc";
 import { YoutubeManager } from "./youtube/manager";
 import { ensureYtDlp, readYtDlpVersion } from "./youtube/ytdlp";
@@ -190,6 +190,19 @@ app.whenReady().then(() => {
     maximized: boolean;
     minSize: [number, number];
   } | null = null;
+  // Ré-extraire une pochette à la demande (cache vidé, première lecture) : on retrouve le fichier
+  // par sa clé, sans quoi les pochettes resteraient génératives.
+  setArtSourceResolver((artKey) => {
+    try {
+      const row = db.prepare("SELECT path FROM tracks WHERE art_key = ? LIMIT 1").get(artKey) as
+        | { path: string }
+        | undefined;
+      return row?.path ?? null;
+    } catch {
+      return null;
+    }
+  });
+
   registerIpc(db, {
     setCompact: (on: boolean) => {
       const win = BrowserWindow.getAllWindows()[0];
@@ -276,6 +289,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

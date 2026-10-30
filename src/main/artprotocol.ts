@@ -41,8 +41,22 @@ export const nativeImageResizer: Resizer = (data, size) => {
  * A appeler apres `app.whenReady()` : configure le cache (dossier + redimensionneur) et
  * installe le handler de `benten-art://<artKey>?size=<n>` (404 si pas de pochette).
  */
+let resolveArtSource: ((artKey: string) => string | null) | null = null;
+
+/**
+ * Branche le résolveur `artKey -> chemin du fichier audio`. Appelé par le Main après ouverture de
+ * la base : sans lui, une pochette absente du cache reste introuvable (404 → repli génératif).
+ */
+export function setArtSourceResolver(resolver: (artKey: string) => string | null): void {
+  resolveArtSource = resolver;
+}
+
 export function registerArtProtocol(): void {
   const cacheDir = artCacheDir();
   configureArtCache({ cacheDir, size: DEFAULT_ART_SIZE, resize: nativeImageResizer });
-  protocol.handle(ART_SCHEME, (request) => serveArt(request.url, cacheDir));
+  protocol.handle(ART_SCHEME, (request) =>
+    serveArt(request.url, cacheDir, (artKey) => resolveArtSource?.(artKey) ?? null),
+  );
 }
+
+
