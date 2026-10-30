@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Link2, Loader2, TriangleAlert } from "lucide-react";
-import type { YoutubeJobView, YoutubeStatusView } from "../../shared/types";
-import { validateYoutubeUrl } from "../../shared/youtube";
+import { Check, Download, Link2, Loader2, TriangleAlert } from "lucide-react";
+import type { YoutubeJobView, YoutubePlaylistPreview, YoutubeStatusView } from "../../shared/types";
+import { parseYoutubePlaylistUrl, validateYoutubeUrl } from "../../shared/youtube";
 import { Button } from "../ui/Button";
 import { useMotion } from "../ui/useMotion";
 import "./downloads.css";
@@ -35,10 +35,14 @@ export function DownloadsView(): JSX.Element {
   const [jobs, setJobs] = useState<readonly YoutubeJobView[]>([]);
   const [status, setStatus] = useState<YoutubeStatusView>({ installed: false, version: null });
   const [busy, setBusy] = useState(false);
+  const [playlist, setPlaylist] = useState<YoutubePlaylistPreview | null>(null);
+  const [playlistBusy, setPlaylistBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const m = useMotion();
 
   const api = typeof window !== "undefined" ? window.benten?.youtube : undefined;
   const valid = useMemo(() => validateYoutubeUrl(raw), [raw]);
+  const playlistLink = useMemo(() => parseYoutubePlaylistUrl(raw), [raw]);
   const touched = raw.trim().length > 0;
 
   useEffect(() => {
@@ -70,6 +74,31 @@ export function DownloadsView(): JSX.Element {
     }
   }, [api, valid, busy]);
 
+  const analysePlaylist = useCallback(async () => {
+    if (!api || !playlistLink) return;
+    setPlaylistBusy(true);
+    setLinkError(null);
+    setPlaylist(null);
+    try {
+      setPlaylist(await api.playlistPreview(raw.trim()));
+    } catch (e) {
+      setLinkError(e instanceof Error ? e.message : "Analyse impossible");
+    } finally {
+      setPlaylistBusy(false);
+    }
+  }, [api, playlistLink, raw]);
+
+  const downloadMissing = useCallback(async () => {
+    if (!api || !playlist) return;
+    const urls = playlist.items.filter((item) => !item.inLibrary).map((item) => item.url);
+    if (urls.length === 0) return;
+    setPlaylistBusy(true);
+    try {
+      await api.playlistStart(urls);
+    } finally {
+      setPlaylistBusy(false);
+    }
+  }, [api, playlist]);
   const install = useCallback(async () => {
     if (!api) return;
     setBusy(true);
@@ -105,11 +134,17 @@ export function DownloadsView(): JSX.Element {
             if (e.key === "Enter") void submit();
           }}
         />
-        <Button variant="primary" size="s" disabled={!valid || busy} onClick={() => void submit()}>
-          {busy ? "…" : "Télécharger"}
-        </Button>
+        {playlistLink ? (
+          <Button variant="primary" size="s" disabled={playlistBusy} onClick={() => void analysePlaylist()}>
+            {playlistBusy ? "Analyse…" : "Analyser la playlist"}
+          </Button>
+        ) : (
+          <Button variant="primary" size="s" disabled={!valid || busy} onClick={() => void submit()}>
+            {busy ? "…" : "Télécharger"}
+          </Button>
+        )}
       </div>
-      {touched && !valid && (
+      {touched && !valid && !playlistLink && (
         <p className="dl-hint dl-hint--bad">
           <TriangleAlert size={13} strokeWidth={1.75} aria-hidden /> Lien invalide — seuls les liens YouTube en https
           sont acceptés.
@@ -130,8 +165,45 @@ export function DownloadsView(): JSX.Element {
         )}
       </div>
 
+      {linkError && <p className="dl-hint dl-hint--bad">{linkError}</p>}
+
+      {playlist?.ok && (
+        <>
+          <div className="dl-playlist">
+            <span className="dl-playlist__copy">
+              <strong>Playlist YouTube</strong>
+              <small>
+                {playlist.total} titres · {playlist.total - playlist.missing} déjà dans ta bibliothèque ·{" "}
+                {playlist.missing} à télécharger
+              </small>
+            </span>
+            {playlist.missing > 0 ? (
+              <Button variant="primary" size="s" disabled={playlistBusy} onClick={() => void downloadMissing()}>
+                {playlistBusy ? "Envoi…" : `Télécharger ${playlist.missing} manquant${playlist.missing > 1 ? "s" : ""}`}
+              </Button>
+            ) : (
+              <span className="dl-playlist__done">tout est déjà là</span>
+            )}
+          </div>
+
+          <ul className="dl-list">
+            {playlist.items.slice(0, 200).map((item, index) => (
+              <li key={`${item.url}-${index}`} className={"dl-job" + (item.inLibrary ? " is-done" : "")}>
+                <span className="dl-job__icon" aria-hidden>
+                  {item.inLibrary ? <Check size={15} strokeWidth={2} /> : <Download size={15} strokeWidth={1.75} />}
+                </span>
+                <span className="dl-job__copy">
+                  <strong>{item.title}</strong>
+                  <small>{item.artist || "artiste inconnu"}</small>
+                </span>
+                <span className="dl-job__pct">{item.inLibrary ? "déjà là" : "à venir"}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <ul className="dl-list">
-        {jobs.length === 0 && <li className="dl-empty">Aucun téléchargement pour le moment.</li>}
+        {jobs.length === 0 && playlist === null && <li className="dl-empty">Aucun téléchargement pour le moment.</li>}
         {jobs.map((job) => (
           <li key={job.id} className={"dl-job is-" + job.state}>
             <span className="dl-job__icon" aria-hidden>
@@ -160,4 +232,8 @@ export function DownloadsView(): JSX.Element {
     </div>
   );
 }
+
+
+
+
 

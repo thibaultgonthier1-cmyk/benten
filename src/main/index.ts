@@ -12,6 +12,7 @@ import { existingCookiesPath, saveCookies, cookiesStatus } from "./apple/cookies
 import { matchTracks } from "./importer/matcher";
 import { queryLibrary } from "./ipc";
 import { ensureYtDlp, readYtDlpVersion } from "./youtube/ytdlp";
+import { parseYoutubePlaylistUrl, resolveYoutubePlaylist } from "./youtube/playlist";
 import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
 import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
 import { backfillAddedAt } from "./library/addedAt";
@@ -295,6 +296,44 @@ app.whenReady().then(() => {
     }
     return result;
   };
+  const youtubePlaylistPreview = async (rawUrl: string) => {
+    const link = parseYoutubePlaylistUrl(rawUrl);
+    if (!link) {
+      return { ok: false, name: "", reason: "Ce lien n'est pas une playlist YouTube.", total: 0, missing: 0, items: [] };
+    }
+    if (!existsSync(ytBin)) await ensureYtDlp(join(userData, "bin"));
+    const tracks = await resolveYoutubePlaylist(ytBin, link.url);
+    const library = queryLibrary(db, { view: "tracks", limit: 20000 });
+    const matched = matchTracks(
+      tracks.map((track) => ({ title: track.title, artist: track.artist, durationSec: track.duration || undefined })),
+      library.rows as never,
+    );
+    const items = tracks.map((track, index) => ({
+      title: track.title,
+      artist: track.artist,
+      duration: track.duration,
+      url: track.url,
+      inLibrary: Boolean(matched[index]?.track),
+      matchedTrackId: matched[index]?.track?.id ?? null,
+    }));
+    return {
+      ok: true,
+      name: "",
+      reason: "",
+      total: items.length,
+      missing: items.filter((item) => !item.inLibrary).length,
+      items,
+    };
+  };
+
+  const youtubePlaylistStart = async (urls: readonly string[]) => {
+    if (!existsSync(ytBin)) await ensureYtDlp(join(userData, "bin"));
+    let queued = 0;
+    for (const url of urls) {
+      if (youtubeManager.enqueue(url)) queued += 1;
+    }
+    return { queued };
+  };
   registerIpc(db, {
     apple: {
       status: appleStatus,
@@ -340,6 +379,8 @@ app.whenReady().then(() => {
     },
     onSourcesChanged: startWatcher,
     youtube: {
+      playlistPreview: youtubePlaylistPreview,
+      playlistStart: youtubePlaylistStart,
       enqueue: (url: unknown) => youtubeManager.enqueue(String(url ?? "")),
       jobs: () => youtubeManager.jobsList(),
       status: () => ({ installed: existsSync(ytBin), version: null }),
@@ -390,6 +431,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

@@ -175,6 +175,26 @@ export interface ImportPreview {
   items: ImportPreviewItem[];
 }
 
+/** YouTube — piste d''une playlist, avec son sort dans la bibliothèque locale. */
+export interface YoutubePlaylistItem {
+  title: string;
+  artist: string;
+  duration: number;
+  url: string;
+  inLibrary: boolean;
+  matchedTrackId: number | null;
+}
+
+/** YouTube — aperçu d''une playlist. */
+export interface YoutubePlaylistPreview {
+  ok: boolean;
+  name: string;
+  reason: string;
+  total: number;
+  missing: number;
+  items: YoutubePlaylistItem[];
+}
+
 /** Apple Music — état des prérequis (cookies + gamdl). */
 export interface AppleStatusView {
   cookies: boolean;
@@ -325,6 +345,8 @@ export interface BentenApi {
     jobs(): Promise<YoutubeJobView[]>;
     status(): Promise<YoutubeStatusView>;
     update(): Promise<YoutubeStatusView>;
+    playlistPreview(url: string): Promise<YoutubePlaylistPreview>;
+    playlistStart(urls: readonly string[]): Promise<YoutubeStatusView | { queued: number }>;
     onProgress(cb: (job: YoutubeJobView) => void): () => void;
   };
 }
@@ -334,6 +356,7 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 
 

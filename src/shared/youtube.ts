@@ -47,3 +47,37 @@ export function validateYoutubeUrl(raw: string): string | null {
   if (shorts) return canonical(shorts[1]!);
   return null;
 }
+
+const PLAYLIST_ID = /^[A-Za-z0-9_-]{10,64}$/;
+const VIDEO = /^[A-Za-z0-9_-]{11}$/;
+
+export interface YoutubePlaylistLink {
+  /** URL canonique de la playlist. */
+  url: string;
+  listId: string;
+  startVideoId: string | null;
+}
+
+/**
+ * Lien de playlist YouTube ? Accepte `/playlist?list=`, `watch?v=…&list=…` et `music.youtube.com`.
+ * Le lien canonique ne garde que la playlist : on veut TOUTE la liste, pas la vidéo courante.
+ */
+export function parseYoutubePlaylistUrl(raw: string): YoutubePlaylistLink | null {
+  let url: URL;
+  try {
+    url = new URL(String(raw ?? "").trim());
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  if (url.username || url.password) return null;
+  if (!HOSTS.has(url.hostname.toLowerCase())) return null;
+  const listId = url.searchParams.get("list") ?? "";
+  if (!PLAYLIST_ID.test(listId)) return null;
+  const video = url.searchParams.get("v");
+  return {
+    url: `https://www.youtube.com/playlist?list=${listId}`,
+    listId,
+    startVideoId: video && VIDEO.test(video) ? video : null,
+  };
+}

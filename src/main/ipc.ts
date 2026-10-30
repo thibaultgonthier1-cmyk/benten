@@ -347,6 +347,8 @@ export interface IpcHooks {
   setCompact?: (on: boolean) => void;
   /** T15 — téléchargeur YouTube. Fourni par le Main, absent dans les tests. */
   youtube?: {
+    playlistPreview(url: unknown): Promise<unknown>;
+    playlistStart(urls: readonly string[]): Promise<unknown>;
     enqueue(url: unknown): unknown;
     jobs(): unknown;
     status(): unknown;
@@ -455,6 +457,19 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
   ipcMain.handle(CHANNELS.YOUTUBE_ENQUEUE, (event, url: unknown) => {
     assertTrusted(event);
     return hooks?.youtube?.enqueue(url) ?? null;
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_PLAYLIST_PREVIEW, (event, url: unknown) => {
+    assertTrusted(event);
+    if (typeof url !== "string" || url.trim().length === 0) throw new Error("youtube:playlist-preview: lien manquant");
+    return (
+      hooks?.youtube?.playlistPreview(url) ?? { ok: false, name: "", reason: "indisponible", total: 0, missing: 0, items: [] }
+    );
+  });
+
+  ipcMain.handle(CHANNELS.YOUTUBE_PLAYLIST_START, (event, urls: unknown) => {
+    assertTrusted(event);
+    if (!Array.isArray(urls) || urls.length === 0) throw new Error("youtube:playlist-start: aucune piste");
+    return hooks?.youtube?.playlistStart(urls.map((value) => String(value))) ?? { queued: 0 };
   });
   ipcMain.handle(CHANNELS.YOUTUBE_JOBS, (event) => {
     assertTrusted(event);
@@ -629,6 +644,7 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
 
 
 
