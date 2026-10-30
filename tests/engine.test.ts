@@ -71,6 +71,13 @@ class FakeAudioBuffer {
     return Math.round(this.duration * this.sampleRate);
   }
 }
+/** Filtre passe-bande/biquad simulé : les tests vérifient type, fréquence et gain de chaque bande. */
+class FakeBiquadFilter extends FakeNode {
+  type = "peaking";
+  frequency = { value: 1000 };
+  Q = { value: 1 };
+  gain = new FakeGainParam();
+}
 class FakeAudioContext {
   currentTime = 0;
   state: "running" | "suspended" | "closed" = "running";
@@ -88,6 +95,12 @@ class FakeAudioContext {
   createAnalyser(): FakeAnalyser {
     this.analyserCount++;
     return new FakeAnalyser();
+  }
+  eqFilters: FakeBiquadFilter[] = [];
+  createBiquadFilter(): FakeBiquadFilter {
+    const filter = new FakeBiquadFilter();
+    this.eqFilters.push(filter);
+    return filter;
   }
   createBufferSource(): FakeBufferSource {
     this.createdSources++;
@@ -185,7 +198,28 @@ describe("AudioEngine", () => {
     expect(analyser).toBeInstanceOf(FakeAnalyser);
     const volume = analyser.connectedTo as FakeGain;
     expect(volume).toBeInstanceOf(FakeGain);
-    expect(volume.connectedTo).toBe(ctx.destination);
+
+    // T17B : entre le volume et la destination, dix filtres chaînés (égaliseur). Aucun chemin
+    // parallèle — sinon le signal non égalisé reviendrait et doublerait le son.
+    expect(ctx.eqFilters).toHaveLength(10);
+    expect(volume.connectedTo).toBe(ctx.eqFilters[0]);
+    for (let i = 0; i < ctx.eqFilters.length - 1; i += 1) {
+      expect(ctx.eqFilters[i]!.connectedTo).toBe(ctx.eqFilters[i + 1]);
+    }
+    expect(ctx.eqFilters[9]!.connectedTo).toBe(ctx.destination);
+  });
+
+  it("l'égaliseur borne les gains à ±12 dB et laisse le nœud anti-clic intact", () => {
+    const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(10)));
+    engine.setEqGains([6, -3, 99, -99, 0, 0, 0, 0, 0, 0]);
+    const gains = engine.getEqGains();
+    expect(gains[0]).toBe(6);
+    expect(gains[1]).toBe(-3);
+    expect(gains[2]).toBe(12);
+    expect(gains[3]).toBe(-12);
+    const antiClick = (engine as unknown as { gain: FakeGain }).gain;
+    expect(antiClick.gain.ramps).toHaveLength(0);
+    expect(antiClick.gain.value).toBe(1);
   });
 
   it("la position derive de currentTime puis se fige au pause", async () => {
@@ -485,4 +519,6 @@ describe("AudioEngine", () => {
     });
   });
 });
+
+
 

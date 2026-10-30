@@ -11,13 +11,21 @@ describe("restoreSettings", () => {
   it("assainit des valeurs invalides vers les défauts", () => {
     expect(restoreSettings('{"motionIntensity":"bogus","showIntro":"x"}')).toEqual({
       motionIntensity: "full",
+  eqEnabled: false,
+  eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       showIntro: true,
       groupVersions: true,
     });
   });
 
   it("JSON invalide → défauts, sans lever", () => {
-    expect(restoreSettings("{bad")).toEqual({ motionIntensity: "full", showIntro: true, groupVersions: true });
+    expect(restoreSettings("{bad")).toEqual({
+      motionIntensity: "full",
+      showIntro: true,
+      groupVersions: true,
+      eqEnabled: false,
+      eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
     expect(restoreSettings("")).toEqual(DEFAULT_SETTINGS);
     expect(restoreSettings("null")).toEqual(DEFAULT_SETTINGS);
     expect(restoreSettings("[1,2]")).toEqual(DEFAULT_SETTINGS);
@@ -28,11 +36,13 @@ describe("restoreSettings", () => {
       motionIntensity: "reduced",
       showIntro: false,
       groupVersions: true,
+      eqEnabled: false,
+      eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     });
   });
 
   it("aller-retour serialize → restore identique", () => {
-    const s = { motionIntensity: "subtle" as const, showIntro: false, groupVersions: false };
+    const s = { motionIntensity: "subtle" as const, showIntro: false, groupVersions: false, eqEnabled: false, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     expect(restoreSettings(serializeSettings(s))).toEqual(s);
   });
 
@@ -50,7 +60,7 @@ describe("groupVersions (Tâche 7)", () => {
   });
 
   it("sérialisé avec les autres réglages et restauré (aller-retour)", () => {
-    const s = { motionIntensity: "full" as const, showIntro: true, groupVersions: false };
+    const s = { motionIntensity: "full" as const, showIntro: true, groupVersions: false, eqEnabled: false, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
     expect(JSON.parse(serializeSettings(s))).toEqual(s);
     expect(restoreSettings(serializeSettings(s)).groupVersions).toBe(false);
   });
@@ -126,12 +136,12 @@ describe("settings store (persistance via api injectée)", () => {
     store.getState().setMotionIntensity("reduced");
     expect(writes.at(-1)).toEqual([
       "settings",
-      '{"motionIntensity":"reduced","showIntro":false,"groupVersions":true}',
+      '{"motionIntensity":"reduced","showIntro":false,"groupVersions":true,"eqEnabled":false,"eqGains":[0,0,0,0,0,0,0,0,0,0]}',
     ]);
     store.getState().setShowIntro(true);
     expect(writes.at(-1)).toEqual([
       "settings",
-      '{"motionIntensity":"reduced","showIntro":true,"groupVersions":true}',
+      '{"motionIntensity":"reduced","showIntro":true,"groupVersions":true,"eqEnabled":false,"eqGains":[0,0,0,0,0,0,0,0,0,0]}',
     ]);
   });
 
@@ -159,3 +169,7 @@ describe("settings store (persistance via api injectée)", () => {
     expect(store.getState().motionIntensity).toBe("subtle");
   });
 });
+
+
+
+

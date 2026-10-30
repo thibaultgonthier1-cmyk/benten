@@ -7,6 +7,9 @@ import type { PlayerControls } from "./controls";
 import { GoldMedallion } from "../ui/GoldMedallion";
 import { BiwaString } from "../ui/BiwaString";
 import { SleepTimerMenu } from "./SleepTimerMenu";
+import { EqualizerPanel } from "./EqualizerPanel";
+import { useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
 import { Shuffle, Minimize2 } from "lucide-react";
 import { uiStore } from "../state/ui";
 
@@ -20,6 +23,7 @@ const SEEK_STEP_SEC = 5;
  * au clavier (fleches / Debut / Fin).
  */
 export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Element | null {
+  const [eqOpen, setEqOpen] = useState(false);
   const track = usePlayer((s) => s.currentTrack);
   const status = usePlayer((s) => s.status);
   const positionSec = usePlayer((s) => s.positionSec);
@@ -117,6 +121,9 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
         </button>
       </div>
       <div className="mp-extras">
+        <button className="ic" type="button" title="Égaliseur" aria-label="Ouvrir l'égaliseur" onClick={() => setEqOpen(true)}>
+          <SlidersHorizontal size={16} strokeWidth={1.75} aria-hidden />
+        </button>
         <button
           className="ic"
           type="button"
@@ -181,9 +188,12 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
         <span className="mp-time">{formatTime(dur)}</span>
         <QualityBadge track={track} variant="pill" />
       </div>
+      {eqOpen && <EqualizerPanel onClose={() => setEqOpen(false)} />}
     </div>
   );
 }
+
+
 
 
 

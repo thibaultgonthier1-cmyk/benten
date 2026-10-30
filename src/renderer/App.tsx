@@ -12,6 +12,7 @@ import type { TrackRow } from "../shared/types";
 import { Intro } from "./components/Intro";
 import { CompactPlayer } from "./components/CompactPlayer";
 import { configureSleepTimer } from "./runtime/sleepTimerHost";
+import { applyEqualizer, bindEqualizer } from "./components/EqualizerPanel";
 import { useUi } from "./state/ui";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
@@ -153,6 +154,12 @@ export function App(): JSX.Element {
     });
   }, [engine, controls]);
 
+  // T17B : le moteur reçoit les gains de l'égaliseur (0 dB partout quand il est inactif).
+  useEffect(() => {
+    bindEqualizer(engine);
+    applyEqualizer();
+  }, [engine]);
+
   const compact = useUi((s) => s.compact);
 
   if (compact) {
@@ -179,6 +186,7 @@ export function App(): JSX.Element {
     </>
   );
 }
+
 
 
 

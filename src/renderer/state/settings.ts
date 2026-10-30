@@ -18,19 +18,31 @@ export const SETTINGS_KEY = "settings";
 export interface PersistedSettings {
   motionIntensity: MotionIntensity;
   showIntro: boolean;
+  /** T17B — égaliseur : 10 gains en dB (grave → aigu), et son activation. */
+  eqEnabled: boolean;
+  eqGains: number[];
   /** Vue Titres : regroupe les versions d'un même morceau sous l'original (Tâche 7). */
   groupVersions: boolean;
 }
+
+export const EQ_BAND_COUNT = 10;
+
+/** Gains plats (0 dB sur les 10 bandes). */
+export const FLAT_EQ: readonly number[] = Object.freeze(Array.from({ length: EQ_BAND_COUNT }, () => 0));
 
 export const DEFAULT_SETTINGS: Readonly<PersistedSettings> = Object.freeze({
   motionIntensity: "full",
   showIntro: true,
   groupVersions: true,
+  eqEnabled: false,
+  eqGains: [...FLAT_EQ],
 });
 
 export interface SettingsState extends PersistedSettings {
   setMotionIntensity(intensity: MotionIntensity): void;
   setShowIntro(show: boolean): void;
+  setEqEnabled(on: boolean): void;
+  setEqGains(gains: readonly number[]): void;
   setGroupVersions(on: boolean): void;
   /** Lit la clé `"settings"` d'`app_state` et l'applique (no-op hors fenêtre, ne lève jamais). */
   load(): Promise<void>;
@@ -53,6 +65,8 @@ export function serializeSettings(s: PersistedSettings): string {
     motionIntensity: s.motionIntensity,
     showIntro: s.showIntro,
     groupVersions: s.groupVersions,
+    eqEnabled: s.eqEnabled,
+    eqGains: s.eqGains,
   });
 }
 
@@ -76,6 +90,14 @@ export function restoreSettings(raw: string): PersistedSettings {
       ? o.motionIntensity
       : DEFAULT_SETTINGS.motionIntensity,
     showIntro: typeof o.showIntro === "boolean" ? o.showIntro : DEFAULT_SETTINGS.showIntro,
+    eqEnabled: typeof o.eqEnabled === "boolean" ? o.eqEnabled : DEFAULT_SETTINGS.eqEnabled,
+    eqGains:
+      Array.isArray(o.eqGains) && o.eqGains.length === EQ_BAND_COUNT
+        ? (o.eqGains as unknown[]).map((v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? Math.max(-12, Math.min(12, n)) : 0;
+          })
+        : [...FLAT_EQ],
     // Clé absente (réglages d'une version antérieure) ou invalide → défaut (regroupé).
     groupVersions:
       typeof o.groupVersions === "boolean" ? o.groupVersions : DEFAULT_SETTINGS.groupVersions,
@@ -113,6 +135,19 @@ export function createSettingsStore(
 
     setGroupVersions(on) {
       set({ groupVersions: on === true });
+    },
+
+    setEqEnabled(on) {
+      set({ eqEnabled: on === true });
+    },
+
+    setEqGains(gains) {
+      // Toujours 10 valeurs bornées : une valeur manquante ou absurde devient 0 dB.
+      const next = Array.from({ length: EQ_BAND_COUNT }, (_, index) => {
+        const value = Number(gains[index] ?? 0);
+        return Number.isFinite(value) ? Math.max(-12, Math.min(12, value)) : 0;
+      });
+      set({ eqGains: next });
     },
 
     async load() {
@@ -165,3 +200,7 @@ export const settingsStore: SettingsStore = createSettingsStore();
 export function useSettings<T>(selector: (state: SettingsState) => T): T {
   return useStore(settingsStore, selector);
 }
+
+
+
+
