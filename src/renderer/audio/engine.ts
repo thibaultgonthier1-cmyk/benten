@@ -1,6 +1,6 @@
 import type { QualityMode, TrackRow } from "../../shared/types";
 import type { Decoder } from "./decoder";
-import { nextStartTime, shouldPreload } from "./schedule";
+import { crossfadeGains, crossfadeStartTime, nextStartTime, normalizeCrossfade, shouldPreload } from "./schedule";
 import { buildOrder, nextInOrder, prevInOrder, type RepeatMode } from "./order";
 
 export type { RepeatMode } from "./order";
@@ -193,6 +193,12 @@ export class AudioEngine {
   private scheduledBuffer: AudioBuffer | null = null;
   /** Instant-contexte (s) auquel la source programmee demarre = fin de la courante. */
   private scheduledWhen = 0;
+  /** Fondu enchainé (s) ; 0 = gapless pur, comportement historique. */
+  private crossfadeSec = 0;
+  /** Gain dédié à la source courante (n'existe qu'en mode fondu). */
+  private sourceGain: GainNode | null = null;
+  /** Gain dédié à la source programmée (n'existe qu'en mode fondu). */
+  private scheduledGain: GainNode | null = null;
 
   /**
    * @param context  `AudioContext` partage (injectable → mockable).
@@ -424,7 +430,18 @@ export class AudioEngine {
     this.teardownSource();
     const source = this.context.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.gain);
+    // En mode fondu, chaque source a SON gain : c'est lui qu'on baisse pendant que la suivante
+    // monte. À fondu 0, on garde le câblage historique (une seule source -> `gain`).
+    if (this.crossfadeSec > 0) {
+      const sg = this.context.createGain();
+      sg.gain.value = 1;
+      source.connect(sg);
+      sg.connect(this.gain);
+      this.sourceGain = sg;
+    } else {
+      source.connect(this.gain);
+      this.sourceGain = null;
+    }
     this.attachEndedHandler(source);
     const start = clamp(offsetSec, 0, this.durationSec);
     this.startOffsetSec = start;
@@ -487,6 +504,15 @@ export class AudioEngine {
   private teardownSource(): void {
     const source = this.source;
     this.source = null;
+    // Le gain dédié meurt avec sa source (sinon il resterait accroché au graphe).
+    if (this.sourceGain) {
+      try {
+        this.sourceGain.disconnect();
+      } catch {
+        /* déjà détaché */
+      }
+      this.sourceGain = null;
+    }
     if (!source) return;
     source.onended = null;
     try {
@@ -968,10 +994,32 @@ export class AudioEngine {
     const buffer = this.preloadedBuffer;
     if (!buffer || (this.scheduledForIndex === index && this.scheduledSource)) return;
     const prevStart = this.startedAtCtxTime - this.startOffsetSec;
-    const when = nextStartTime(prevStart, this.durationSec);
+    const endTime = nextStartTime(prevStart, this.durationSec);
+    // Fondu : on démarre la suivante AVANT la fin ; gapless : exactement à la fin.
+    const fadeSec = this.crossfadeSec;
+    const when = fadeSec > 0 ? crossfadeStartTime(endTime, fadeSec, prevStart) : endTime;
     const source = this.context.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.gain);
+
+    if (fadeSec > 0) {
+      // Deux gains indépendants, rampes PROGRAMMÉES sur l'horloge audio (aucun tick requis) :
+      // l'ancienne descend, la nouvelle monte, en égalité de puissance.
+      const outgoing = this.sourceGain;
+      const incoming = this.context.createGain();
+      const { current, next } = crossfadeGains(0);
+      const fadeEnd = when + fadeSec;
+      if (outgoing) {
+        outgoing.gain.setValueAtTime(current, when);
+        outgoing.gain.linearRampToValueAtTime(0, fadeEnd);
+      }
+      incoming.gain.setValueAtTime(next, when);
+      incoming.gain.linearRampToValueAtTime(1, fadeEnd);
+      source.connect(incoming);
+      incoming.connect(this.gain);
+      this.scheduledGain = incoming;
+    } else {
+      source.connect(this.gain);
+    }
     // `onended` reste nul jusqu'a la promotion : cette source ne doit pas avancer la file seule.
     this.scheduledSource = source;
     this.scheduledForIndex = index;
@@ -1024,6 +1072,9 @@ export class AudioEngine {
     this.scheduledForIndex = null;
     this.scheduledBuffer = null;
     this.scheduledWhen = 0;
+    // Le gain du fondu devient celui de la source courante (il est déjà remonté à 1).
+    this.sourceGain = this.scheduledGain;
+    this.scheduledGain = null;
     this.preloadedBuffer = null;
     this.preloadedForIndex = null;
     this.preloadStartedForIndex = null;
@@ -1053,6 +1104,9 @@ export class AudioEngine {
     this.scheduledForIndex = null;
     this.scheduledBuffer = null;
     this.scheduledWhen = 0;
+    // Le gain du fondu devient celui de la source courante (il est déjà remonté à 1).
+    this.sourceGain = this.scheduledGain;
+    this.scheduledGain = null;
     if (!source) return;
     source.onended = null;
     try {
@@ -1103,6 +1157,9 @@ export class AudioEngine {
     this.scheduledForIndex = null;
     this.scheduledBuffer = null;
     this.scheduledWhen = 0;
+    // Le gain du fondu devient celui de la source courante (il est déjà remonté à 1).
+    this.sourceGain = this.scheduledGain;
+    this.scheduledGain = null;
     return end;
   }
 
@@ -1194,6 +1251,22 @@ export class AudioEngine {
     }
     this.userVolume = target;
   }
+  /**
+   * Règle la durée du fondu enchaîné (0 = désactivé, gapless pur).
+   *
+   * Le fondu ne touche ni la file, ni les fondus anti-clic : il ajoute un gain par source et
+   * décale le départ de la suivante de `fadeSec`, exactement comme `nextStartTime` le fait pour
+   * le gapless. À 0, aucun nœud supplémentaire n'est créé.
+   */
+  setCrossfade(seconds: number): void {
+    this.crossfadeSec = normalizeCrossfade(seconds);
+  }
+
+  /** Durée de fondu effective (0 = désactivé). */
+  getCrossfade(): number {
+    return this.crossfadeSec;
+  }
+
   /** Volume utilisateur courant [0,1], lu depuis le noeud dedie (source de verite du graphe). */
   getVolume(): number {
     const v = this.volumeGain.gain.value;
@@ -1278,6 +1351,11 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+
+
+
+
+
 
 
 

@@ -450,6 +450,37 @@ describe("AudioEngine", () => {
     });
   });
 
+  describe("fondu enchainé (T-17 fondu)", () => {
+    it("à 0 : la suivante démarre exactement à la fin (gapless inchangé)", () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      expect(engine.getCrossfade()).toBe(0);
+    });
+
+    it("accepte une durée, la borne, et revient à 0", () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      engine.setCrossfade(6);
+      expect(engine.getCrossfade()).toBe(6);
+      engine.setCrossfade(60);
+      expect(engine.getCrossfade()).toBe(12);
+      engine.setCrossfade(0);
+      expect(engine.getCrossfade()).toBe(0);
+    });
+
+    it("ne crée aucun gain supplémentaire quand le fondu est désactivé", async () => {
+      const local = new FakeAudioContext();
+      const engine = makeEngine(local, okDecoder(new FakeAudioBuffer(20)));
+      await engine.setQueue([track({ id: 1 }), track({ id: 2 })], 0);
+      engine.play();
+      // `gain` + `volumeGain`, créés au constructeur : le gapless n''en ajoute aucun.
+      expect(local.gainCount).toBe(2);
+
+      // Fondu actif : chaque source reçoit son gain dédié, donc le compte monte.
+      engine.setCrossfade(6);
+      await engine.next();
+      expect(local.gainCount).toBeGreaterThan(2);
+    });
+  });
+
   describe("rebuildContext (contextes mockes)", () => {
     it("conserve trackId et se repositionne EN PAUSE a la position memorisee", async () => {
       const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(200)));
@@ -519,6 +550,8 @@ describe("AudioEngine", () => {
     });
   });
 });
+
+
 
 
 
