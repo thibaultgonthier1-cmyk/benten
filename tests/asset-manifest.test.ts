@@ -39,6 +39,7 @@ describe("assets/manifest", () => {
     const wired: readonly AssetId[] = [
       "tex.goldLeaf",
       "tex.washi",
+      "logo.animated",
       "tex.lacquer",
       "tex.seigaihaDisc",
       "fx.pluck",
@@ -58,8 +59,8 @@ describe("assets/manifest", () => {
   });
 
   it("DA4 : ce qui n'est pas encore approuvé garde son repli (null)", () => {
-    // Plus que le logo animé : aucun rendu n'a été produit pour lui (rien dans design/motion).
-    const pending: readonly AssetId[] = ["logo.animated"];
+    // Toutes les ressources produites sont désormais branchées.
+    const pending: readonly AssetId[] = [];
     for (const id of pending) expect(assetUrl(id)).toBeNull();
   });
 
@@ -71,6 +72,7 @@ describe("assets/manifest", () => {
     expect(assetUrl(bad)).toBeNull();
   });
 });
+
 
 
 
