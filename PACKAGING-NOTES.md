@@ -58,6 +58,23 @@ Tant que le mode développeur est désactivé, l'app est reconstruite à la main
 dans le binaire). L'icône de fenêtre et de barre des tâches, elle, est bien la nouvelle, puisqu'elle
 est chargée à l'exécution.
 
+## Où vit l'app installée (31/10/2026)
+
+L'app utilisée au quotidien est **copiée hors du dossier de compilation**, dans un emplacement
+stable, avec un raccourci sur le Bureau :
+
+| Élément | Chemin |
+| --- | --- |
+| Application | `C:\Users\Dream\Apps\Benten\` |
+| Exécutable | `C:\Users\Dream\Apps\Benten\Benten.exe` |
+| Raccourci | Bureau → `Benten.lnk` |
+| Données | `%APPDATA%\benten\` (base, cache de pochettes, cookies, yt-dlp) |
+| Téléchargements | `%USERPROFILE%\Music\Benten\{YouTube,Apple}` (ajoutés comme sources) |
+
+Mettre à jour l'app = reconstruire `app.asar` dans `C:\Users\Dream\Apps\Benten\resources\`.
+Le dossier `release/win-unpacked` n'est qu'une sortie de compilation : ne pas l'utiliser au
+quotidien, il peut être écrasé au prochain build.
+
 ## Tailles et chemins (version actuelle)
 
 | Élément | Chemin | Taille |
@@ -88,3 +105,4 @@ Les pochettes sont alors ré-extraites à la première lecture, en 1024.
 1. `npm run build:win` → produit l'installeur NSIS et la version **portable** (un seul `.exe`).
 2. Vérifier que l'icône embarquée est la nouvelle (soleil d'or + torii), lisible à 16 px.
 3. Noter ici les tailles finales des deux artefacts.
+
