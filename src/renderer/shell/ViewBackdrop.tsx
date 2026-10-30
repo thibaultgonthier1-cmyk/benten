@@ -1,26 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { assetUrl, type AssetId } from "../assets/manifest";
+import { usePlayer } from "../state/player";
 import { useUi, type RouteName } from "../state/ui";
 import { useMotion } from "../ui/useMotion";
+import { requestFx } from "../ui/FxOverlay";
 import "./backdrop.css";
 
 /**
- * Fond animé par catégorie.
+ * Fond réactif.
  *
- * Chaque vue a son ambiance : l'accueil respire avec Benzaiten, les titres avec le torii au bord
- * de l'eau, les playlists avec la pose de biwa… Quand on change de catégorie, l'ancienne image
- * reste en place et s'efface pendant que la nouvelle apparaît — c'est un FONDU ENCHAÎNÉ de fonds,
- * pas un remplacement sec.
+ * Trois choses le font vivre, et aucune ne dépend d'une vidéo longue :
  *
- * Coût maîtrisé : deux couches image au maximum, transitions sur `opacity` et `transform`
- * uniquement (composited), aucun `filter: blur()`. En mouvement réduit, pas de dérive lente et un
- * fondu instantané.
+ *  1. **Il suit la lecture.** La scène 3D se fige quand tu mets en pause et reprend quand tu
+ *     relances ; le fond baisse légèrement en pause. Le décor « écoute » l'app.
+ *  2. **Il suit le défilement.** Un léger décalage par rapport au contenu (parallaxe) donne du
+ *     relief : transform seulement, une mise à jour par frame au maximum.
+ *  3. **Il réagit au changement de piste.** Une onde dorée traverse le fond au moment où le
+ *     morceau change — c'est l'effet `fx.ripple` déjà produit, pas une nouvelle vidéo.
+ *
+ * En mouvement réduit : ni parallaxe ni onde, et la vidéo reste simplement posée.
  */
 
 /**
- * Fond de chaque catégorie. Les vues les plus regardées reçoivent la SCÈNE 3D (Blender) ; les
- * autres gardent une illustration fixe — une vidéo par vue coûterait trop de décodage pour un
- * écran qu'on traverse.
+ * Fond de chaque catégorie. Les vues les plus regardées reçoivent une SCÈNE ANIMÉE ; les autres
+ * gardent une illustration fixe — une vidéo par vue coûterait trop de décodage pour un écran qu'on
+ * traverse.
  */
 const SCENE_ROUTES: ReadonlySet<RouteName> = new Set<RouteName>(["home", "tracks", "albums"]);
 
@@ -46,60 +50,112 @@ interface Layer {
   video: boolean;
 }
 
+/** Amplitude de la parallaxe : 8 % du défilement, plafonnée. */
+const PARALLAX_RATE = 0.08;
+const PARALLAX_MAX = 40;
+
 export function ViewBackdrop(): JSX.Element | null {
   const route = useUi((s) => s.route.name);
+  const playing = usePlayer((s) => s.status === "playing");
+  const trackId = usePlayer((s) => s.currentTrack?.id ?? null);
   const m = useMotion();
   const [layers, setLayers] = useState<Layer[]>([]);
+  const [shift, setShift] = useState(0);
   const counter = useRef(0);
+  const lastTrack = useRef<number | null>(null);
 
+  // --- Changement de catégorie : fondu enchaîné ------------------------------------------------
   useEffect(() => {
     const isScene = SCENE_ROUTES.has(route);
-    const url = isScene ? assetUrl("scene.torii") : (() => {
-      const id = BACKDROP_FOR[route];
-      return id ? assetUrl(id) : null;
-    })();
+    const url = isScene
+      ? assetUrl("scene.torii")
+      : (() => {
+          const id = BACKDROP_FOR[route];
+          return id ? assetUrl(id) : null;
+        })();
     if (!url) {
       setLayers([]);
       return;
     }
     counter.current += 1;
     const next: Layer = { id: counter.current, url, video: isScene };
-    // On garde l'ancienne couche le temps du fondu (elle s'efface), puis on la retire.
     setLayers((previous) => [...previous.slice(-1), next]);
-    const timer = window.setTimeout(() => {
-      setLayers((previous) => previous.filter((layer) => layer.id === next.id));
-    }, m.enabled ? 900 : 0);
+    const timer = window.setTimeout(
+      () => setLayers((previous) => previous.filter((layer) => layer.id === next.id)),
+      m.enabled ? 900 : 0,
+    );
     return () => window.clearTimeout(timer);
   }, [route, m.enabled]);
+
+  // --- Défilement : parallaxe ---------------------------------------------------------------
+  useEffect(() => {
+    if (!m.enabled) {
+      setShift(0);
+      return undefined;
+    }
+    const scroller = document.querySelector<HTMLElement>(".shell-scroll");
+    if (!scroller) return undefined;
+    let raf = 0;
+    const onScroll = (): void => {
+      if (raf) return; // une seule mise à jour par frame, même si l'événement pleut
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        setShift(Math.min(PARALLAX_MAX, scroller.scrollTop * PARALLAX_RATE));
+      });
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [m.enabled]);
+
+  // --- Changement de piste : onde dorée ------------------------------------------------------
+  useEffect(() => {
+    if (trackId === null) return;
+    const previous = lastTrack.current;
+    lastTrack.current = trackId;
+    if (previous === null || previous === trackId || !m.enabled) return; // premier morceau : rien
+    requestFx("ripple", { x: window.innerWidth / 2, y: Math.round(window.innerHeight * 0.22) }, { size: 520 });
+  }, [trackId, m.enabled]);
+
+  // La scène se fige en pause : le décor suit l'état de l'app.
+  useEffect(() => {
+    const video = document.querySelector<HTMLVideoElement>(".view-backdrop-video[data-current='true']");
+    if (!video) return;
+    if (playing) void video.play().catch(() => undefined);
+    else video.pause();
+  }, [playing, layers]);
 
   if (layers.length === 0) return null;
 
   return (
-    <div className="view-backdrop-layer" aria-hidden="true">
-      {layers.map((layer, index) =>
-        layer.video ? (
+    <div className="view-backdrop-layer" aria-hidden="true" data-playing={playing ? "true" : "false"}>
+      {layers.map((layer, index) => {
+        const current = index === layers.length - 1;
+        const style = { transform: `translate3d(0, ${-shift}px, 0)` };
+        return layer.video ? (
           <video
             key={layer.id}
             className="view-backdrop-frame view-backdrop-video"
-            data-current={index === layers.length - 1 ? "true" : "false"}
+            data-current={current ? "true" : "false"}
+            style={style}
             src={layer.url}
             autoPlay
             muted
             loop
             playsInline
             preload="auto"
-            aria-hidden="true"
           />
         ) : (
           <div
             key={layer.id}
             className="view-backdrop-frame"
-            data-current={index === layers.length - 1 ? "true" : "false"}
-            style={{ backgroundImage: `url("${layer.url}")` }}
+            data-current={current ? "true" : "false"}
+            style={{ ...style, backgroundImage: `url("${layer.url}")` }}
           />
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }
-
