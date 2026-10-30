@@ -58,7 +58,22 @@ Tant que le mode développeur est désactivé, l'app est reconstruite à la main
 dans le binaire). L'icône de fenêtre et de barre des tâches, elle, est bien la nouvelle, puisqu'elle
 est chargée à l'exécution.
 
-## Où vit l'app installée (31/10/2026)
+## Installation par utilisateur (sans administrateur)
+
+Comme `electron-builder` reste bloqué (voir plus bas), l''app est installée **par utilisateur**,
+sans élévation — c''est un vrai emplacement d''installation Windows, pas un dossier de compilation :
+
+| Élément | Chemin |
+| --- | --- |
+| Application installée | `%LOCALAPPDATA%\Programs\Benten\` |
+| Menu Démarrer | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Benten.lnk` |
+| Bureau | `Benten.lnk` |
+| Désinstallation | Paramètres → Applications → Benten (entrée `HKCU\...\Uninstall\Benten`) |
+
+Mettre à jour = recopier le contenu de `release/win-unpacked` (ou l''asar reconstruit) dans
+`%LOCALAPPDATA%\Programs\Benten\`, app fermée.
+
+## Où vit l''app installée (31/10/2026)
 
 L'app utilisée au quotidien est **copiée hors du dossier de compilation**, dans un emplacement
 stable, avec un raccourci sur le Bureau :
@@ -105,4 +120,5 @@ Les pochettes sont alors ré-extraites à la première lecture, en 1024.
 1. `npm run build:win` → produit l'installeur NSIS et la version **portable** (un seul `.exe`).
 2. Vérifier que l'icône embarquée est la nouvelle (soleil d'or + torii), lisible à 16 px.
 3. Noter ici les tailles finales des deux artefacts.
+
 

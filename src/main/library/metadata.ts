@@ -92,7 +92,10 @@ export async function readMetadata(path: string): Promise<TrackInput> {
       path,
       title: clean(common.title) || guess.title,
       artist: clean(common.artist) || clean(common.albumartist) || guess.artist,
-      album: clean(common.album) || guess.album,
+      // Un fichier téléchargé (YouTube/Apple) posé à plat n''a pas de tag album : on prend alors
+      // l''ARTISTE comme album, sinon tous les téléchargements s''entassent dans un album nommé
+      // d''après le dossier (« YouTube ») et la vue Albums devient un cimetière de 1 titre.
+      album: clean(common.album) || clean(common.artist) || clean(common.albumartist) || guess.album,
       albumArtist: clean(common.albumartist) || null,
       trackNo: common.track.no ?? guess.trackNo,
       discNo: common.disk?.no ?? null,
@@ -109,3 +112,4 @@ export async function readMetadata(path: string): Promise<TrackInput> {
     return unplayable;
   }
 }
+
