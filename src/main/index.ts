@@ -31,6 +31,10 @@ registerArtScheme();
 // politique d'autoplay de Chromium laisserait l'AudioContext suspendu et « play » resterait muet.
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
+// Identité Windows : sans ça, la barre des tâches regroupe l'app sous « Electron » et
+// certaines fonctions (notifications, épinglage) l'attribuent au mauvais programme.
+app.setAppUserModelId("com.benten.player");
+
 // Harnais de vérification CDP : en dev uniquement, ouvre le port de debogage distant pour que
 // `scripts/cdp-smoke.mjs` puisse piloter le vrai renderer. Garde sur ELECTRON_RENDERER_URL afin
 // de ne jamais exposer ce port dans un build de production.
@@ -509,6 +513,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

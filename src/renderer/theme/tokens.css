@@ -1526,3 +1526,48 @@ button.qopt:focus-visible {
   margin-left: 10px;
   flex: none;
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Vue Lecture — la pochette est CENTRÉE DEVANT le disque, et l'ensemble suit la taille de la
+   fenêtre.
+
+   Avant : `.np-cover { inset: 0 }` remplissait tout l'étage — le disque laqué était donc
+   entièrement caché, on ne voyait que le bord de l'anneau. Maintenant :
+     • l'étage grandit avec la fenêtre (largeur ET hauteur),
+     • le disque occupe l'étage entier et déborde un peu,
+     • la pochette est posée au centre, à 74 % — le disque reste visible tout autour.
+   --------------------------------------------------------------------------------------------- */
+.np-stage {
+  width: clamp(220px, min(58vh, 46vw), 520px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+
+.np-disc {
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.np-ring {
+  inset: 2%;
+}
+
+.np-cover {
+  position: absolute;
+  inset: auto;
+  width: 74%;
+  aspect-ratio: 1;
+  border-radius: 18px;
+  /* Centrée par construction : plus fiable qu'un `inset` calculé. */
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+}
+
+@media (max-width: 900px) {
+  .np-stage {
+    width: clamp(200px, min(46vh, 74vw), 340px);
+  }
+}

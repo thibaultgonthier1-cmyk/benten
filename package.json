@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "npm run typecheck && electron-vite build && node scripts/copy-icon.mjs",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -47,3 +47,4 @@
     "vitest": "5.0.5"
   }
 }
+
