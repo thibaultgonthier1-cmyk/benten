@@ -60,6 +60,20 @@ describe("buildYtDlpArgs", () => {
   });
 });
 
+describe("buildYtDlpArgs — ffmpeg", () => {
+  it("omet --ffmpeg-location quand le chemin est inconnu (yt-dlp cherche dans le PATH)", () => {
+    const args = buildYtDlpArgs("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "C:\\out", null);
+    expect(args).not.toContain("--ffmpeg-location");
+    expect(args).toContain("-x");
+    expect(args).toContain("mp3");
+  });
+
+  it("accepte un chemin réel", () => {
+    const args = buildYtDlpArgs("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "C:\\out", "C:\\ffmpeg.exe");
+    expect(args[args.indexOf("--ffmpeg-location") + 1]).toBe("C:\\ffmpeg.exe");
+  });
+});
+
 describe("parseProgress", () => {
   it("lit une ligne de téléchargement", () => {
     expect(parseProgress("[download]  42.3% of 3.21MiB at 1.2MiB/s ETA 00:02")).toEqual({
@@ -132,3 +146,4 @@ describe("ensureYtDlp", () => {
     expect(checksumFor(text, "missing.exe")).toBeNull();
   });
 });
+

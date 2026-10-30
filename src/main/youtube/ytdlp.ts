@@ -22,8 +22,11 @@ const RELEASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
 const BINARY = "yt-dlp.exe";
 const SUMS = "SHA2-256SUMS";
 
-export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath: string): string[] {
-  return [
+export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath?: string | null): string[] {
+  // `--ffmpeg-location` n''accepte QU''UN chemin réel : passer le mot « ffmpeg » produit
+  // « ffmpeg-location ffmpeg does not exist » et laisse des .webm sans conversion. Quand le
+  // chemin est inconnu, on omet l''option : yt-dlp trouve alors ffmpeg dans le PATH.
+  const args = [
     "-x",
     "--audio-format",
     "mp3",
@@ -33,12 +36,10 @@ export function buildYtDlpArgs(url: string, outDir: string, ffmpegPath: string):
     "--add-metadata",
     "--no-playlist",
     "--newline",
-    "--ffmpeg-location",
-    ffmpegPath,
-    "-o",
-    join(outDir, "%(artist,uploader)s - %(title)s.%(ext)s"),
-    url,
   ];
+  if (ffmpegPath && ffmpegPath.trim().length > 0) args.push("--ffmpeg-location", ffmpegPath);
+  args.push("-o", join(outDir, "%(artist,uploader)s - %(title)s.%(ext)s"), url);
+  return args;
 }
 
 /** Ligne de sortie yt-dlp → avancement, ou `null` si la ligne n'en porte pas. */
@@ -114,6 +115,7 @@ export async function readYtDlpVersion(
 export async function readSumsFile(path: string): Promise<string> {
   return readFile(path, "utf8");
 }
+
 
 
 

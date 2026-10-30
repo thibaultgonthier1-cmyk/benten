@@ -30,7 +30,8 @@ export interface YoutubeJob {
 export interface YoutubeManagerOptions {
   binaryPath: string;
   outputDir: string;
-  ffmpegPath: string;
+  /** Chemin réel de ffmpeg ; absent → yt-dlp le cherche dans le PATH. */
+  ffmpegPath?: string | null;
   spawnImpl?: typeof spawn;
   listFiles?: (dir: string) => Promise<string[]>;
   onProgress?: (job: YoutubeJob) => void;
@@ -198,4 +199,5 @@ async function pickNewest(dir: string, names: string[]): Promise<string | null> 
   }
   return best ? best.name : null;
 }
+
 

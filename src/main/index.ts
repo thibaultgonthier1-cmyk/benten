@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, powerMonitor } from "electron";
 import { existsSync, mkdirSync, promises as fs, readdirSync } from "node:fs";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
@@ -170,7 +170,22 @@ app.whenReady().then(() => {
   // vérification de son empreinte. `ffmpeg` : celui du PATH, ou `BENTEN_FFMPEG` s'il est ailleurs.
   const youtubeDir = join(app.getPath("music"), "Benten", "YouTube");
   const ytBin = join(userData, "bin", "yt-dlp.exe");
-  const ffmpegPath = process.env.BENTEN_FFMPEG ?? "ffmpeg";
+  // ffmpeg : on résout un VRAI chemin (variable d''environnement, sinon `where`). S''il reste
+  // inconnu, on n''impose rien à yt-dlp : il le trouvera dans le PATH. Passer le mot « ffmpeg »
+  // comme chemin laissait des .webm non convertis.
+  const ffmpegPath = (() => {
+    const explicit = process.env.BENTEN_FFMPEG;
+    if (explicit && existsSync(explicit)) return explicit;
+    try {
+      const found = execFileSync("where.exe", ["ffmpeg"], { encoding: "utf8", timeout: 8000 })
+        .split(/\r?\n/)[0]
+        ?.trim();
+      return found && existsSync(found) ? found : null;
+    } catch {
+      return null;
+    }
+  })();
+  journal?.log({ kind: "process", event: "youtube.ffmpeg", path: ffmpegPath });
   const youtubeManager = new YoutubeManager({
     binaryPath: ytBin,
     outputDir: youtubeDir,
@@ -432,6 +447,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 
