@@ -39,7 +39,7 @@ import {
   shuffleArtist,
 } from "./artistPlay";
 import { EmptyState } from "./common";
-import { HeroCompactBar, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
+import { HeroCompactBar, safeTint, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
 import { anchorBelow, anchorFromEvent, playlistMenuItem, useViewMenus } from "./menus";
 import "./views.css";
 import "./artists.css";
@@ -88,7 +88,7 @@ function ArtistPageView({
   const colors = useCoverColors(page.artKey, seed);
   // Couleur seulement quand elle est connue (jamais le repli génératif transitoire d'une vraie pochette).
   const resolved = page.artKey ? coverColorCache.peek(page.artKey) : colors;
-  useTopTint(scrollRef, resolved?.vibrant ?? null);
+  useTopTint(scrollRef, safeTint(resolved?.vibrant));
   const actionsRef = useRef<HTMLDivElement>(null);
   const compact = useCompactOnScroll(scrollRef, actionsRef);
 
@@ -417,3 +417,4 @@ function ArtistSkeleton(): JSX.Element {
     </div>
   );
 }
+

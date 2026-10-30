@@ -32,7 +32,7 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
   "tex.goldLeaf": new URL("./tex/gold-leaf.png", import.meta.url).href,
   "tex.lacquer": new URL("./tex/lacquer.png", import.meta.url).href,
   "tex.seigaihaDisc": new URL("./tex/seigaiha-disc.png", import.meta.url).href,
-  "tex.washi": null,
+  "tex.washi": new URL("./tex/washi.webp", import.meta.url).href,
   "fx.pluck": new URL("./fx/pluck.webm", import.meta.url).href,
   "fx.inkVeil": new URL("./fx/inkveil.webm", import.meta.url).href,
   "fx.goldFlakes": new URL("./fx/goldflakes.webm", import.meta.url).href,
@@ -49,3 +49,4 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
 export function assetUrl(id: AssetId): string | null {
   return Object.prototype.hasOwnProperty.call(ASSET_MAP, id) ? ASSET_MAP[id] : null;
 }
+

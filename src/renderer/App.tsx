@@ -13,6 +13,7 @@ import { Intro } from "./components/Intro";
 import { CompactPlayer } from "./components/CompactPlayer";
 import { configureSleepTimer } from "./runtime/sleepTimerHost";
 import { applyEqualizer, bindEqualizer } from "./components/EqualizerPanel";
+import { assetUrl } from "./assets/manifest";
 import { useUi } from "./state/ui";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
@@ -160,6 +161,13 @@ export function App(): JSX.Element {
     applyEqualizer();
   }, [engine]);
 
+  // Texture washi : posée en variable CSS une fois, consommée par les panneaux (feuille de papier
+  // japonais). Absente → les panneaux gardent leur dégradé, rien ne casse.
+  useEffect(() => {
+    const washi = assetUrl("tex.washi");
+    if (washi) document.documentElement.style.setProperty("--tex-washi", `url("${washi}")`);
+  }, []);
+
   const compact = useUi((s) => s.compact);
 
   if (compact) {
@@ -186,6 +194,7 @@ export function App(): JSX.Element {
     </>
   );
 }
+
 
 
 
