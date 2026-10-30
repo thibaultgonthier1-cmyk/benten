@@ -112,7 +112,7 @@ describe("resolveYoutubePlaylist", () => {
 
     await resolveYoutubePlaylist("yt-dlp.exe", "https://www.youtube.com/playlist?list=x", {
       spawnImpl,
-      cookiesPath: "C:/data/youtube-cookies.txt",
+      cookieArgs: ["--cookies", "C:/data/youtube-cookies.txt"],
     });
     expect(captured).toContain("--cookies");
     expect(captured[captured.indexOf("--cookies") + 1]).toBe("C:/data/youtube-cookies.txt");
@@ -134,4 +134,5 @@ describe("resolveYoutubePlaylist", () => {
     expect(captured).not.toContain("--cookies");
   });
 });
+
 

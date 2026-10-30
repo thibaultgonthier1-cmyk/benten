@@ -235,6 +235,13 @@ export interface AppleProgressView {
   error: string;
 }
 /** T15 — état du binaire yt-dlp. */
+/** Source des cookies YouTube (playlists privées). */
+export interface YoutubeCookieSourceView {
+  mode: "none" | "file" | "browser";
+  browser: string;
+  file: boolean;
+}
+
 export interface YoutubeStatusView {
   installed: boolean;
   version: string | null;
@@ -350,6 +357,8 @@ export interface BentenApi {
     playlistPreview(url: string): Promise<YoutubePlaylistPreview>;
     playlistStart(urls: readonly string[]): Promise<YoutubeStatusView | { queued: number }>;
     saveCookies(text: string): Promise<{ entries: number }>;
+    cookieSource(): Promise<YoutubeCookieSourceView>;
+    setCookieSource(value: { mode: "none" | "file" | "browser"; browser?: string }): Promise<YoutubeCookieSourceView>;
     onProgress(cb: (job: YoutubeJobView) => void): () => void;
   };
 }
@@ -359,6 +368,7 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 
 

@@ -350,6 +350,8 @@ export interface IpcHooks {
     playlistPreview(url: unknown): Promise<unknown>;
     playlistStart(urls: readonly string[]): Promise<unknown>;
     saveCookies(text: string): Promise<{ entries: number }>;
+    cookieSource(): Promise<unknown>;
+    setCookieSource(value: unknown): Promise<unknown>;
     enqueue(url: unknown): unknown;
     jobs(): unknown;
     status(): unknown;
@@ -471,6 +473,11 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     assertTrusted(event);
     if (!Array.isArray(urls) || urls.length === 0) throw new Error("youtube:playlist-start: aucune piste");
     return hooks?.youtube?.playlistStart(urls.map((value) => String(value))) ?? { queued: 0 };
+  });
+  ipcMain.handle(CHANNELS.YOUTUBE_COOKIE_SOURCE, async (event, value?: unknown) => {
+    assertTrusted(event);
+    if (value === undefined) return hooks?.youtube?.cookieSource() ?? { mode: "none", browser: "chrome", file: false };
+    return hooks?.youtube?.setCookieSource(value) ?? { mode: "none", browser: "chrome" };
   });
   ipcMain.handle(CHANNELS.YOUTUBE_SAVE_COOKIES, (event, text: unknown) => {
     assertTrusted(event);
@@ -651,6 +658,7 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
 
 
 

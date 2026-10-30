@@ -81,6 +81,8 @@ const api: BentenApi = {
     playlistPreview: (url) => invoke(CHANNELS.YOUTUBE_PLAYLIST_PREVIEW, url),
     playlistStart: (urls) => invoke(CHANNELS.YOUTUBE_PLAYLIST_START, urls),
     saveCookies: (text) => invoke(CHANNELS.YOUTUBE_SAVE_COOKIES, text),
+    cookieSource: () => invoke(CHANNELS.YOUTUBE_COOKIE_SOURCE),
+    setCookieSource: (value) => invoke(CHANNELS.YOUTUBE_COOKIE_SOURCE, value),
     onProgress: (cb) => {
       const listener = (_e: unknown, job: Parameters<typeof cb>[0]): void => cb(job);
       ipcRenderer.on(CHANNELS.YOUTUBE_PROGRESS, listener);
@@ -98,6 +100,7 @@ const api: BentenApi = {
 };
 
 contextBridge.exposeInMainWorld("benten", api);
+
 
 
 

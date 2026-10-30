@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Download, Link2, Loader2, TriangleAlert } from "lucide-react";
-import type { YoutubeJobView, YoutubePlaylistPreview, YoutubeStatusView } from "../../shared/types";
+import type { YoutubeCookieSourceView, YoutubeJobView, YoutubePlaylistPreview, YoutubeStatusView } from "../../shared/types";
 import { parseYoutubePlaylistUrl, validateYoutubeUrl } from "../../shared/youtube";
 import { Button } from "../ui/Button";
 import { useMotion } from "../ui/useMotion";
@@ -41,6 +41,7 @@ export function DownloadsView(): JSX.Element {
   const [cookieOpen, setCookieOpen] = useState(false);
   const [cookieText, setCookieText] = useState("");
   const [cookieNote, setCookieNote] = useState<string | null>(null);
+  const [cookieSource, setCookieSource] = useState<YoutubeCookieSourceView>({ mode: "none", browser: "chrome", file: false });
   const m = useMotion();
 
   const api = typeof window !== "undefined" ? window.benten?.youtube : undefined;
@@ -52,6 +53,7 @@ export function DownloadsView(): JSX.Element {
     if (!api) return;
     void api.jobs().then(setJobs);
     void api.status().then(setStatus);
+    void api.cookieSource().then(setCookieSource);
     return api.onProgress((job) => {
       setJobs((previous) => {
         const index = previous.findIndex((item) => item.id === job.id);
@@ -102,6 +104,22 @@ export function DownloadsView(): JSX.Element {
       setPlaylistBusy(false);
     }
   }, [api, playlist]);
+  const chooseSource = useCallback(
+    async (mode: "none" | "file" | "browser", browser?: string) => {
+      if (!api) return;
+      const next = await api.setCookieSource({ mode, browser: browser ?? cookieSource.browser });
+      setCookieSource(next);
+      setCookieNote(
+        mode === "browser"
+          ? "Cookies lus depuis le navigateur à chaque appel — jamais périmés."
+          : mode === "file"
+            ? "Cookies du fichier exporté (périmés en quelques minutes : ré-exporte juste avant)."
+            : "Aucun cookie : seules les playlists publiques sont lisibles.",
+      );
+    },
+    [api, cookieSource.browser],
+  );
+
   const saveCookies = useCallback(async () => {
     if (!api || cookieText.trim().length === 0) return;
     try {
@@ -185,13 +203,38 @@ export function DownloadsView(): JSX.Element {
       {linkError && <p className="dl-hint dl-hint--bad">{linkError}</p>}
       {cookieNote && <p className="dl-hint">{cookieNote}</p>}
 
-      <p className="dl-cookies-line">
-        {status.cookies ? "Cookies YouTube enregistrés — les playlists privées sont lisibles." : "Playlist privée ?"}
-        {" "}
-        <button className="dl-link" type="button" onClick={() => setCookieOpen((open) => !open)}>
-          {status.cookies ? "Mettre à jour" : "Ajouter mes cookies YouTube"}
-        </button>
-      </p>
+      <div className="dl-cookies-line">
+        <span>Playlist privée ?</span>
+        <select
+          className="dl-select"
+          value={cookieSource.mode}
+          onChange={(e) => void chooseSource(e.target.value as "none" | "file" | "browser")}
+          aria-label="Source des cookies YouTube"
+        >
+          <option value="none">Sans cookies (playlists publiques)</option>
+          <option value="browser">Depuis mon navigateur (recommandé)</option>
+          <option value="file">Fichier cookies.txt collé</option>
+        </select>
+        {cookieSource.mode === "browser" && (
+          <select
+            className="dl-select"
+            value={cookieSource.browser}
+            onChange={(e) => void chooseSource("browser", e.target.value)}
+            aria-label="Navigateur"
+          >
+            {["chrome", "edge", "firefox", "brave", "chromium"].map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
+        {cookieSource.mode === "file" && (
+          <button className="dl-link" type="button" onClick={() => setCookieOpen((open) => !open)}>
+            {cookieSource.file ? "Mettre à jour le fichier" : "Coller le fichier"}
+          </button>
+        )}
+      </div>
 
       {cookieOpen && (
         <div className="dl-cookies">
@@ -273,6 +316,8 @@ export function DownloadsView(): JSX.Element {
     </div>
   );
 }
+
+
 
 
 

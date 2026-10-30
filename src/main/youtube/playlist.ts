@@ -61,12 +61,13 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 export function resolveYoutubePlaylist(
   binaryPath: string,
   listUrl: string,
-  options: { spawnImpl?: typeof spawn; maxEntries?: number; cookiesPath?: string | null } = {},
+  options: { spawnImpl?: typeof spawn; maxEntries?: number; cookieArgs?: readonly string[] } = {},
 ): Promise<YoutubePlaylistTrack[]> {
   const spawnImpl = options.spawnImpl ?? spawn;
   const args = ["--flat-playlist", "-J", "--no-warnings", "--no-call-home"];
   // Cookies : indispensable pour une playlist PRIVÉE (les siennes) ; inutile pour une publique.
-  if (options.cookiesPath) args.push("--cookies", options.cookiesPath);
+  // Les arguments viennent de `cookieSource` : fichier exporté ou lecture directe du navigateur.
+  if (options.cookieArgs?.length) args.push(...options.cookieArgs);
   args.push(listUrl);
   return new Promise((resolve, reject) => {
     let out = "";
@@ -87,6 +88,15 @@ export function resolveYoutubePlaylist(
       if (code !== 0) {
         const detail = err.trim().split(/\r?\n/).pop() || `yt-dlp a quitté avec le code ${code}`;
         // Message actionnable : « playlist does not exist » veut presque toujours dire « privée ».
+        // Cookies du navigateur illisibles (verrou de base, chiffrement app-bound) : message dédié.
+        if (/Could not copy|Failed to decrypt|DPAPI|cookies database/i.test(detail)) {
+          reject(
+            new Error(
+              "Ce navigateur protège ses cookies et yt-dlp ne peut pas les lire. Exporte plutôt le fichier cookies.txt et colle-le ici, juste avant d'analyser.",
+            ),
+          );
+          return;
+        }
         if (/playlist does not exist|does not exist/i.test(detail)) {
           reject(
             new Error(
@@ -108,6 +118,8 @@ export function resolveYoutubePlaylist(
     });
   });
 }
+
+
 
 
 

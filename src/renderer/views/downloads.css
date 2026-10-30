@@ -282,3 +282,19 @@
   font-family: ui-monospace, Consolas, monospace;
   font-size: 11px;
 }
+
+.dl-cookies-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dl-select {
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #12100e;
+  color: var(--ivory);
+  font-size: 11.5px;
+}

@@ -97,6 +97,7 @@ describe("registerIpc", () => {
       "state:get",
       "state:set",
       "window:set-compact",
+      "youtube:cookie-source",
       "youtube:enqueue",
       "youtube:jobs",
       "youtube:playlist-preview",
@@ -598,6 +599,7 @@ describe("normalizePage / validateScanPaths", () => {
     expect(validateScanPaths([FIX])).toEqual([FIX]);
   });
 });
+
 
 
 
