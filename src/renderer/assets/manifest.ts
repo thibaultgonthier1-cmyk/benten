@@ -41,7 +41,7 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
   "ill.emptyPlaylist": new URL("./ill/empty-playlist.webp", import.meta.url).href,
   "ill.noResults": new URL("./ill/no-results.webp", import.meta.url).href,
   "ill.onboarding": new URL("./ill/onboarding.webp", import.meta.url).href,
-  "logo.animated": null,
+  "logo.animated": new URL("./motion/logo.webm", import.meta.url).href,
   "intro.gold": new URL("./intro/gold.mp4", import.meta.url).href,
 });
 
@@ -49,4 +49,5 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
 export function assetUrl(id: AssetId): string | null {
   return Object.prototype.hasOwnProperty.call(ASSET_MAP, id) ? ASSET_MAP[id] : null;
 }
+
 

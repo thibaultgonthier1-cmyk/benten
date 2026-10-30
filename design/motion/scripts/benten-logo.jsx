@@ -29,6 +29,8 @@
   var OR_CLAIR = [0.941, 0.827, 0.541]; // #f0d38a
   var IVOIRE = [0.953, 0.937, 0.91]; // #f3efe8
 
+  // Un projet doit exister : en `-r` (ligne de commande) AE démarre parfois sans projet.
+  if (!app.project) app.newProject();
   app.beginUndoGroup("Benten — logo animé");
 
   // ── Composition ────────────────────────────────────────────────────────────────────────────
@@ -64,29 +66,28 @@
   var groupe = torii.property("ADBE Root Vectors Group").addProperty("ADBE Vector Group");
   var formes = groupe.property("ADBE Vectors Group");
 
-  function poutre(nom, largeur, hauteur, y) {
+  /**
+   * Une poutre = un rectangle positionné INDIVIDUELLEMENT dans le groupe.
+   *
+   * Piège rencontré : le transform de groupe est partagé par toutes ses formes — positionner le
+   * groupe pour chaque poutre empile tout au même endroit (on obtient une croix, pas un torii).
+   * C'est donc `ADBE Vector Rect Position` (propre à la forme) qu'il faut régler.
+   */
+  function poutre(nom, largeur, hauteur, x, y) {
     var rect = formes.addProperty("ADBE Vector Shape - Rect");
     rect.property("ADBE Vector Rect Size").setValue([largeur, hauteur]);
+    rect.property("ADBE Vector Rect Position").setValue([x, y]);
     var remplissage = formes.addProperty("ADBE Vector Graphic - Fill");
     remplissage.property("ADBE Vector Fill Color").setValue([IVOIRE[0], IVOIRE[1], IVOIRE[2], 1]);
-    var position = groupe.property("ADBE Vector Transform Group").property("ADBE Vector Position");
-    // On empile les formes : chaque nouvelle part du centre, on décale le groupe entier plus bas.
-    position.setValue([0, y]);
     return rect;
   }
 
-  // Kasagi (poutre haute) — légèrement plus large que le reste.
-  poutre("Kasagi", 1180, 78, -300);
-  poutre("Shimaki", 1020, 40, -230);
-  poutre("Nuki", 1120, 52, -70);
-  poutre("Pilier gauche", 74, 420, 110);
-  // Le pilier droit est le même rectangle décalé horizontalement : on le crée à part.
-  (function pilierDroit() {
-    var rect = formes.addProperty("ADBE Vector Shape - Rect");
-    rect.property("ADBE Vector Rect Size").setValue([74, 420]);
-    var remplissage = formes.addProperty("ADBE Vector Graphic - Fill");
-    remplissage.property("ADBE Vector Fill Color").setValue([IVOIRE[0], IVOIRE[1], IVOIRE[2], 1]);
-  })();
+  // Torii : kasagi (haute, large), shimaki (sous-poutre), nuki (traverse), deux piliers.
+  poutre("Kasagi", 1180, 80, 0, -300);
+  poutre("Shimaki", 1000, 38, 0, -228);
+  poutre("Nuki", 1100, 50, 0, -60);
+  poutre("Pilier gauche", 76, 430, -430, 130);
+  poutre("Pilier droit", 76, 430, 430, 130);
 
   torii.property("ADBE Transform Group").property("ADBE Position").setValue([LARGEUR / 2, HAUTEUR / 2 - 40]);
 
@@ -130,7 +131,14 @@
 
   app.endUndoGroup();
 
-  alert(
+  // Rendu immédiat (script lancé en ligne de commande : personne pour cliquer « Rendre »).
+  try {
+    app.project.renderQueue.render();
+  } catch (e) {
+    alert("Rendu impossible automatiquement : " + e.toString() + "\nLa composition est prête, lance-le depuis la file de rendu.");
+  }
+
+  if (!/headless/i.test($.getenv("BENTEN_AE_QUIET") || "")) alert(
     "Composition créée : « Benten — logo »\n\n" +
       "Rendu PNG préparé vers :\n" +
       SORTIE.fsName +
@@ -139,3 +147,5 @@
       "  ffmpeg -framerate 30 -i benten-logo_%05d.png -c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 32 logo.webm",
   );
 })();
+
+
