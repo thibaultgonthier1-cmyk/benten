@@ -162,6 +162,19 @@ export interface YoutubeJobView {
   addedAt: number;
 }
 
+/** T16 — élément d'aperçu d'import : titre de l'export et piste locale trouvée (ou non). */
+export interface ImportPreviewItem {
+  title: string;
+  artist: string;
+  matchedTrackId: number | null;
+  score: number;
+}
+
+/** T16 — résultat d'aperçu d'un export de playlist. */
+export interface ImportPreview {
+  items: ImportPreviewItem[];
+}
+
 /** T15 — état du binaire yt-dlp. */
 export interface YoutubeStatusView {
   installed: boolean;
@@ -245,7 +258,11 @@ export interface BentenApi {
    * fonction de désabonnement.
    */
   onLibraryChanged(cb: () => void): () => void;
-  youtube: {
+  importer: {
+    pickFile(): Promise<string | null>;
+    preview(path: string): Promise<ImportPreview>;
+    commit(args: { name: string; trackIds: readonly number[] }): Promise<{ playlistId: number }>;
+  };  youtube: {
     enqueue(url: string): Promise<YoutubeJobView | null>;
     jobs(): Promise<YoutubeJobView[]>;
     status(): Promise<YoutubeStatusView>;
@@ -259,4 +276,5 @@ declare global {
     benten: BentenApi;
   }
 }
+
 

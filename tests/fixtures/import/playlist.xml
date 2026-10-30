@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Playlist Items</key>
+	<array>
+		<dict>
+			<key>Name</key><string>Montagem Aghanim</string>
+			<key>Artist</key><string>DJ Ritmo</string>
+			<key>Album</key><string>Montagem</string>
+			<key>Total Time</key><integer>272000</integer>
+			<key>Date Added</key><date>2026-10-29T21:04:00Z</date>
+		</dict>
+		<dict>
+			<key>Name</key><string>C’est la vie</string>
+			<key>Artist</key><string>Khaled</string>
+			<key>Album</key><string>Album</string>
+			<key>Total Time</key><integer>215000</integer>
+		</dict>
+	</array>
+</dict>
+</plist>

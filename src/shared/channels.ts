@@ -32,9 +32,14 @@ export const CHANNELS = {
   YOUTUBE_JOBS: "youtube:jobs",
   YOUTUBE_STATUS: "youtube:status",
   YOUTUBE_UPDATE: "youtube:update",
+  /** T16 — import d'une playlist Apple (aperçu puis création). */
+  IMPORT_PREVIEW: "import:preview",
+  IMPORT_COMMIT: "import:commit",
+  DIALOG_PICK_FILE: "dialog:pick-file",
   /** Push Main -> Renderer : un travail a changé d'état. */
   YOUTUBE_PROGRESS: "youtube:progress",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
 

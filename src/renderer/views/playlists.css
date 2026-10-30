@@ -509,3 +509,11 @@
     animation: none;
   }
 }
+
+/* T16 — deux actions côte à côte quand la bibliothèque de playlists est vide. */
+.plg-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}

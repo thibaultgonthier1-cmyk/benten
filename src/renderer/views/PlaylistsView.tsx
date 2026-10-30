@@ -1,7 +1,7 @@
 import type React from "react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { CircleAlert, ListEnd, ListMusic, ListStart, Pencil, Play, Plus, Shuffle, Trash2 } from "lucide-react";
+import { CircleAlert, FileUp, ListEnd, ListMusic, ListStart, Pencil, Play, Plus, Shuffle, Trash2 } from "lucide-react";
 import type { PlaylistRow, TrackRow } from "../../shared/types";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
 import { playlistsByCreation } from "../lib/viewModels";
@@ -11,6 +11,7 @@ import { uiStore } from "../state/ui";
 import type { RouteViewActions } from "../shell/RouteView";
 import { dur, ease } from "../theme/ds/motion";
 import { Button } from "../ui/Button";
+import { ImportPlaylistDialog } from "./ImportPlaylistDialog";
 import { ICON_STROKE } from "../ui/IconButton";
 import { openMenu, type MenuItem } from "../ui/menuStore";
 import { PlaylistMosaic } from "../ui/PlaylistMosaic";
@@ -249,6 +250,7 @@ const EMPTY: readonly string[] = [];
 /** Aucune playlist : invitation illustrée (mosaïque fantôme) à créer la première. */
 function PlaylistsEmpty(): JSX.Element {
   const m = useMotion();
+  const [importing, setImporting] = useState(false);
   return (
     <motion.div
       className="plg-empty"
@@ -276,9 +278,17 @@ function PlaylistsEmpty(): JSX.Element {
         Rassemble tes titres, dans l'ordre que tu veux. Ensuite, glisse des titres sur la playlist dans la barre
         latérale, ou fais un clic droit sur un titre › <b>Ajouter à une playlist</b>.
       </p>
-      <Button variant="primary" icon={Plus} onClick={() => openNewPlaylist()}>
-        Nouvelle playlist
-      </Button>
+      <div className="plg-empty__actions">
+        <Button variant="primary" icon={Plus} onClick={() => openNewPlaylist()}>
+          Nouvelle playlist
+        </Button>
+        <Button variant="ghost" icon={FileUp} onClick={() => setImporting(true)}>
+          Importer une playlist
+        </Button>
+      </div>
+      {importing && <ImportPlaylistDialog onClose={() => setImporting(false)} />}
     </motion.div>
   );
 }
+
+

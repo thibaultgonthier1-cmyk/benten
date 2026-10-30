@@ -57,9 +57,12 @@ describe("registerIpc", () => {
       "audio:default-device",
       "audio:list-devices",
       "audio:read-file",
+      "dialog:pick-file",
       "dialog:pick-folder",
       "favorites:list",
       "favorites:toggle",
+      "import:commit",
+      "import:preview",
       "library:query",
       "library:scan",
       "library:search",
@@ -575,4 +578,7 @@ describe("normalizePage / validateScanPaths", () => {
     expect(validateScanPaths([FIX])).toEqual([FIX]);
   });
 });
+
+
+
 

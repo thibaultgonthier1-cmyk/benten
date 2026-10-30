@@ -22,6 +22,8 @@ import type {
 } from "../shared/types";
 import { defaultOutputDevice, listOutputDevices } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
+import { parseImportFile } from "./importer/applePlaylist";
+import { matchTracks } from "./importer/matcher";
 import { validateDiagEntries, type JournalWriter } from "./journal";
 import {
   addSource,
@@ -342,6 +344,48 @@ export interface IpcHooks {
 
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
+  // ── T16 — import d'une playlist Apple ────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.DIALOG_PICK_FILE, async (event): Promise<string | null> => {
+    assertTrusted(event);
+    const result = await dialog.showOpenDialog({
+      title: "Choisir un export de playlist",
+      properties: ["openFile"],
+      filters: [
+        { name: "Exports de playlist", extensions: ["txt", "m3u", "m3u8", "xml", "csv"] },
+        { name: "Tous les fichiers", extensions: ["*"] },
+      ],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(CHANNELS.IMPORT_PREVIEW, async (event, filePath: unknown) => {
+    assertTrusted(event);
+    const path = String(filePath ?? "");
+    if (!path) throw new Error("import:preview — chemin manquant");
+    const buffer = await readFile(path);
+    const parsed = parseImportFile(path, buffer);
+    const library = queryLibrary(db, { view: "tracks", limit: 5000 });
+    // `rows` porte les colonnes de la vue « titres » : c'est exactement ce que le matcher attend.
+    const matched = matchTracks(parsed, library.rows as never);
+    return {
+      items: matched.map((entry) => ({
+        title: entry.imported.title,
+        artist: entry.imported.artist,
+        matchedTrackId: entry.track ? entry.track.id : null,
+        score: entry.score,
+      })),
+    };
+  });
+
+  ipcMain.handle(CHANNELS.IMPORT_COMMIT, (event, payload: unknown) => {
+    assertTrusted(event);
+    const input = (payload ?? {}) as { name?: unknown; trackIds?: unknown };
+    const name = requireName(input.name, "import:commit");
+    const ids = requireIntArray(input.trackIds, "import:commit");
+    const playlistId = createPlaylist(db, name);
+    if (ids.length > 0) addToPlaylist(db, playlistId, ids);
+    return { playlistId };
+  });
   // ── T15 — YouTube → MP3 ──────────────────────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.YOUTUBE_ENQUEUE, (event, url: unknown) => {
     assertTrusted(event);
@@ -520,4 +564,6 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
+
 
