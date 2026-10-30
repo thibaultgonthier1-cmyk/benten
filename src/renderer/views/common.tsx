@@ -3,6 +3,7 @@ import { CircleAlert, RotateCw, type LucideIcon } from "lucide-react";
 import { Button } from "../ui/Button";
 import { ICON_STROKE } from "../ui/IconButton";
 import { Skeleton } from "../ui/Skeleton";
+import { assetUrl, type AssetId } from "../assets/manifest";
 
 /** En-tête de page : sur-titre (mincho, accent), titre mincho, sous-titre en chiffres tabulaires. */
 export function PageHeader({
@@ -35,17 +36,28 @@ export function EmptyState({
   title,
   text,
   action,
+  art,
 }: {
   icon: LucideIcon;
   title: string;
   text: string;
   action?: ReactNode;
+  /**
+   * Illustration DA « Biwa & Or » (peinture encre et or). Remplacée par l'icône quand la
+   * ressource n'est pas embarquée : le repli dessiné en code reste la règle.
+   */
+  art?: AssetId;
 }): JSX.Element {
+  const artUrl = art ? assetUrl(art) : null;
   return (
     <div className="page-empty">
-      <span className="page-empty-icon" aria-hidden="true">
-        <Icon size={24} strokeWidth={ICON_STROKE} />
-      </span>
+      {artUrl ? (
+        <img className="page-empty-art" src={artUrl} alt="" aria-hidden="true" decoding="async" />
+      ) : (
+        <span className="page-empty-icon" aria-hidden="true">
+          <Icon size={24} strokeWidth={ICON_STROKE} />
+        </span>
+      )}
       <h2>{title}</h2>
       <p>{text}</p>
       {action}
@@ -98,3 +110,5 @@ export function ErrorState({
     </div>
   );
 }
+
+

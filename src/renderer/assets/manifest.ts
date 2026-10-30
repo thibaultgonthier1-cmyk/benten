@@ -3,10 +3,10 @@
  * effet vidéo, illustration, logo, intro). Chaque composant signature demande son url ici et, tant
  * qu'elle vaut `null`, rend son repli dessiné en code (permanent : c'est aussi la version Réduit).
  *
- * DA4 : les effets et les textures validés sont branchés (4,98 Mo au total, très en dessous du
- * plafond de 20 Mo). Les illustrations et l'intro restent `null` tant qu'elles ne sont pas
- * approuvées. Les effets `fx.*` sont rendus sur fond noir OPAQUE et composés par le CSS
- * `mix-blend-mode: screen` (pas d'alpha VP9).
+ * ATTENTION : les `new URL("./…", import.meta.url)` doivent rester **littéraux**, écrits sur place.
+ * Vite ne reconnaît que cette forme pour émettre le fichier dans le bundle ; passer par une
+ * fonction utilitaire (`url(relative)`) l'en empêchait, et les ressources manquaient à l'exécution
+ * — silencieusement, puisque chaque composant possède un repli.
  */
 
 export const ASSET_IDS = [
@@ -28,31 +28,24 @@ export const ASSET_IDS = [
 
 export type AssetId = (typeof ASSET_IDS)[number];
 
-/**
- * `new URL(..., import.meta.url)` : Vite résout l'asset au build et laisse passer en dev.
- * Les fichiers vivent sous `src/renderer/assets/` et sont donc embarqués, hors-ligne.
- */
-const url = (relative: string): string => new URL(relative, import.meta.url).href;
-
 const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
-  "tex.goldLeaf": url("./tex/gold-leaf.png"),
-  "tex.lacquer": url("./tex/lacquer.png"),
-  "tex.seigaihaDisc": url("./tex/seigaiha-disc.png"),
+  "tex.goldLeaf": new URL("./tex/gold-leaf.png", import.meta.url).href,
+  "tex.lacquer": new URL("./tex/lacquer.png", import.meta.url).href,
+  "tex.seigaihaDisc": new URL("./tex/seigaiha-disc.png", import.meta.url).href,
   "tex.washi": null,
-  "fx.pluck": url("./fx/pluck.webm"),
-  "fx.inkVeil": url("./fx/inkveil.webm"),
-  "fx.goldFlakes": url("./fx/goldflakes.webm"),
-  "fx.ripple": url("./fx/ripple.webm"),
-  "ill.emptyLibrary": null,
-  "ill.emptyPlaylist": null,
-  "ill.noResults": null,
-  "ill.onboarding": null,
+  "fx.pluck": new URL("./fx/pluck.webm", import.meta.url).href,
+  "fx.inkVeil": new URL("./fx/inkveil.webm", import.meta.url).href,
+  "fx.goldFlakes": new URL("./fx/goldflakes.webm", import.meta.url).href,
+  "fx.ripple": new URL("./fx/ripple.webm", import.meta.url).href,
+  "ill.emptyLibrary": new URL("./ill/empty-library.webp", import.meta.url).href,
+  "ill.emptyPlaylist": new URL("./ill/empty-playlist.webp", import.meta.url).href,
+  "ill.noResults": new URL("./ill/no-results.webp", import.meta.url).href,
+  "ill.onboarding": new URL("./ill/onboarding.webp", import.meta.url).href,
   "logo.animated": null,
-  "intro.gold": url("./intro/gold.mp4"),
+  "intro.gold": new URL("./intro/gold.mp4", import.meta.url).href,
 });
 
 /** Url embarquée de la ressource, ou `null` tant qu'elle n'est pas produite (→ repli en code). */
 export function assetUrl(id: AssetId): string | null {
   return Object.prototype.hasOwnProperty.call(ASSET_MAP, id) ? ASSET_MAP[id] : null;
 }
-

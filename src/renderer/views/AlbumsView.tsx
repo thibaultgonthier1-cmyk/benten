@@ -127,7 +127,7 @@ export function AlbumsView({ scrollRef, actions, variant = "albums" }: AlbumsVie
         text="Touche le cœur d'un titre pour retrouver son album ici."
       />
     ) : (
-      <EmptyState icon={Disc3} title="Aucun album" text="Ajoute un dossier de musique depuis l'accueil pour remplir ta bibliothèque." />
+      <EmptyState art="ill.emptyLibrary" icon={Disc3} title="Aucun album" text="Ajoute un dossier de musique depuis l'accueil pour remplir ta bibliothèque." />
     );
   } else {
     body = (
@@ -148,3 +148,4 @@ export function AlbumsView({ scrollRef, actions, variant = "albums" }: AlbumsVie
     </div>
   );
 }
+

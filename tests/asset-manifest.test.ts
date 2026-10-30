@@ -44,6 +44,10 @@ describe("assets/manifest", () => {
       "fx.inkVeil",
       "fx.goldFlakes",
       "fx.ripple",
+      "ill.emptyLibrary",
+      "ill.emptyPlaylist",
+      "ill.noResults",
+      "ill.onboarding",
     ];
     for (const id of wired) {
       const url = assetUrl(id);
@@ -53,14 +57,7 @@ describe("assets/manifest", () => {
   });
 
   it("DA4 : ce qui n'est pas encore approuvé garde son repli (null)", () => {
-    const pending: readonly AssetId[] = [
-      "tex.washi",
-      "ill.emptyLibrary",
-      "ill.emptyPlaylist",
-      "ill.noResults",
-      "ill.onboarding",
-      "logo.animated",
-    ];
+    const pending: readonly AssetId[] = ["tex.washi", "logo.animated"];
     for (const id of pending) expect(assetUrl(id)).toBeNull();
   });
 
@@ -72,4 +69,5 @@ describe("assets/manifest", () => {
     expect(assetUrl(bad)).toBeNull();
   });
 });
+
 

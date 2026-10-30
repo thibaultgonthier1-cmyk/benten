@@ -12,6 +12,7 @@ import type { RouteViewActions } from "../shell/RouteView";
 import { dur, ease } from "../theme/ds/motion";
 import { Button } from "../ui/Button";
 import { ImportPlaylistDialog } from "./ImportPlaylistDialog";
+import { assetUrl } from "../assets/manifest";
 import { ICON_STROKE } from "../ui/IconButton";
 import { openMenu, type MenuItem } from "../ui/menuStore";
 import { PlaylistMosaic } from "../ui/PlaylistMosaic";
@@ -273,6 +274,8 @@ function PlaylistsEmpty(): JSX.Element {
           </span>
         </span>
       </div>
+      {/* Illustration DA : repli sur rien si la ressource manque. */}
+      <img className="page-empty-art" src={assetUrl("ill.emptyPlaylist") ?? undefined} alt="" aria-hidden="true" />
       <h2>Crée ta première playlist</h2>
       <p>
         Rassemble tes titres, dans l'ordre que tu veux. Ensuite, glisse des titres sur la playlist dans la barre
@@ -290,5 +293,6 @@ function PlaylistsEmpty(): JSX.Element {
     </motion.div>
   );
 }
+
 
 

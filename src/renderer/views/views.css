@@ -685,3 +685,15 @@
     animation: none;
   }
 }
+
+/* Illustration des états vides (peinture encre et or) : présente, jamais criarde. */
+.page-empty-art {
+  display: block;
+  width: min(420px, 78%);
+  height: auto;
+  margin: 0 auto 18px;
+  border-radius: 14px;
+  opacity: 0.92;
+  mask-image: radial-gradient(80% 80% at 50% 45%, #000 55%, transparent 100%);
+  -webkit-mask-image: radial-gradient(80% 80% at 50% 45%, #000 55%, transparent 100%);
+}
