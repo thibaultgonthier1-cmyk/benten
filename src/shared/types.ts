@@ -258,6 +258,9 @@ export interface BentenApi {
    * fonction de désabonnement.
    */
   onLibraryChanged(cb: () => void): () => void;
+  window: {
+    setCompact(on: boolean): Promise<{ compact: boolean }>;
+  };
   importer: {
     pickFile(): Promise<string | null>;
     preview(path: string): Promise<ImportPreview>;
@@ -276,5 +279,6 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 

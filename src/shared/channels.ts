@@ -36,10 +36,13 @@ export const CHANNELS = {
   IMPORT_PREVIEW: "import:preview",
   IMPORT_COMMIT: "import:commit",
   DIALOG_PICK_FILE: "dialog:pick-file",
+  /** T17 — mode compact (fenêtre 420×132, toujours au premier plan). */
+  WINDOW_SET_COMPACT: "window:set-compact",
   /** Push Main -> Renderer : un travail a changé d'état. */
   YOUTUBE_PROGRESS: "youtube:progress",
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
 
 

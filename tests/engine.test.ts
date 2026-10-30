@@ -390,6 +390,23 @@ describe("AudioEngine", () => {
       expect(engine.getVolume()).toBeCloseTo(0.5, 5);
     });
 
+    it("rampVolume programme une rampe sur le noeud de volume uniquement", () => {
+      const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
+      const volumeNode = (engine as unknown as { volumeGain: FakeGain }).volumeGain;
+      const antiClick = (engine as unknown as { gain: FakeGain }).gain;
+      volumeNode.gain.ramps.length = 0;
+      antiClick.gain.ramps.length = 0;
+
+      engine.rampVolume(0.2, 8);
+
+      // Une seule rampe, sur `volumeGain`, vers la cible.
+      expect(volumeNode.gain.ramps).toHaveLength(1);
+      expect(volumeNode.gain.ramps[0]!.to).toBeCloseTo(0.2, 5);
+      // Le nœud des fondus anti-clic n'est pas touché.
+      expect(antiClick.gain.ramps).toHaveLength(0);
+      // La valeur mémorisée suit la cible (pas de saut au réglage suivant).
+      expect(engine.getVolume()).toBeCloseTo(0.2, 5);
+    });
     it("borne le volume dans [0,1]", () => {
       const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(100)));
       engine.setVolume(2);
@@ -468,3 +485,4 @@ describe("AudioEngine", () => {
     });
   });
 });
+

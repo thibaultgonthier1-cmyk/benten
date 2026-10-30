@@ -26,6 +26,7 @@ function setup(withTrack = true) {
   const ui = createUiStore();
   const controls = {
     playAlbum: vi.fn(),
+  playTracks: vi.fn(),
     toggle: vi.fn(),
     next: vi.fn(),
     prev: vi.fn(),
@@ -99,6 +100,7 @@ describe("raccourcis du Shell", () => {
     const ui = createUiStore();
     const controls = {
       playAlbum: vi.fn(),
+  playTracks: vi.fn(),
       toggle: vi.fn(),
       next: vi.fn(),
       prev: vi.fn(),
@@ -163,3 +165,4 @@ describe("raccourcis du Shell", () => {
     expect(closeTopmostLayer(ui, player)).toBe(false);
   });
 });
+

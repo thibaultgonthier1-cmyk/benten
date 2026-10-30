@@ -51,6 +51,9 @@ const api: BentenApi = {
   // Abonnement au push « library:changed » (Task 14B). On enveloppe un listener qui ignore les
   // arguments IPC (event/payload) et n'expose au Renderer qu'un callback sans argument. La valeur
   // de retour est une fonction de desabonnement (retire le listener).
+  window: {
+    setCompact: (on) => invoke(CHANNELS.WINDOW_SET_COMPACT, on),
+  },
   importer: {
     pickFile: () => invoke(CHANNELS.DIALOG_PICK_FILE),
     preview: (path) => invoke(CHANNELS.IMPORT_PREVIEW, path),
@@ -78,5 +81,6 @@ const api: BentenApi = {
 };
 
 contextBridge.exposeInMainWorld("benten", api);
+
 
 

@@ -182,7 +182,48 @@ app.whenReady().then(() => {
       }
     },
   });
+  // T17 — mode compact : 420×132, toujours au premier plan, non redimensionnable. On mémorise la
+  // géométrie d'avant pour la restaurer exactement (taille ET position).
+  let compactBefore: {
+    bounds: Electron.Rectangle;
+    resizable: boolean;
+    maximized: boolean;
+    minSize: [number, number];
+  } | null = null;
   registerIpc(db, {
+    setCompact: (on: boolean) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (!win) return;
+      if (on && !compactBefore) {
+        // Une fenêtre MAXIMISÉE ignore `setBounds` : on la démaximise d'abord (et on le note pour
+        // la restaurer, sinon l'utilisateur perd son plein écran en revenant).
+        const maximized = win.isMaximized();
+        compactBefore = {
+          bounds: win.getNormalBounds(),
+          resizable: win.isResizable(),
+          maximized,
+          minSize: win.getMinimumSize() as [number, number],
+        };
+        if (maximized) win.unmaximize();
+        // ORDRE IMPORTANT : sur Windows, `setBounds` est ignoré sur une fenêtre non redimensionnable.
+        // On redimensionne donc D'ABORD, puis on verrouille.
+        // Le plancher de mise en page (960×620) empêcherait la fenêtre de rétrécir : on le lève.
+        win.setMinimumSize(320, 120);
+        win.setAlwaysOnTop(true);
+        // Hauteur extérieure : barre de titre + facteur d'échelle consomment ~65 px.
+        win.setBounds({ x: win.getBounds().x, y: win.getBounds().y, width: 420, height: 180 });
+        win.setResizable(false);
+        journal?.log({ kind: "process", event: "compact.on", bounds: win.getBounds(), inner: win.getContentBounds() });
+      } else if (!on && compactBefore) {
+        const previous = compactBefore;
+        compactBefore = null;
+        win.setAlwaysOnTop(false);
+        win.setResizable(previous.resizable);
+        win.setBounds(previous.bounds);
+        win.setMinimumSize(previous.minSize[0], previous.minSize[1]);
+        if (previous.maximized) win.maximize();
+      }
+    },
     onSourcesChanged: startWatcher,
     youtube: {
       enqueue: (url: unknown) => youtubeManager.enqueue(String(url ?? "")),
@@ -235,6 +276,13 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
+
+
+
+
+
 
 
 

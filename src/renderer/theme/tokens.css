@@ -1516,3 +1516,13 @@ button.qopt:focus-visible {
 .np-cover {
   z-index: 1;
 }
+
+/* T17 — groupe des outils de la barre (aléatoire total, minuteur, compact). Placé entre le
+   transport et la zone de droite ; `flex` explicite pour ne pas perturber la grille existante. */
+.mp-extras {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  flex: none;
+}

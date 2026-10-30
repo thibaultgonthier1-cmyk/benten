@@ -333,6 +333,8 @@ export function registerDiagnosticsIpc(writer: JournalWriter, versions: Diagnost
 export interface IpcHooks {
   /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
   onSourcesChanged?: () => void;
+  /** T17 — passage en mode compact (fenêtre). Absent dans les tests. */
+  setCompact?: (on: boolean) => void;
   /** T15 — téléchargeur YouTube. Fourni par le Main, absent dans les tests. */
   youtube?: {
     enqueue(url: unknown): unknown;
@@ -344,6 +346,15 @@ export interface IpcHooks {
 
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
+  // ── T17 — mode compact ───────────────────────────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.WINDOW_SET_COMPACT, (event, on: unknown) => {
+    assertTrusted(event);
+    // Refus net d'un non-booléen : la fenêtre ne change jamais d'état sur une entrée douteuse.
+    if (typeof on !== "boolean") throw new Error("window:set-compact: on must be a boolean");
+    hooks?.setCompact?.(on);
+    return { compact: on };
+  });
+
   // ── T16 — import d'une playlist Apple ────────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.DIALOG_PICK_FILE, async (event): Promise<string | null> => {
     assertTrusted(event);
@@ -564,6 +575,7 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
 
 
 

@@ -1110,6 +1110,31 @@ export class AudioEngine {
     this.applyVolumeToNode();
   }
 
+  /**
+   * Rampe LINEAIRE du volume vers `to01` en `seconds` (T17 — minuteur de sommeil).
+   *
+   * Isolation stricte : on ne touche QUE `volumeGain` (jamais `gain`, jamais une source, jamais
+   * le graphe). Le fondu du minuteur ne peut donc ni creer de clic, ni perturber un changement de
+   * piste. La valeur memorisee suit la cible, ce qui evite un saut au reglage suivant.
+   */
+  rampVolume(to01: number, seconds: number): void {
+    const target = clamp(Number.isFinite(to01) ? to01 : 0, 0, 1);
+    const duration = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
+    const gp = this.volumeGain.gain;
+    const now = this.context.currentTime;
+    if (
+      typeof gp.cancelScheduledValues === "function" &&
+      typeof gp.setValueAtTime === "function" &&
+      typeof gp.linearRampToValueAtTime === "function"
+    ) {
+      gp.cancelScheduledValues(now);
+      gp.setValueAtTime(typeof gp.value === "number" ? gp.value : this.userVolume, now);
+      gp.linearRampToValueAtTime(target, now + duration);
+    } else if (typeof gp.value === "number") {
+      gp.value = target;
+    }
+    this.userVolume = target;
+  }
   /** Volume utilisateur courant [0,1], lu depuis le noeud dedie (source de verite du graphe). */
   getVolume(): number {
     const v = this.volumeGain.gain.value;
@@ -1194,3 +1219,4 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+

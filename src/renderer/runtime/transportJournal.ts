@@ -104,6 +104,11 @@ export function withOrigin(
       log("play", { ...status(), albumId: album.id, index: index ?? 0, queueLen: album.tracks.length });
       raw.playAlbum(album, index);
     },
+    playTracks(tracks, index) {
+      // Aléatoire total / file arbitraire : même entrée de journal qu'un album, sans identifiant.
+      log("play", { ...status(), albumId: null, index: index ?? 0, queueLen: tracks.length });
+      raw.playTracks(tracks, index);
+    },
     toggle() {
       const s = status();
       log("toggle", { ...s, intent: toggleIntent(s["status"] as string | undefined) });
@@ -125,3 +130,4 @@ export function withOrigin(
   tagged[RAW] = raw;
   return tagged;
 }
+

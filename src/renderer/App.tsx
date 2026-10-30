@@ -8,7 +8,11 @@ import type { Album } from "./lib/library";
 import { Shell } from "./shell/Shell";
 import type { RouteViewActions } from "./shell/RouteView";
 import { MiniPlayer } from "./components/MiniPlayer";
+import type { TrackRow } from "../shared/types";
 import { Intro } from "./components/Intro";
+import { CompactPlayer } from "./components/CompactPlayer";
+import { configureSleepTimer } from "./runtime/sleepTimerHost";
+import { useUi } from "./state/ui";
 import { NowPlaying } from "./components/NowPlaying";
 import { QueuePanel } from "./components/QueuePanel";
 
@@ -92,6 +96,14 @@ export function App(): JSX.Element {
     [controls],
   );
 
+  // « Aléatoire total » (T17) : toute la bibliothèque, mélange activé, départ au hasard.
+  const shuffleAll = useCallback(async (): Promise<void> => {
+    const result = await window.benten.library.query({ view: "tracks", limit: 20000 });
+    const tracks = result.rows as unknown as TrackRow[];
+    if (tracks.length === 0) return;
+    playerStore.getState().setShuffle(true);
+    controls.playTracks(tracks, Math.floor(Math.random() * tracks.length));
+  }, [controls]);
   // « Aléatoire » : active le mélange du moteur (action existante du store), puis lance l'album
   // depuis une piste tirée au hasard (elle devient la tête de l'ordre mélangé).
   const shuffleAlbum = useCallback(
@@ -126,6 +138,32 @@ export function App(): JSX.Element {
     [playAlbum, playAlbumInOrder, shuffleAlbum, togglePlay, albumPlayNext, albumAddToQueue],
   );
 
+  // Minuteur de sommeil : fondu sur le nœud de volume du moteur, pause par le store, et
+  // restauration du volume après la pause (sinon l'app se réveillerait muette).
+  useEffect(() => {
+    configureSleepTimer({
+      fade: (to, seconds) => engine.rampVolume(to, seconds),
+      pause: () => {
+        if (playerStore.getState().status === "playing") controls.toggle();
+      },
+      getVolume: () => playerStore.getState().volume,
+      setVolume: (v) => playerStore.getState().setVolume(v),
+      // « Fin du titre » : le moteur émet `ended` au changement de piste — c'est le signal exact.
+      onTrackEnd: (cb) => engine.on("ended", () => cb()),
+    });
+  }, [engine, controls]);
+
+  const compact = useUi((s) => s.compact);
+
+  if (compact) {
+    return (
+      <>
+        <Intro onDone={() => undefined} />
+        <CompactPlayer controls={controls} />
+      </>
+    );
+  }
+
   return (
     <>
       <Intro onDone={() => undefined} />
@@ -141,4 +179,8 @@ export function App(): JSX.Element {
     </>
   );
 }
+
+
+
+
 

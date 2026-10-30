@@ -1,0 +1,70 @@
+/* Menu du minuteur de sommeil (T17). */
+.sleep {
+  position: relative;
+  display: inline-flex;
+}
+
+.sleep__btn {
+  position: relative;
+}
+
+.sleep__btn.on {
+  color: var(--gold);
+}
+
+.sleep__badge {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8.5px;
+  line-height: 1;
+  color: var(--gold-light);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.sleep__menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: -8px;
+  z-index: 60;
+  min-width: 168px;
+  display: grid;
+  padding: 6px;
+  gap: 2px;
+  border-radius: 11px;
+  border: 1px solid rgba(240, 211, 138, 0.24);
+  background: #0c0a08;
+  box-shadow: 0 26px 60px -30px rgba(0, 0, 0, 0.95);
+  animation: sleep-in 120ms ease both;
+}
+
+.sleep__menu button {
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(243, 239, 232, 0.86);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sleep__menu button:hover {
+  background: rgba(240, 211, 138, 0.1);
+  color: var(--ivory);
+}
+
+.sleep__cancel {
+  color: #d8806f !important;
+}
+
+@keyframes sleep-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sleep__menu { animation: none; }
+}

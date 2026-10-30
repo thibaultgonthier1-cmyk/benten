@@ -6,6 +6,9 @@ import { QualityBadge } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
 import { GoldMedallion } from "../ui/GoldMedallion";
 import { BiwaString } from "../ui/BiwaString";
+import { SleepTimerMenu } from "./SleepTimerMenu";
+import { Shuffle, Minimize2 } from "lucide-react";
+import { uiStore } from "../state/ui";
 
 /** Pas de deplacement clavier du scrubber, en secondes. */
 const SEEK_STEP_SEC = 5;
@@ -113,7 +116,35 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
           {repeat === "one" && <span className="rep-one" aria-hidden="true">1</span>}
         </button>
       </div>
-      <div className="mp-right">
+      <div className="mp-extras">
+        <button
+          className="ic"
+          type="button"
+          title="Aléatoire total"
+          aria-label="Lecture aléatoire de toute la bibliothèque"
+          onClick={() => void window.benten?.library.query({ view: "tracks", limit: 20000 }).then((result) => {
+            const tracks = result.rows as unknown as Parameters<PlayerControls["playTracks"]>[0];
+            if (!tracks || tracks.length === 0) return;
+            playerStore.getState().setShuffle(true);
+            controls.playTracks(tracks, Math.floor(Math.random() * tracks.length));
+          })}
+        >
+          <Shuffle size={16} strokeWidth={1.75} aria-hidden />
+        </button>
+        <SleepTimerMenu />
+        <button
+          className="ic"
+          type="button"
+          title="Mode compact"
+          aria-label="Passer en mode compact"
+          onClick={() => {
+            uiStore.getState().setCompact(true);
+            void window.benten?.window.setCompact(true);
+          }}
+        >
+          <Minimize2 size={16} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>      <div className="mp-right">
         <button
           className="ic"
           type="button"
@@ -153,5 +184,6 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
     </div>
   );
 }
+
 
 
