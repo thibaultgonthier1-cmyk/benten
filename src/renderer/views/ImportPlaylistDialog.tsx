@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Check, FileUp, Loader2, X } from "lucide-react";
-import type { ImportPreview } from "../../shared/types";
+import type { ImportPreview, PlaylistRow } from "../../shared/types";
+import { usePlaylists } from "../state/playlists";
 import { Button } from "../ui/Button";
 import "./import.css";
 
@@ -18,6 +19,9 @@ export function ImportPlaylistDialog({ onClose }: { onClose(): void }): JSX.Elem
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // `null` = nouvelle playlist ; sinon on ajoute à celle choisie (titres déjà présents ignorés).
+  const [target, setTarget] = useState<number | null>(null);
+  const playlistRows = usePlaylists((s) => s.rows) as readonly PlaylistRow[];
 
   const api = typeof window !== "undefined" ? window.benten?.importer : undefined;
 
@@ -48,7 +52,11 @@ export function ImportPlaylistDialog({ onClose }: { onClose(): void }): JSX.Elem
     }
     setBusy(true);
     try {
-      await api.commit({ name: name.trim() || "Playlist importée", trackIds: ids });
+      await api.commit({
+        name: name.trim() || "Playlist importée",
+        trackIds: ids,
+        playlistId: target,
+      });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Création impossible");
@@ -115,9 +123,30 @@ export function ImportPlaylistDialog({ onClose }: { onClose(): void }): JSX.Elem
             </ul>
 
             <label className="import-name">
-              <span>Nom de la playlist</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} />
+              <span>Destination</span>
+              <select
+                value={target ?? ""}
+                onChange={(e) => setTarget(e.target.value === "" ? null : Number(e.target.value))}
+              >
+                <option value="">Nouvelle playlist…</option>
+                {playlistRows.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    Ajouter à « {row.name} »
+                  </option>
+                ))}
+              </select>
             </label>
+
+            {target === null ? (
+              <label className="import-name">
+                <span>Nom de la playlist</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} />
+              </label>
+            ) : (
+              <p className="import-hint-target">
+                Les titres déjà présents dans cette playlist seront ignorés — seuls les nouveaux sont ajoutés.
+              </p>
+            )}
           </>
         )}
 
@@ -135,3 +164,5 @@ export function ImportPlaylistDialog({ onClose }: { onClose(): void }): JSX.Elem
     </div>
   );
 }
+
+

@@ -264,7 +264,15 @@ export interface BentenApi {
   importer: {
     pickFile(): Promise<string | null>;
     preview(path: string): Promise<ImportPreview>;
-    commit(args: { name: string; trackIds: readonly number[] }): Promise<{ playlistId: number }>;
+    /**
+     * `playlistId` fourni → on AJOUTE à cette playlist en ignorant les titres déjà présents
+     * (re-import d'un export Apple après avoir ajouté des titres). Sinon → nouvelle playlist.
+     */
+    commit(args: {
+      name: string;
+      trackIds: readonly number[];
+      playlistId?: number | null;
+    }): Promise<{ playlistId: number; added: number; skipped: number }>;
   };  youtube: {
     enqueue(url: string): Promise<YoutubeJobView | null>;
     jobs(): Promise<YoutubeJobView[]>;
@@ -279,6 +287,7 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 
 

@@ -24,6 +24,7 @@ import { defaultOutputDevice, listOutputDevices } from "./audio/devices";
 import { indexLibrary } from "./library/indexer";
 import { parseImportFile } from "./importer/applePlaylist";
 import { matchTracks } from "./importer/matcher";
+import { onlyNewTrackIds } from "./importer/incremental";
 import { validateDiagEntries, type JournalWriter } from "./journal";
 import {
   addSource,
@@ -390,12 +391,23 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
 
   ipcMain.handle(CHANNELS.IMPORT_COMMIT, (event, payload: unknown) => {
     assertTrusted(event);
-    const input = (payload ?? {}) as { name?: unknown; trackIds?: unknown };
-    const name = requireName(input.name, "import:commit");
+    const input = (payload ?? {}) as { name?: unknown; trackIds?: unknown; playlistId?: unknown };
     const ids = requireIntArray(input.trackIds, "import:commit");
+    const target = input.playlistId;
+
+    // Ajout à une playlist existante : on ne réinsère que les titres absents. C'est ce qui permet
+    // de ré-exporter depuis Apple Music après avoir ajouté des titres, sans créer de doublon.
+    if (typeof target === "number" && Number.isInteger(target)) {
+      const existing = getPlaylistTracks(db, target).map((track) => track.id);
+      const fresh = onlyNewTrackIds(ids, existing);
+      if (fresh.length > 0) addToPlaylist(db, target, fresh);
+      return { playlistId: target, added: fresh.length, skipped: ids.length - fresh.length };
+    }
+
+    const name = requireName(input.name, "import:commit");
     const playlistId = createPlaylist(db, name);
     if (ids.length > 0) addToPlaylist(db, playlistId, ids);
-    return { playlistId };
+    return { playlistId, added: ids.length, skipped: 0 };
   });
   // ── T15 — YouTube → MP3 ──────────────────────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.YOUTUBE_ENQUEUE, (event, url: unknown) => {
@@ -575,6 +587,8 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
+
 
 
 
