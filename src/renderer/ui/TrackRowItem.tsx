@@ -9,6 +9,7 @@ import { uiStore } from "../state/ui";
 import { Equalizer } from "./Equalizer";
 import { ICON_STROKE } from "./IconButton";
 import { GoldMedallion } from "./GoldMedallion";
+import { cancelPrefetch, prefetchNow, prefetchOnHover } from "../runtime/prefetch";
 import "./tiles.css";
 
 export interface TrackRowItemProps {
@@ -143,7 +144,13 @@ function TrackRowItemImpl({
         ) : hideNumber ? null : (
           <span className="track-row__n">{number ?? index + 1}</span>
         )}
-        <span className="track-row__play" onClick={(e) => e.stopPropagation()}>
+        <span
+          className="track-row__play"
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={() => prefetchNow(track)}
+          onPointerEnter={() => prefetchOnHover(track)}
+          onPointerLeave={() => cancelPrefetch()}
+        >
           <GoldMedallion
             playing={statusPlaying}
             size="sm"
@@ -221,4 +228,5 @@ function TrackRowItemImpl({
 }
 
 export const TrackRowItem = memo(TrackRowItemImpl);
+
 

@@ -13,6 +13,7 @@ import { Intro } from "./components/Intro";
 import { CompactPlayer } from "./components/CompactPlayer";
 import { configureSleepTimer } from "./runtime/sleepTimerHost";
 import { applyEqualizer, bindEqualizer } from "./components/EqualizerPanel";
+import { bindPrefetcher } from "./runtime/prefetch";
 import { assetUrl } from "./assets/manifest";
 import { useUi } from "./state/ui";
 import { NowPlaying } from "./components/NowPlaying";
@@ -159,6 +160,8 @@ export function App(): JSX.Element {
   useEffect(() => {
     bindEqualizer(engine);
     applyEqualizer();
+    // Préchargement à l'intention : décoder avant le clic rend le changement de piste instantané.
+    bindPrefetcher(engine);
   }, [engine]);
 
   // Texture washi : posée en variable CSS une fois, consommée par les panneaux (feuille de papier
@@ -194,6 +197,7 @@ export function App(): JSX.Element {
     </>
   );
 }
+
 
 
 

@@ -411,6 +411,24 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Décode une piste en tâche de fond pour que sa lecture soit instantanée, SANS toucher à ce qui
+   * joue : aucun effet sur la file, les sources ni le statut. Sert au préchargement à l'intention.
+   */
+  async prefetch(track: Pick<TrackRow, "id" | "path" | "playable">): Promise<void> {
+    if (this.decoded.has(track.id)) return; // déjà prêt
+    if (track.playable === false) return;
+    if (!this.decoder.canDecode(track.path)) return;
+    try {
+      const bytes = await this.readBytes(track.path);
+      const buffer = await this.decoder.decode(bytes);
+      // Une lecture a pu démarrer entre-temps et avoir déjà mis ce buffer en cache.
+      if (!this.decoded.has(track.id)) this.rememberDecoded(track.id, buffer);
+    } catch {
+      // Silencieux : un préchargement raté ne doit jamais déranger l'utilisateur.
+    }
+  }
+
   /** Nombre d'entrées en cache (diagnostic et tests). */
   decodedCacheSize(): number {
     return this.decoded.size;

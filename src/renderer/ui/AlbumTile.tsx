@@ -2,6 +2,7 @@ import type React from "react";
 import { memo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import { GoldMedallion } from "./GoldMedallion";
+import { cancelPrefetch, prefetchNow, prefetchOnHover } from "../runtime/prefetch";
 import type { Album } from "../lib/library";
 import { setDragTracks } from "../lib/dnd";
 import { coverColorCache, useCoverColors } from "../lib/useCoverColors";
@@ -159,6 +160,9 @@ function TilePlayButton({
     <span
       className={`album-tile__play${current ? " is-current" : ""}`}
       onClick={(e) => e.stopPropagation()}
+      onPointerDown={() => prefetchNow(album.tracks[0] ?? null)}
+      onPointerEnter={() => prefetchOnHover(album.tracks[0] ?? null)}
+      onPointerLeave={() => cancelPrefetch()}
     >
       <GoldMedallion
         playing={playing}
@@ -173,4 +177,6 @@ function TilePlayButton({
 }
 
 export const AlbumTile = memo(AlbumTileImpl);
+
+
 
