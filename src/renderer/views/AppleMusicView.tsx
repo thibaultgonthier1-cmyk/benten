@@ -103,8 +103,7 @@ export function AppleMusicView(): JSX.Element {
         <span className="ab-eyebrow">Apple Music</span>
         <h1>Importer depuis Apple Music</h1>
         <p>
-          Colle un lien de playlist : les titres absents de ta bibliothèque sont téléchargés en local, puis rangés
-          dans <code>Musique\Benten\Apple</code>.
+          Colle un lien de <b>playlist</b>, d'<b>album</b> ou d'un <b>titre</b> : les morceaux absents de ta bibliothèque sont téléchargés en local, puis rangés dans <code>Musique\Benten\Apple</code>.
         </p>
       </header>
 
@@ -150,7 +149,7 @@ export function AppleMusicView(): JSX.Element {
           className="ab-input"
           value={url}
           spellCheck={false}
-          placeholder="https://music.apple.com/fr/playlist/…"
+          placeholder="Colle un lien Apple Music (playlist, album ou titre)…"
           aria-label="Lien de playlist ou d'album Apple Music"
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
@@ -235,4 +234,5 @@ export function AppleMusicView(): JSX.Element {
     </div>
   );
 }
+
 

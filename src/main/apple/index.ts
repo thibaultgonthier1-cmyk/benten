@@ -42,13 +42,60 @@ export function isAppleCollectionUrl(url: unknown): boolean {
  * Lève si le réseau échoue ; renvoie `ok: false` pour un lien invalide.
  */
 export async function resolveCollection(url: string): Promise<AppleCollection> {
-  const result = (await resolveAppleCollection(url)) as AppleCollection;
+  const link = parseAppleLink(url);
+  if (!link) {
+    return {
+      ok: false,
+      kind: "unknown",
+      playlistName: "",
+      tracks: [],
+      reason: "Ce lien n'est pas une playlist, un album ou un titre Apple Music.",
+      truncated: false,
+    };
+  }
+
+  const result = (await resolveAppleCollection(link.resolveUrl)) as AppleCollection;
+  const tracks = Array.isArray(result?.tracks) ? result.tracks : [];
+  if (!result?.ok) {
+    return {
+      ok: false,
+      kind: String(result?.kind ?? link.kind),
+      playlistName: "",
+      tracks: [],
+      reason: String(result?.reason ?? "Lien illisible"),
+      truncated: false,
+    };
+  }
+
+  // Un lien de TITRE se résout via son album : on ne garde que la piste visée.
+  if (link.kind === "song" && link.trackId) {
+    const only = tracks.filter((track) => String(track.trackId ?? "") === link.trackId);
+    if (only.length === 0) {
+      return {
+        ok: false,
+        kind: "song",
+        playlistName: "",
+        tracks: [],
+        reason: "Ce titre n'est pas dans l'album résolu — copie plutôt le lien de l'album ou de la playlist.",
+        truncated: false,
+      };
+    }
+    return {
+      ok: true,
+      kind: "song",
+      playlistName: only[0]?.title ?? "",
+      tracks: only,
+      reason: "",
+      truncated: false,
+    };
+  }
+
   return {
-    ok: Boolean(result?.ok),
-    kind: String(result?.kind ?? "unknown"),
+    ok: true,
+    kind: String(result.kind ?? link.kind),
     playlistName: String(result?.playlistName ?? ""),
-    tracks: Array.isArray(result?.tracks) ? result.tracks : [],
-    reason: String(result?.reason ?? ""),
+    tracks,
+    reason: "",
     truncated: Boolean(result?.truncated),
   };
 }
@@ -106,5 +153,7 @@ export class AppleRunner {
 
 // Import séparé pour garder le nom public `isAppleCollectionUrl` et l'implémentation portée.
 import { isAppleCollectionUrl as isAppleCollectionUrlImpl } from "./collection";
+import { parseAppleLink } from "./link";
+
 
 
