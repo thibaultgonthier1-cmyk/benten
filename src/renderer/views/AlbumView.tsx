@@ -20,7 +20,7 @@ import { TrackRowItem } from "../ui/TrackRowItem";
 import { useMotion } from "../ui/useMotion";
 import { quoted, toast } from "../ui/toastStore";
 import { EmptyState } from "./common";
-import { HeroCompactBar, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
+import { HeroCompactBar, safeTint, useCompactOnScroll, useHeroEnter, useTopTint } from "./hero";
 import { anchorBelow, anchorFromEvent, useViewMenus } from "./menus";
 import "./views.css";
 
@@ -80,7 +80,7 @@ function AlbumPage({
   const multiDisc = groups.length > 1;
 
   // Teinte sous la barre du haut (cf. `useTopTint`) ; barre compacte au défilement.
-  useTopTint(scrollRef, resolved?.vibrant ?? null);
+  useTopTint(scrollRef, safeTint(resolved?.vibrant));
   const compact = useCompactOnScroll(scrollRef, actionsRef);
 
   // « Lecture » d'en-tête : lecture DANS L'ORDRE (le mélange est coupé, comme Apple Music) ;
@@ -259,3 +259,4 @@ function AlbumSkeleton(): JSX.Element {
     </div>
   );
 }
+

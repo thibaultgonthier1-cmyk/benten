@@ -19,6 +19,41 @@ const TINT_FADE_PX = 220;
  * teinte sur `.shell-main` (`--top-tint`, `data-tint`) et l'éteint en défilant (opacité
  * `--top-tint-o`, mise à jour au plus une fois par frame) ; tout est retiré en quittant la page.
  */
+/**
+ * Teinte d'en-tête sûre (point (m) de la revue DA).
+ *
+ * Une pochette très claire produit une teinte claire : le dégradé du haut devient alors laiteux et
+ * le titre ivoire perd son contraste. Dans ce cas on ne teinte PAS (retour au laque de la page) —
+ * c'est la règle « en-tête neutre plutôt qu'or ».
+ */
+export function safeTint(color: string | null | undefined): string | null {
+  if (!color) return null;
+  const rgb = parseColor(color);
+  if (!rgb) return null;
+  const [r, g, b] = rgb.map((v) => v / 255) as [number, number, number];
+  const lin = (c: number): number => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  // Au-delà de 0,42 la teinte éclaircit trop le haut de page.
+  return luminance > 0.42 ? null : color;
+}
+
+function parseColor(value: string): [number, number, number] | null {
+  const text = value.trim().toLowerCase();
+  const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+  if (hex) {
+    const raw = hex[1]!;
+    const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+    return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)];
+  }
+  const rgb = text.match(/^rgba?\(([^)]+)\)$/);
+  if (rgb) {
+    const parts = rgb[1]!.split(",").map((p) => Number(p.trim()));
+    if (parts.length >= 3 && parts.slice(0, 3).every((n) => Number.isFinite(n))) {
+      return [parts[0]!, parts[1]!, parts[2]!];
+    }
+  }
+  return null;
+}
 export function useTopTint(scrollRef: React.RefObject<HTMLElement>, tint: string | null): void {
   const tintOwner = useId();
   useEffect(() => {
@@ -147,3 +182,4 @@ export function HeroCompactBar({
     </div>
   );
 }
+

@@ -38,6 +38,7 @@ describe("assets/manifest", () => {
   it("DA4 : les effets et textures validés sont branchés", () => {
     const wired: readonly AssetId[] = [
       "tex.goldLeaf",
+      "tex.washi",
       "tex.lacquer",
       "tex.seigaihaDisc",
       "fx.pluck",
@@ -57,7 +58,8 @@ describe("assets/manifest", () => {
   });
 
   it("DA4 : ce qui n'est pas encore approuvé garde son repli (null)", () => {
-    const pending: readonly AssetId[] = ["tex.washi", "logo.animated"];
+    // Plus que le logo animé : aucun rendu n'a été produit pour lui (rien dans design/motion).
+    const pending: readonly AssetId[] = ["logo.animated"];
     for (const id of pending) expect(assetUrl(id)).toBeNull();
   });
 
@@ -69,5 +71,6 @@ describe("assets/manifest", () => {
     expect(assetUrl(bad)).toBeNull();
   });
 });
+
 
 
