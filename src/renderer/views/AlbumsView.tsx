@@ -12,6 +12,7 @@ import { Button } from "../ui/Button";
 import { ICON_STROKE } from "../ui/IconButton";
 import { AlbumGrid } from "./AlbumGrid";
 import { EmptyState, GridSkeleton, PageHeader } from "./common";
+import { assetUrl } from "../assets/manifest";
 import { anchorBelow, anchorFromEvent, useViewMenus } from "./menus";
 import "./views.css";
 
@@ -141,11 +142,19 @@ export function AlbumsView({ scrollRef, actions, variant = "albums" }: AlbumsVie
     );
   }
 
+  // Fond en image sur l'accueil : la peinture encre et or, très en retrait, masquée en dégradé.
+  // Une seule image, pas de flou calculé (le flou coûte cher) — juste opacité et masque.
+  const backdrop = variant === "home" ? assetUrl("ill.onboarding") : null;
+
   return (
-    <div className="albums-view">
+    <div className={"albums-view" + (backdrop ? " has-backdrop" : "")}>
+      {backdrop && (
+        <div className="view-backdrop" aria-hidden="true" style={{ backgroundImage: `url("${backdrop}")` }} />
+      )}
       <PageHeader eyebrow={header.eyebrow} title={header.title} sub={header.sub} aside={toolbar} />
       {body}
     </div>
   );
 }
+
 
