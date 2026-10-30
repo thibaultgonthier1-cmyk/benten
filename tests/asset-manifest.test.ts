@@ -21,6 +21,7 @@ const EXPECTED: readonly AssetId[] = [
   "ill.onboarding",
   "logo.animated",
   "scene.torii",
+  "scene.benten",
   "intro.gold",
 ];
 
@@ -42,6 +43,8 @@ describe("assets/manifest", () => {
       "tex.washi",
       "logo.animated",
       "scene.torii",
+      "scene.benten",
+  "scene.benten",
       "tex.lacquer",
       "tex.seigaihaDisc",
       "fx.pluck",
@@ -74,6 +77,7 @@ describe("assets/manifest", () => {
     expect(assetUrl(bad)).toBeNull();
   });
 });
+
 
 
 

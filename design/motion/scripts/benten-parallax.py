@@ -41,7 +41,7 @@ def find_illustrations(root):
 
 
 ILLUSTRATIONS = find_illustrations(ROOT)
-OUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "benten-parallax")
+OUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "benten-benten-scene")
 
 FRAMES = 180
 FPS = 30
@@ -50,9 +50,9 @@ RES = (1920, 1080)
 # Plans : (nom du fichier cherché, profondeur, largeur du plan, hauteur du plan)
 # Plus la profondeur est négative, plus le plan est LOIN : il bougera moins à l'écran.
 LAYERS = [
-    ("benten-biwa-1.png", -11.0, 26.0, 14.6),   # fond : la peinture entière
-    ("benten-biwa-2.png", -6.5, 13.0, 7.3),     # milieu
-    ("torii-eau-1.png", -3.0, 5.2, 2.9),       # premier plan : bouge le plus
+    ("benten-biwa-1.png", -11.0, 13.2, 7.4, 0.0),   # fond : la peinture entiere
+    ("goutte-or-1.png", -6.2, 4.6, 2.6, 5.2, -3.0),  # milieu : la goutte, dans le coin noir
+
 ]
 
 
@@ -98,14 +98,14 @@ def make_image_material(name, image_path):
     return mat
 
 
-def add_plane(name, width, height, depth, material):
+def add_plane(name, width, height, depth, material, offset_x=0.0, offset_y=0.0):
     """
     Un plan est créé COUCHÉ (dans le plan XY) : il faut le redresser de 90° autour de X pour qu'il
     fasse face à la caméra. Sans ça, la caméra le voit par la tranche et l'image est écrasée.
     """
     # Centrés sur l'axe de la caméra (z = 1,2) : sinon un grand plan a son centre bien
     # au-dessus de l'objectif et la caméra ne voit que du vide.
-    bpy.ops.mesh.primitive_plane_add(size=1, location=(0, depth, 1.2))
+    bpy.ops.mesh.primitive_plane_add(size=1, location=(offset_x, depth, 1.2 + offset_y))
     plane = bpy.context.active_object
     plane.name = name
     plane.rotation_euler = (math.radians(90), 0, 0)
@@ -133,14 +133,17 @@ def build():
     scene.world = world
 
     used = []
-    for index, (file_name, depth, width, height) in enumerate(LAYERS):
+    for index, entry in enumerate(LAYERS):
+        file_name, depth, width, height = entry[0], entry[1], entry[2], entry[3]
+        offset_x = entry[4] if len(entry) > 4 else 0.0
+        offset_y = entry[5] if len(entry) > 5 else 0.0
         path = pick_image(file_name)
         if path:
             material = make_image_material(f"plan_{index}", path)
             used.append(file_name)
         else:
             material = make_gold_gradient(f"plan_{index}")
-        add_plane(f"plan_{index}", width, height, depth, material)
+        add_plane(f"plan_{index}", width, height, depth, material, offset_x, offset_y)
 
     # Caméra : reculée, elle avance de 1,2 m sur la durée — la parallaxe vient de là.
     bpy.ops.object.camera_add(location=(0, 4.0, 1.35))
@@ -170,6 +173,11 @@ if __name__ == "__main__":
     build()
     bpy.ops.render.render(animation=True)
     print("[benten] rendu terminé dans", OUT_DIR)
+
+
+
+
+
 
 
 

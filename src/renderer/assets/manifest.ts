@@ -24,6 +24,7 @@ export const ASSET_IDS = [
   "ill.onboarding",
   "logo.animated",
   "scene.torii",
+  "scene.benten",
   "intro.gold",
 ] as const;
 
@@ -45,6 +46,8 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
   "logo.animated": new URL("./motion/logo.webm", import.meta.url).href,
   // Scène 3D (Blender) : torii, soleil, eau et anneaux, boucle de 6 s avec transparence.
   "scene.torii": new URL("./motion/scene-torii.webm", import.meta.url).href,
+  // Scène Benten : la joueuse de biwa en trois plans (icônes DA), caméra qui avance.
+  "scene.benten": new URL("./motion/scene-benten.webm", import.meta.url).href,
   "intro.gold": new URL("./intro/gold.mp4", import.meta.url).href,
 });
 
@@ -52,6 +55,7 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
 export function assetUrl(id: AssetId): string | null {
   return Object.prototype.hasOwnProperty.call(ASSET_MAP, id) ? ASSET_MAP[id] : null;
 }
+
 
 
 

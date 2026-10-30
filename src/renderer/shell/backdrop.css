@@ -59,7 +59,9 @@
 
 /* La scène 3D est plus lumineuse qu'une illustration : on la montre moins fort. */
 .view-backdrop-video[data-current='true'] {
-  opacity: 0.22 !important;
+  /* Les peintures Magnific sont sombres : sans une opacite plus franche, elles restent
+     invisibles sur le laque noir. */
+  opacity: 0.42 !important;
 }
 
 /* Réactivité : le fond s'éteint légèrement quand rien ne joue — le décor suit l'app. */
@@ -79,4 +81,5 @@
     transition-duration: 0ms;
   }
 }
+
 

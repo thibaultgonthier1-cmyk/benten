@@ -69,8 +69,10 @@ export function ViewBackdrop(): JSX.Element | null {
   // --- Changement de catégorie : fondu enchaîné ------------------------------------------------
   useEffect(() => {
     const isScene = SCENE_ROUTES.has(route);
+    // L'accueil reçoit Benten (la joueuse de biwa) ; les listes, le torii.
+    const scene: AssetId = route === "home" ? "scene.benten" : "scene.torii";
     const url = isScene
-      ? assetUrl("scene.torii")
+      ? assetUrl(scene)
       : (() => {
           const id = BACKDROP_FOR[route];
           return id ? assetUrl(id) : null;
@@ -188,5 +190,6 @@ export function ViewBackdrop(): JSX.Element | null {
     </div>
   );
 }
+
 
 
