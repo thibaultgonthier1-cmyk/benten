@@ -52,6 +52,8 @@ function createWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     title: "Benten",
+    // Icône de fenêtre et de barre des tâches (or sur laque, lisible à 16 px).
+    icon: join(__dirname, "..", "icon.ico"),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -233,6 +235,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 
