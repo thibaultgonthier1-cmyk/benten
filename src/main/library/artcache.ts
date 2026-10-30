@@ -20,7 +20,12 @@ import { dirname, join } from "node:path";
  */
 
 /** Taille cible par defaut (cote le plus long, en px). */
-export const DEFAULT_ART_SIZE = 512;
+/**
+ * Taille cible par défaut : 1024 px. Les grandes tuiles (grille d'albums, pochette de la vue
+ * lecture) sont affichées jusqu'à ~420 px CSS, soit ~840 px en écran 2× — 512 y perdait en netteté.
+ * Les entrées déjà en cache (512) restent servies telles quelles ; vider `art-cache` les refait.
+ */
+export const DEFAULT_ART_SIZE = 1024;
 /** Une image plus grosse n'est pas lue (fichier de dossier aberrant). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const KEY_RE = /^[0-9a-f]{40}$/;
@@ -183,3 +188,4 @@ export async function serveArt(url: string, cacheDir: string): Promise<Response>
     return NOT_FOUND();
   }
 }
+
