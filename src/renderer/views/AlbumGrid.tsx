@@ -2,7 +2,7 @@ import type React from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Album } from "../lib/library";
-import { gridLayout } from "../lib/viewModels";
+import { adaptiveMinTile, gridLayout } from "../lib/viewModels";
 import { usePlayer } from "../state/player";
 import { plannedScroll } from "../shell/scrollMemory";
 import { AlbumTile } from "../ui/AlbumTile";
@@ -48,7 +48,11 @@ export function AlbumGrid({ albums, scrollRef, onPlay, onContextMenu, memoryKey 
   // Largeur estimée dès le premier rendu (le conteneur existe déjà) : les tuiles montées au
   // premier rendu sont les bonnes, la pochette partagée retrouve donc sa tuile.
   const [layout, setLayout] = useState(() =>
-    gridLayout(Math.max(0, (scrollRef.current?.clientWidth ?? 0) - 2 * PAGE_X), MIN_TILE, GAP_X),
+    gridLayout(
+      Math.max(0, (scrollRef.current?.clientWidth ?? 0) - 2 * PAGE_X),
+      adaptiveMinTile(scrollRef.current?.clientWidth ?? 0),
+      GAP_X,
+    ),
   );
   const [scrollMargin, setScrollMargin] = useState(0);
   const [entering, setEntering] = useState(restoreTop === null);
@@ -59,7 +63,7 @@ export function AlbumGrid({ albums, scrollRef, onPlay, onContextMenu, memoryKey 
     const el = wrapperRef.current;
     if (!el) return;
     const recompute = (): void => {
-      const next = gridLayout(el.clientWidth, MIN_TILE, GAP_X);
+      const next = gridLayout(el.clientWidth, adaptiveMinTile(el.clientWidth), GAP_X);
       setLayout((prev) => (prev.cols === next.cols && prev.cardW === next.cardW ? prev : next));
     };
     recompute();
@@ -156,3 +160,4 @@ export function AlbumGrid({ albums, scrollRef, onPlay, onContextMenu, memoryKey 
     </div>
   );
 }
+

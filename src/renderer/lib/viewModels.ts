@@ -834,6 +834,22 @@ export const GRID_MAX_COLS = 8;
  * avec une gouttière `gap`, plafonné à `maxCols`). Largeur nulle (pas encore mesurée) : une
  * colonne de `min` px.
  */
+/**
+ * Largeur minimale de tuile ADAPTATIVE : une pochette ne doit pas être un timbre-poste sur un
+ * grand écran, ni déborder sur une fenêtre étroite.
+ *
+ * On suit la largeur utile par paliers plutôt qu'une formule continue : un palier stable évite de
+ * faire sauter la grille (et de remonter les rangées virtualisées) pour 3 px de redimensionnement.
+ */
+export function adaptiveMinTile(width: number): number {
+  if (!(width > 0)) return 176; // pas encore mesuré : valeur historique
+  if (width < 560) return 132; // fenêtre étroite / petite fenêtre flottante
+  if (width < 900) return 156;
+  if (width < 1280) return 176;
+  if (width < 1680) return 196;
+  return 216; // grand écran : pochettes plus grandes, moins de colonnes
+}
+
 export function gridLayout(
   width: number,
   min: number,
@@ -1121,3 +1137,4 @@ export function searchLibrary(tracks: readonly TrackRow[], query: string, limit 
   hits.sort((a, b) => a.r - b.r || a.i - b.i);
   return hits.slice(0, Math.max(0, limit)).map((h) => h.t);
 }
+
