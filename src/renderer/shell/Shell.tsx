@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { RouteView, type RouteViewActions } from "./RouteView";
+import { ViewBackdrop } from "./ViewBackdrop";
 import { createShellShortcuts } from "./shellShortcuts";
 import type { PlayerControls } from "../components/controls";
 import { useGlobalShortcuts } from "../lib/shortcuts";
@@ -81,6 +82,7 @@ export function Shell({ views, controls, player, topActions }: ShellProps): JSX.
   return (
     <div className="shell">
       <Sidebar />
+      <ViewBackdrop />
       <div className="shell-main">
         <TopBar scrolled={scrolled} actions={topActions} searchRef={searchRef} />
         <main className="shell-scroll" ref={scrollRef} onScroll={onScroll}>
@@ -97,3 +99,4 @@ export function Shell({ views, controls, player, topActions }: ShellProps): JSX.
     </div>
   );
 }
+

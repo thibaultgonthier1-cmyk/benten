@@ -144,7 +144,7 @@ export function AlbumsView({ scrollRef, actions, variant = "albums" }: AlbumsVie
 
   // Fond en image sur l'accueil : la peinture encre et or, très en retrait, masquée en dégradé.
   // Une seule image, pas de flou calculé (le flou coûte cher) — juste opacité et masque.
-  const backdrop = variant === "home" ? assetUrl("ill.onboarding") : null;
+  const backdrop = null; // remplacé par le fond animé global (ViewBackdrop)
 
   return (
     <div className={"albums-view" + (backdrop ? " has-backdrop" : "")}>
@@ -156,5 +156,6 @@ export function AlbumsView({ scrollRef, actions, variant = "albums" }: AlbumsVie
     </div>
   );
 }
+
 
 
