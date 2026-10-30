@@ -15,7 +15,7 @@ import type { TrackRow } from "../../shared/types";
  */
 
 /** Délai avant de décoder sur simple survol : assez pour distinguer une intention d'un balayage. */
-export const HOVER_DELAY_MS = 160;
+export const HOVER_DELAY_MS = 40;
 
 let engineRef: AudioEngine | null = null;
 let hoverTimer = 0;
@@ -52,3 +52,4 @@ export function cancelPrefetch(): void {
   hoverTimer = 0;
   hoveredId = null;
 }
+

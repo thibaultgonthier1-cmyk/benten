@@ -205,9 +205,24 @@ export class AudioEngine {
    * instantanément. Borné en nombre ET en durée cumulée : on ne garde pas une bibliothèque en RAM.
    */
   private readonly decoded = new Map<number, AudioBuffer>();
-  private static readonly DECODED_MAX_ENTRIES = 6;
-  /** ~40 min d'audio au total : de quoi revenir en arrière, jamais toute la bibliothèque. */
-  private static readonly DECODED_MAX_SECONDS = 60 * 40;
+  private static readonly DECODED_MAX_ENTRIES = 4;
+  /**
+   * Budget mémoire RÉEL du cache, en octets.
+   *
+   * Piège corrigé : borner en DURÉE était faux. Un `AudioBuffer` stocke des Float32 (4 octets par
+   * échantillon et par canal) : 40 minutes de stéréo à 48 kHz pèsent ~900 Mo, soit presque toute la
+   * mémoire d'une machine modeste. On raisonne donc en octets, à ~200 Mo au total.
+   */
+  private static readonly DECODED_MAX_BYTES = 200 * 1024 * 1024;
+
+  /**
+   * Décodages EN COURS, par piste.
+   *
+   * Sans ça, un préchargement lancé au survol et la lecture déclenchée au clic décodaient le MÊME
+   * fichier deux fois : le second attendait son propre décodage (~1,7 s mesuré) au lieu de profiter
+   * du premier. Ici, `load()` rejoint le décodage déjà en vol.
+   */
+  private readonly decoding = new Map<number, Promise<AudioBuffer>>();
 
   /** Gain dédié à la source courante (n'existe qu'en mode fondu). */
   private sourceGain: GainNode | null = null;
@@ -377,8 +392,9 @@ export class AudioEngine {
 
     let buffer: AudioBuffer;
     try {
-      const bytes = await this.readBytes(track.path);
-      buffer = await this.decoder.decode(bytes);
+      // Rejoint le décodage éventuellement déjà en vol (préchargement au survol) au lieu d'en
+      // lancer un second : c'est ce qui évite le doublon qui doublait le temps d'attente.
+      buffer = await this.decodeOnce(track.id, track.path);
       this.rememberDecoded(track.id, buffer);
     } catch (err) {
       return fail(err instanceof Error ? err.message : "decode error");
@@ -390,23 +406,21 @@ export class AudioEngine {
     this.setStatus("ready");
   }
 
-  /** Garde un buffer décodé, en respectant les bornes du cache (nombre et durée cumulée). */
+  /** Garde un buffer décodé, en respectant les bornes du cache (nombre et MÉMOIRE). */
   private rememberDecoded(trackId: number, buffer: AudioBuffer): void {
     this.decoded.delete(trackId);
     this.decoded.set(trackId, buffer);
-    let seconds = 0;
-    for (const value of this.decoded.values()) {
-      seconds += Number.isFinite(value.duration) ? value.duration : 0;
-    }
+    let bytes = 0;
+    for (const value of this.decoded.values()) bytes += AudioEngine.decodedBytes(value);
     while (
       this.decoded.size > AudioEngine.DECODED_MAX_ENTRIES ||
-      (seconds > AudioEngine.DECODED_MAX_SECONDS && this.decoded.size > 1)
+      (bytes > AudioEngine.DECODED_MAX_BYTES && this.decoded.size > 1)
     ) {
       const oldest = this.decoded.keys().next();
       // On ne jette jamais la piste qu'on vient de charger.
       if (oldest.done || oldest.value === trackId) break;
       const removed = this.decoded.get(oldest.value);
-      seconds -= removed && Number.isFinite(removed.duration) ? removed.duration : 0;
+      bytes -= removed ? AudioEngine.decodedBytes(removed) : 0;
       this.decoded.delete(oldest.value);
     }
   }
@@ -420,8 +434,7 @@ export class AudioEngine {
     if (track.playable === false) return;
     if (!this.decoder.canDecode(track.path)) return;
     try {
-      const bytes = await this.readBytes(track.path);
-      const buffer = await this.decoder.decode(bytes);
+      const buffer = await this.decodeOnce(track.id, track.path);
       // Une lecture a pu démarrer entre-temps et avoir déjà mis ce buffer en cache.
       if (!this.decoded.has(track.id)) this.rememberDecoded(track.id, buffer);
     } catch {
@@ -429,10 +442,44 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Décode un fichier UNE SEULE FOIS, même si plusieurs appelants le demandent en même temps
+   * (préchargement au survol + lecture au clic). C'est ce qui supprime le doublon de décodage.
+   */
+  /** Taille mémoire réelle d'un buffer décodé (Float32 × canaux × échantillons). */
+  private static decodedBytes(buffer: AudioBuffer): number {
+    const channels = buffer.numberOfChannels || 1;
+    return (buffer.length || 0) * channels * 4;
+  }
+
+  /** Octets actuellement occupés par le cache (diagnostic et tests). */
+  decodedCacheBytes(): number {
+    let total = 0;
+    for (const value of this.decoded.values()) total += AudioEngine.decodedBytes(value);
+    return total;
+  }
+
   /** Nombre d'entrées en cache (diagnostic et tests). */
   decodedCacheSize(): number {
     return this.decoded.size;
   }
+
+  private decodeOnce(trackId: number, path: string): Promise<AudioBuffer> {
+    const inFlight = this.decoding.get(trackId);
+    if (inFlight) return inFlight;
+    const job = (async (): Promise<AudioBuffer> => {
+      const bytes = await this.readBytes(path);
+      return this.decoder.decode(bytes);
+    })();
+    this.decoding.set(trackId, job);
+    // On libère la place dès que le travail est terminé, quel qu'en soit le résultat.
+    void job
+      .finally(() => this.decoding.delete(trackId))
+      .catch(() => undefined);
+    return job;
+  }
+
+  /** Nombre d'entrées en cache (diagnostic et tests). */
 
   /** Purge le cache : les buffers appartiennent à l'AudioContext qui les a créés. */
   clearDecodedCache(): void {

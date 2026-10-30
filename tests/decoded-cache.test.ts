@@ -88,7 +88,7 @@ describe("cache de buffers decodes", () => {
     expect(engine.decodedCacheSize()).toBe(1);
   });
 
-  it("reste borne : jamais plus de 6 pistes en cache", async () => {
+  it("reste borne : jamais plus de 4 pistes en cache", async () => {
     const decoder: Decoder = { canDecode: () => true, decode: async () => new FakeBuffer(12) } as unknown as Decoder;
     const engine = new AudioEngine(
       new FakeCtx() as unknown as AudioContext,
@@ -96,7 +96,7 @@ describe("cache de buffers decodes", () => {
       (async () => new ArrayBuffer(8)) as never,
     );
     for (let id = 1; id <= 9; id += 1) await engine.load(track(id));
-    expect(engine.decodedCacheSize()).toBeLessThanOrEqual(6);
+    expect(engine.decodedCacheSize()).toBeLessThanOrEqual(4);
   });
 
   it("se purge quand le contexte audio est reconstruit", async () => {
@@ -112,3 +112,4 @@ describe("cache de buffers decodes", () => {
     expect(engine.decodedCacheSize()).toBe(0);
   });
 });
+

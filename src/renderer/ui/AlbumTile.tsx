@@ -78,6 +78,10 @@ function AlbumTileImpl({ album, playing, onPlay, onContextMenu, enterIndex = nul
       tabIndex={0}
       role="group"
       aria-label={label}
+      // Survol de la CARTE entière : le décodage part tôt, bien avant que le clic n'arrive sur le
+      // médaillon. C'est ce qui rend le changement de piste instantané en usage réel.
+      onPointerEnter={() => prefetchOnHover(album.tracks[0] ?? null)}
+      onPointerLeave={() => cancelPrefetch()}
       aria-current={playing ? "true" : undefined}
       aria-keyshortcuts="Enter Shift+Enter"
       draggable
@@ -189,6 +193,8 @@ function TilePlayButton({
 }
 
 export const AlbumTile = memo(AlbumTileImpl);
+
+
 
 
 
