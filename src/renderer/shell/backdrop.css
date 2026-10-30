@@ -25,7 +25,7 @@
 }
 
 .view-backdrop-frame[data-current='true'] {
-  opacity: 0.13;
+  opacity: 0.26;
   transform: scale(1.07);
 }
 
@@ -59,12 +59,12 @@
 
 /* La scène 3D est plus lumineuse qu'une illustration : on la montre moins fort. */
 .view-backdrop-video[data-current='true'] {
-  opacity: 0.09 !important;
+  opacity: 0.22 !important;
 }
 
 /* Réactivité : le fond s'éteint légèrement quand rien ne joue — le décor suit l'app. */
 .view-backdrop-layer[data-playing='false'] .view-backdrop-frame[data-current='true'] {
-  opacity: 0.07;
+  opacity: 0.12;
 }
 
 /* Parallaxe : le décalage vient d'une variable inline ; la transition adoucit le retour en haut. */
@@ -79,3 +79,4 @@
     transition-duration: 0ms;
   }
 }
+

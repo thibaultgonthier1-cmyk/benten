@@ -51,8 +51,8 @@ interface Layer {
 }
 
 /** Amplitude de la parallaxe : 8 % du défilement, plafonnée. */
-const PARALLAX_RATE = 0.08;
-const PARALLAX_MAX = 40;
+const PARALLAX_RATE = 0.16;
+const PARALLAX_MAX = 90;
 
 export function ViewBackdrop(): JSX.Element | null {
   const route = useUi((s) => s.route.name);
@@ -126,7 +126,7 @@ export function ViewBackdrop(): JSX.Element | null {
         // Normalisé dans [-1,1] depuis le centre, puis réduit : 14 px de course au maximum.
         const x = (event.clientX / window.innerWidth - 0.5) * 2;
         const y = (event.clientY / window.innerHeight - 0.5) * 2;
-        setPointer({ x: Math.round(-x * 14), y: Math.round(-y * 9) });
+        setPointer({ x: Math.round(-x * 34), y: Math.round(-y * 22) });
       });
     };
     window.addEventListener("pointermove", onMove, { passive: true });
@@ -188,4 +188,5 @@ export function ViewBackdrop(): JSX.Element | null {
     </div>
   );
 }
+
 

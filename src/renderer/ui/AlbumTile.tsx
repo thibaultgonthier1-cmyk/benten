@@ -163,8 +163,8 @@ function TilePlayButton({
         const rect = event.currentTarget.getBoundingClientRect();
         const dx = (event.clientX - rect.left) / rect.width - 0.5;
         const dy = (event.clientY - rect.top) / rect.height - 0.5;
-        event.currentTarget.style.setProperty("--tilt-x", `${(-dy * 4).toFixed(2)}deg`);
-        event.currentTarget.style.setProperty("--tilt-y", `${(dx * 4).toFixed(2)}deg`);
+        event.currentTarget.style.setProperty("--tilt-x", `${(-dy * 9).toFixed(2)}deg`);
+        event.currentTarget.style.setProperty("--tilt-y", `${(dx * 9).toFixed(2)}deg`);
       }}
       className={`album-tile__play${current ? " is-current" : ""}`}
       onClick={(e) => e.stopPropagation()}
@@ -189,6 +189,7 @@ function TilePlayButton({
 }
 
 export const AlbumTile = memo(AlbumTileImpl);
+
 
 
 
