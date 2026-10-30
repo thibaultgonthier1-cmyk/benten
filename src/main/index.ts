@@ -17,6 +17,7 @@ import { cookieArgs, readCookieSource, writeCookieSource } from "./youtube/cooki
 import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
 import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
 import { backfillAddedAt } from "./library/addedAt";
+import { addSource } from "./library/repository";
 import { backupDb, openDbSafe, wireDbClose } from "./library/dbsafety";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
@@ -353,6 +354,20 @@ app.whenReady().then(() => {
     }
     return { queued };
   };
+  // Les dossiers de téléchargement sont des SOURCES de la bibliothèque : sans cela, un fichier
+  // téléchargé n''apparaît jamais (seul l''indexage à l''unité le faisait, et il échoue sur les
+  // formats non convertis). Comme sources, la veille les prend en compte, y compris après un
+  // redémarrage — c''est ce qui manquait pour que la playlist se remplisse « en direct ».
+  for (const folder of [youtubeDir, appleDir]) {
+    try {
+      mkdirSync(folder, { recursive: true });
+      const known = getSources(db).some((source) => source.path === folder);
+      if (!known) addSource(db, folder);
+    } catch (error) {
+      journal?.log({ kind: "process", event: "sources.add-failed", folder, message: String(error) });
+    }
+  }
+
   registerIpc(db, {
     apple: {
       status: appleStatus,
@@ -461,6 +476,8 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
 
 
 
