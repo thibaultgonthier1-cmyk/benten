@@ -17,6 +17,13 @@ import "./backdrop.css";
  * fondu instantané.
  */
 
+/**
+ * Fond de chaque catégorie. Les vues les plus regardées reçoivent la SCÈNE 3D (Blender) ; les
+ * autres gardent une illustration fixe — une vidéo par vue coûterait trop de décodage pour un
+ * écran qu'on traverse.
+ */
+const SCENE_ROUTES: ReadonlySet<RouteName> = new Set<RouteName>(["home", "tracks", "albums"]);
+
 const BACKDROP_FOR: Readonly<Record<RouteName, AssetId | null>> = Object.freeze({
   home: "ill.onboarding",
   tracks: "ill.noResults",
@@ -36,6 +43,7 @@ const BACKDROP_FOR: Readonly<Record<RouteName, AssetId | null>> = Object.freeze(
 interface Layer {
   id: number;
   url: string;
+  video: boolean;
 }
 
 export function ViewBackdrop(): JSX.Element | null {
@@ -45,14 +53,17 @@ export function ViewBackdrop(): JSX.Element | null {
   const counter = useRef(0);
 
   useEffect(() => {
-    const id = BACKDROP_FOR[route];
-    const url = id ? assetUrl(id) : null;
+    const isScene = SCENE_ROUTES.has(route);
+    const url = isScene ? assetUrl("scene.torii") : (() => {
+      const id = BACKDROP_FOR[route];
+      return id ? assetUrl(id) : null;
+    })();
     if (!url) {
       setLayers([]);
       return;
     }
     counter.current += 1;
-    const next: Layer = { id: counter.current, url };
+    const next: Layer = { id: counter.current, url, video: isScene };
     // On garde l'ancienne couche le temps du fondu (elle s'efface), puis on la retire.
     setLayers((previous) => [...previous.slice(-1), next]);
     const timer = window.setTimeout(() => {
@@ -65,14 +76,30 @@ export function ViewBackdrop(): JSX.Element | null {
 
   return (
     <div className="view-backdrop-layer" aria-hidden="true">
-      {layers.map((layer, index) => (
-        <div
-          key={layer.id}
-          className="view-backdrop-frame"
-          data-current={index === layers.length - 1 ? "true" : "false"}
-          style={{ backgroundImage: `url("${layer.url}")` }}
-        />
-      ))}
+      {layers.map((layer, index) =>
+        layer.video ? (
+          <video
+            key={layer.id}
+            className="view-backdrop-frame view-backdrop-video"
+            data-current={index === layers.length - 1 ? "true" : "false"}
+            src={layer.url}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
+            aria-hidden="true"
+          />
+        ) : (
+          <div
+            key={layer.id}
+            className="view-backdrop-frame"
+            data-current={index === layers.length - 1 ? "true" : "false"}
+            style={{ backgroundImage: `url("${layer.url}")` }}
+          />
+        ),
+      )}
     </div>
   );
 }
+

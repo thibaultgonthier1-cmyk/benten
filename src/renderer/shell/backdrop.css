@@ -45,3 +45,19 @@
     opacity: 0.1;
   }
 }
+
+/* Scène 3D : la vidéo occupe la même place que l'image, avec sa transparence. */
+.view-backdrop-video {
+  background: none;
+  opacity: 0 !important;
+  width: calc(100% + 12%);
+  height: 620px;
+  object-fit: cover;
+  object-position: center top;
+}
+
+
+/* La scène 3D est plus lumineuse qu'une illustration : on la montre moins fort. */
+.view-backdrop-video[data-current='true'] {
+  opacity: 0.09 !important;
+}

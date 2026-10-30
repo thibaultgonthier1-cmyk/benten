@@ -23,6 +23,7 @@ export const ASSET_IDS = [
   "ill.noResults",
   "ill.onboarding",
   "logo.animated",
+  "scene.torii",
   "intro.gold",
 ] as const;
 
@@ -42,6 +43,8 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
   "ill.noResults": new URL("./ill/no-results.webp", import.meta.url).href,
   "ill.onboarding": new URL("./ill/onboarding.webp", import.meta.url).href,
   "logo.animated": new URL("./motion/logo.webm", import.meta.url).href,
+  // Scène 3D (Blender) : torii, soleil, eau et anneaux, boucle de 6 s avec transparence.
+  "scene.torii": new URL("./motion/scene-torii.webm", import.meta.url).href,
   "intro.gold": new URL("./intro/gold.mp4", import.meta.url).href,
 });
 
@@ -49,5 +52,6 @@ const ASSET_MAP: Readonly<Record<AssetId, string | null>> = Object.freeze({
 export function assetUrl(id: AssetId): string | null {
   return Object.prototype.hasOwnProperty.call(ASSET_MAP, id) ? ASSET_MAP[id] : null;
 }
+
 
 

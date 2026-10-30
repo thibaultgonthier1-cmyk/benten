@@ -107,7 +107,7 @@ def build_scene():
     eau_mat = make_material("eau", (0.012, 0.011, 0.014, 1), roughness=0.06, metallic=0.85)
 
     # Soleil : sphère émissive derrière le torii.
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.9, location=(0, 4.2, 2.15))
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.35, location=(0, 5.2, 1.95))
     soleil = bpy.context.active_object
     soleil.name = "soleil"
     soleil.data.materials.append(or_mat)
@@ -144,10 +144,10 @@ def build_scene():
         anneau.keyframe_insert("scale", frame=FRAME_END)
 
     # Caméra en orbite lente : le fond ne montre jamais deux fois le même cadrage.
-    bpy.ops.object.camera_add(location=(0, -9.5, 3.4))
+    bpy.ops.object.camera_add(location=(0, -14.5, 4.6))
     camera = bpy.context.active_object
     scene.camera = camera
-    camera.data.lens = 42
+    camera.data.lens = 50
 
     # Cible fixe (le torii) via une contrainte « Track To ».
     bpy.ops.object.empty_add(location=(0, 0, 1.8))
@@ -186,5 +186,6 @@ if __name__ == "__main__":
         '  ffmpeg -framerate 30 -i "%s" -c:v libvpx-vp9 -b:v 0 -crf 34 -an benten-scene.webm'
         % os.path.join(OUT_DIR, "frame_%04d.png")
     )
+
 
 
