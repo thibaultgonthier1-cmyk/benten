@@ -569,3 +569,15 @@
 .album-tile__play.is-current {
   padding-left: 0;
 }
+
+/* Inclinaison de la pochette vers le curseur : transform seulement, jamais de layout. */
+.album-tile__play {
+  transform: perspective(520px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition: transform 120ms ease-out, opacity 0.22s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .album-tile__play {
+    transform: none;
+  }
+}

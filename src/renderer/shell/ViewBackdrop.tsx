@@ -61,6 +61,8 @@ export function ViewBackdrop(): JSX.Element | null {
   const m = useMotion();
   const [layers, setLayers] = useState<Layer[]>([]);
   const [shift, setShift] = useState(0);
+  // Décalage piloté par la souris : le décor réagit au curseur, pas seulement au défilement.
+  const [pointer, setPointer] = useState({ x: 0, y: 0 });
   const counter = useRef(0);
   const lastTrack = useRef<number | null>(null);
 
@@ -110,6 +112,30 @@ export function ViewBackdrop(): JSX.Element | null {
     };
   }, [m.enabled]);
 
+  // --- Souris : le fond suit le curseur (parallaxe inverse, très légère) ----------------------
+  useEffect(() => {
+    if (!m.enabled) {
+      setPointer({ x: 0, y: 0 });
+      return undefined;
+    }
+    let raf = 0;
+    const onMove = (event: PointerEvent): void => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        // Normalisé dans [-1,1] depuis le centre, puis réduit : 14 px de course au maximum.
+        const x = (event.clientX / window.innerWidth - 0.5) * 2;
+        const y = (event.clientY / window.innerHeight - 0.5) * 2;
+        setPointer({ x: Math.round(-x * 14), y: Math.round(-y * 9) });
+      });
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      if (raf) window.cancelAnimationFrame(raf);
+    };
+  }, [m.enabled]);
+
   // --- Changement de piste : onde dorée ------------------------------------------------------
   useEffect(() => {
     if (trackId === null) return;
@@ -133,7 +159,10 @@ export function ViewBackdrop(): JSX.Element | null {
     <div className="view-backdrop-layer" aria-hidden="true" data-playing={playing ? "true" : "false"}>
       {layers.map((layer, index) => {
         const current = index === layers.length - 1;
-        const style = { transform: `translate3d(0, ${-shift}px, 0)` };
+        // Composition des deux mouvements : défilement (vertical) + souris (les deux axes).
+        const style = {
+          transform: `translate3d(${pointer.x}px, ${-shift + pointer.y}px, 0)`,
+        };
         return layer.video ? (
           <video
             key={layer.id}
@@ -159,3 +188,4 @@ export function ViewBackdrop(): JSX.Element | null {
     </div>
   );
 }
+

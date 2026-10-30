@@ -158,11 +158,23 @@ function TilePlayButton({
   const playing = usePlayer((s) => current && s.status === "playing");
   return (
     <span
+      onPointerMove={(event) => {
+        // Inclinaison suivant le curseur : 4° au maximum, transform uniquement.
+        const rect = event.currentTarget.getBoundingClientRect();
+        const dx = (event.clientX - rect.left) / rect.width - 0.5;
+        const dy = (event.clientY - rect.top) / rect.height - 0.5;
+        event.currentTarget.style.setProperty("--tilt-x", `${(-dy * 4).toFixed(2)}deg`);
+        event.currentTarget.style.setProperty("--tilt-y", `${(dx * 4).toFixed(2)}deg`);
+      }}
       className={`album-tile__play${current ? " is-current" : ""}`}
       onClick={(e) => e.stopPropagation()}
       onPointerDown={() => prefetchNow(album.tracks[0] ?? null)}
       onPointerEnter={() => prefetchOnHover(album.tracks[0] ?? null)}
-      onPointerLeave={() => cancelPrefetch()}
+      onPointerLeave={(event) => {
+        event.currentTarget.style.setProperty("--tilt-x", "0deg");
+        event.currentTarget.style.setProperty("--tilt-y", "0deg");
+        cancelPrefetch();
+      }}
     >
       <GoldMedallion
         playing={playing}
@@ -177,6 +189,7 @@ function TilePlayButton({
 }
 
 export const AlbumTile = memo(AlbumTileImpl);
+
 
 
 
