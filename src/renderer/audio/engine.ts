@@ -196,6 +196,19 @@ export class AudioEngine {
   private scheduledWhen = 0;
   /** Fondu enchainé (s) ; 0 = gapless pur, comportement historique. */
   private crossfadeSec = 0;
+
+  /**
+   * Cache de buffers DÉCODÉS (LRU borné).
+   *
+   * Changer de morceau coûtait une lecture IPC + un décodage complet du fichier : plusieurs
+   * centaines de millisecondes entre l'appui et le son. Une piste déjà jouée se rejoue désormais
+   * instantanément. Borné en nombre ET en durée cumulée : on ne garde pas une bibliothèque en RAM.
+   */
+  private readonly decoded = new Map<number, AudioBuffer>();
+  private static readonly DECODED_MAX_ENTRIES = 6;
+  /** ~40 min d'audio au total : de quoi revenir en arrière, jamais toute la bibliothèque. */
+  private static readonly DECODED_MAX_SECONDS = 60 * 40;
+
   /** Gain dédié à la source courante (n'existe qu'en mode fondu). */
   private sourceGain: GainNode | null = null;
   /** Gain dédié à la source programmée (n'existe qu'en mode fondu). */
@@ -349,10 +362,24 @@ export class AudioEngine {
     if (!this.decoder.canDecode(track.path)) return fail("unsupported format");
 
     this.setStatus("loading");
+
+    // Cache de buffers décodés : une piste déjà jouée repart SANS lecture de fichier ni décodage.
+    // C'est ce qui supprime le décalage ressenti entre l'appui sur « lire » et le son.
+    const cached = this.decoded.get(track.id);
+    if (cached) {
+      this.decoded.delete(track.id);
+      this.decoded.set(track.id, cached); // réordonne (LRU)
+      this.buffer = cached;
+      this.durationSec = Number.isFinite(cached.duration) ? cached.duration : 0;
+      this.setStatus("ready");
+      return;
+    }
+
     let buffer: AudioBuffer;
     try {
       const bytes = await this.readBytes(track.path);
       buffer = await this.decoder.decode(bytes);
+      this.rememberDecoded(track.id, buffer);
     } catch (err) {
       return fail(err instanceof Error ? err.message : "decode error");
     }
@@ -361,6 +388,37 @@ export class AudioEngine {
     this.buffer = buffer;
     this.durationSec = Number.isFinite(buffer.duration) ? buffer.duration : 0;
     this.setStatus("ready");
+  }
+
+  /** Garde un buffer décodé, en respectant les bornes du cache (nombre et durée cumulée). */
+  private rememberDecoded(trackId: number, buffer: AudioBuffer): void {
+    this.decoded.delete(trackId);
+    this.decoded.set(trackId, buffer);
+    let seconds = 0;
+    for (const value of this.decoded.values()) {
+      seconds += Number.isFinite(value.duration) ? value.duration : 0;
+    }
+    while (
+      this.decoded.size > AudioEngine.DECODED_MAX_ENTRIES ||
+      (seconds > AudioEngine.DECODED_MAX_SECONDS && this.decoded.size > 1)
+    ) {
+      const oldest = this.decoded.keys().next();
+      // On ne jette jamais la piste qu'on vient de charger.
+      if (oldest.done || oldest.value === trackId) break;
+      const removed = this.decoded.get(oldest.value);
+      seconds -= removed && Number.isFinite(removed.duration) ? removed.duration : 0;
+      this.decoded.delete(oldest.value);
+    }
+  }
+
+  /** Nombre d'entrées en cache (diagnostic et tests). */
+  decodedCacheSize(): number {
+    return this.decoded.size;
+  }
+
+  /** Purge le cache : les buffers appartiennent à l'AudioContext qui les a créés. */
+  clearDecodedCache(): void {
+    this.decoded.clear();
   }
 
   /** Demarre / reprend la lecture depuis la position courante. Sans effet si rien de jouable. */
@@ -1341,6 +1399,10 @@ export class AudioEngine {
    * lui a donne). Si rien n'etait charge, on fait un swap propre et on reste en etat neutre.
    */
   async rebuildContext(newContext: AudioContext, newDecoder: Decoder): Promise<void> {
+    // 0) Les buffers decodes appartiennent a l'ANCIEN contexte : les servir dans le nouveau
+    //    produirait des sources invalides. On purge.
+    this.clearDecodedCache();
+
     // 1) Capture AVANT teardown (la position derive de l'ancien contexte).
     const savedPosition = this.getState().positionSec;
     const savedTrack = this.currentTrackRow;
@@ -1391,6 +1453,7 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+
 
 
 
