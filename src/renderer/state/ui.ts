@@ -23,6 +23,7 @@ export type Route =
   | { name: "favorites" }
   | { name: "search"; q: string }
   | { name: "downloads" }
+  | { name: "apple" }
   | { name: "settings" };
 
 export type RouteName = Route["name"];
@@ -36,6 +37,7 @@ export type NavSection =
   | "playlists"
   | "favorites"
   | "downloads"
+  | "apple"
   | "settings";
 
 /** Préférences de la grille d'albums (tri + filtre « Sans perte »), conservées entre les pages. */
@@ -239,3 +241,4 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
 export function useUi<T>(selector: (state: UiState) => T): T {
   return useStore(uiStore, selector);
 }
+

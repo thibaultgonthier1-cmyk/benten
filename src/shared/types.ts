@@ -175,6 +175,45 @@ export interface ImportPreview {
   items: ImportPreviewItem[];
 }
 
+/** Apple Music — état des prérequis (cookies + gamdl). */
+export interface AppleStatusView {
+  cookies: boolean;
+  cookiesUpdatedAt: number | null;
+  cookieEntries: number;
+  gamdl: boolean;
+  gamdlVersion: string | null;
+}
+
+/** Apple Music — piste d'une playlist, avec son sort dans la bibliothèque locale. */
+export interface ApplePreviewItem {
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  url: string;
+  /** Piste locale déjà présente (rien à télécharger). */
+  inLibrary: boolean;
+  matchedTrackId: number | null;
+}
+
+/** Apple Music — aperçu d'une playlist. */
+export interface ApplePreview {
+  ok: boolean;
+  name: string;
+  reason: string;
+  total: number;
+  missing: number;
+  items: ApplePreviewItem[];
+}
+
+/** Apple Music — avancement du téléchargement. */
+export interface AppleProgressView {
+  running: boolean;
+  done: number;
+  total: number;
+  workers: number;
+  error: string;
+}
 /** T15 — état du binaire yt-dlp. */
 export interface YoutubeStatusView {
   installed: boolean;
@@ -258,6 +297,14 @@ export interface BentenApi {
    * fonction de désabonnement.
    */
   onLibraryChanged(cb: () => void): () => void;
+  apple: {
+    status(): Promise<AppleStatusView>;
+    saveCookies(text: string): Promise<AppleStatusView>;
+    preview(url: string): Promise<ApplePreview>;
+    start(urls: readonly string[]): Promise<AppleProgressView>;
+    cancel(): Promise<void>;
+    onProgress(cb: (progress: AppleProgressView) => void): () => void;
+  };
   window: {
     setCompact(on: boolean): Promise<{ compact: boolean }>;
   };
@@ -287,6 +334,8 @@ declare global {
     benten: BentenApi;
   }
 }
+
+
 
 
 

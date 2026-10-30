@@ -65,6 +65,11 @@ describe("registerIpc", () => {
   it("enregistre ping, library:*, audio:*, dialog:pick-folder, sources:*, favorites:* et playlists:*", () => {
     expect([...handlers.keys()].sort()).toEqual([
       "app:ping",
+      "apple:cancel",
+      "apple:preview",
+      "apple:save-cookies",
+      "apple:start",
+      "apple:status",
       "audio:default-device",
       "audio:list-devices",
       "audio:read-file",
@@ -590,6 +595,7 @@ describe("normalizePage / validateScanPaths", () => {
     expect(validateScanPaths([FIX])).toEqual([FIX]);
   });
 });
+
 
 
 

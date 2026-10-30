@@ -51,6 +51,20 @@ const api: BentenApi = {
   // Abonnement au push « library:changed » (Task 14B). On enveloppe un listener qui ignore les
   // arguments IPC (event/payload) et n'expose au Renderer qu'un callback sans argument. La valeur
   // de retour est une fonction de desabonnement (retire le listener).
+  apple: {
+    status: () => invoke(CHANNELS.APPLE_STATUS),
+    saveCookies: (text) => invoke(CHANNELS.APPLE_SAVE_COOKIES, text),
+    preview: (url) => invoke(CHANNELS.APPLE_PREVIEW, url),
+    start: (urls) => invoke(CHANNELS.APPLE_START, urls),
+    cancel: () => invoke(CHANNELS.APPLE_CANCEL),
+    onProgress: (cb) => {
+      const listener = (_e: unknown, progress: Parameters<typeof cb>[0]): void => cb(progress);
+      ipcRenderer.on(CHANNELS.APPLE_PROGRESS, listener);
+      return () => {
+        ipcRenderer.removeListener(CHANNELS.APPLE_PROGRESS, listener);
+      };
+    },
+  },
   window: {
     setCompact: (on) => invoke(CHANNELS.WINDOW_SET_COMPACT, on),
   },
@@ -81,6 +95,7 @@ const api: BentenApi = {
 };
 
 contextBridge.exposeInMainWorld("benten", api);
+
 
 
 

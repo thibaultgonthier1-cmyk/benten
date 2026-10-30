@@ -25,6 +25,7 @@ import { indexLibrary } from "./library/indexer";
 import { parseImportFile } from "./importer/applePlaylist";
 import { matchTracks } from "./importer/matcher";
 import { onlyNewTrackIds } from "./importer/incremental";
+import type { AppleStatusView } from "../shared/types";
 import { validateDiagEntries, type JournalWriter } from "./journal";
 import {
   addSource,
@@ -334,6 +335,14 @@ export function registerDiagnosticsIpc(writer: JournalWriter, versions: Diagnost
 export interface IpcHooks {
   /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
   onSourcesChanged?: () => void;
+  /** Apple Music : prérequis, aperçu d'une playlist, téléchargement. Absent dans les tests. */
+  apple?: {
+    status(): Promise<AppleStatusView>;
+    saveCookies(text: string): Promise<AppleStatusView>;
+    preview(url: string): Promise<unknown>;
+    start(urls: readonly string[]): Promise<unknown>;
+    cancel(): Promise<void>;
+  };
   /** T17 — passage en mode compact (fenêtre). Absent dans les tests. */
   setCompact?: (on: boolean) => void;
   /** T15 — téléchargeur YouTube. Fourni par le Main, absent dans les tests. */
@@ -347,6 +356,39 @@ export interface IpcHooks {
 
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
+  // ── Apple Music : prérequis, aperçu, téléchargement ─────────────────────────────────────────
+  ipcMain.handle(CHANNELS.APPLE_STATUS, (event) => {
+    assertTrusted(event);
+    return hooks?.apple?.status() ?? { cookies: false, cookiesUpdatedAt: null, cookieEntries: 0, gamdl: false, gamdlVersion: null };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_SAVE_COOKIES, (event, text: unknown) => {
+    assertTrusted(event);
+    if (typeof text !== "string" || text.trim().length === 0) {
+      throw new Error("apple:save-cookies: le contenu des cookies est vide");
+    }
+    return hooks?.apple?.saveCookies(text) ?? { cookies: false, cookiesUpdatedAt: null, cookieEntries: 0, gamdl: false, gamdlVersion: null };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_PREVIEW, (event, url: unknown) => {
+    assertTrusted(event);
+    if (typeof url !== "string" || url.trim().length === 0) {
+      throw new Error("apple:preview: lien manquant");
+    }
+    return hooks?.apple?.preview(url) ?? { ok: false, name: "", reason: "indisponible", total: 0, missing: 0, items: [] };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_START, (event, urls: unknown) => {
+    assertTrusted(event);
+    if (!Array.isArray(urls) || urls.length === 0) throw new Error("apple:start: aucune piste à télécharger");
+    const clean = urls.map((value) => String(value));
+    return hooks?.apple?.start(clean) ?? { running: false, done: 0, total: 0, workers: 0, error: "indisponible" };
+  });
+
+  ipcMain.handle(CHANNELS.APPLE_CANCEL, async (event) => {
+    assertTrusted(event);
+    await hooks?.apple?.cancel();
+  });
   // ── T17 — mode compact ───────────────────────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.WINDOW_SET_COMPACT, (event, on: unknown) => {
     assertTrusted(event);
@@ -587,6 +629,7 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
 
 
 

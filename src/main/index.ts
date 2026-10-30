@@ -1,11 +1,16 @@
 import { app, BrowserWindow, dialog, powerMonitor } from "electron";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync, mkdirSync, promises as fs, readdirSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import chokidar from "chokidar";
 import { CHANNELS } from "../shared/channels";
 import { registerArtProtocol, registerArtScheme, setArtSourceResolver } from "./artprotocol";
 import { registerDiagnosticsIpc, registerIpc } from "./ipc";
 import { YoutubeManager } from "./youtube/manager";
+import { AppleRunner, resolveCollection } from "./apple/index";
+import { existingCookiesPath, saveCookies, cookiesStatus } from "./apple/cookies";
+import { matchTracks } from "./importer/matcher";
+import { queryLibrary } from "./ipc";
 import { ensureYtDlp, readYtDlpVersion } from "./youtube/ytdlp";
 import { attachMainJournal, createJournalWriter, watchWindowJournal, type JournalWriter } from "./journal";
 import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
@@ -203,7 +208,103 @@ app.whenReady().then(() => {
     }
   });
 
+  // ── Apple Music : cookies, aperçu, téléchargement ───────────────────────────────────────────
+  // Sortie : `Musique\Benten\Apple`, indexée après coup par la veille. `gamdl` est un outil
+  // externe lancé en local ; les cookies restent dans le dossier de données de l'app.
+  const appleDir = join(app.getPath("music"), "Benten", "Apple");
+  let appleRunner: AppleRunner | null = null;
+
+  const appleStatus = async (): Promise<{
+    cookies: boolean;
+    cookiesUpdatedAt: number | null;
+    cookieEntries: number;
+    gamdl: boolean;
+    gamdlVersion: string | null;
+  }> => {
+    const status = await cookiesStatus(userData);
+    const gamdlVersion = await new Promise<string | null>((resolve) => {
+      execFile("gamdl", ["--version"], { timeout: 10_000 }, (error, stdout) => {
+        resolve(error ? null : String(stdout ?? "").trim().split(/\r?\n/)[0] || null);
+      });
+    });
+    return {
+      cookies: status.present,
+      cookiesUpdatedAt: status.updatedAt,
+      cookieEntries: status.entries,
+      gamdl: gamdlVersion !== null,
+      gamdlVersion,
+    };
+  };
+
+  const applePreview = async (url: string) => {
+    const collection = await resolveCollection(url);
+    if (!collection.ok) {
+      return { ok: false, name: "", reason: collection.reason, total: 0, missing: 0, items: [] };
+    }
+    const library = queryLibrary(db, { view: "tracks", limit: 20000 });
+    const imported = collection.tracks.map((track) => ({
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      durationSec: track.duration,
+    }));
+    const matched = matchTracks(imported, library.rows as never);
+    const items = collection.tracks.map((track, index) => ({
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      duration: track.duration,
+      url: track.url,
+      inLibrary: Boolean(matched[index]?.track),
+      matchedTrackId: matched[index]?.track?.id ?? null,
+    }));
+    return {
+      ok: true,
+      name: collection.playlistName,
+      reason: "",
+      total: items.length,
+      missing: items.filter((item) => !item.inLibrary).length,
+      items,
+    };
+  };
+
+  const appleStart = async (urls: readonly string[]) => {
+    const cookies = existingCookiesPath(userData);
+    if (!cookies) throw new Error("cookies.txt manquant — colle ton export Apple Music d'abord.");
+    mkdirSync(appleDir, { recursive: true });
+    appleRunner?.cancel();
+    appleRunner = new AppleRunner({
+      cookiesPath: cookies,
+      outputPath: appleDir,
+      databasePath: join(userData, "gamdl.db"),
+      workers: 3,
+      onProgress: (progress) => {
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send(CHANNELS.APPLE_PROGRESS, progress);
+      },
+    });
+    const result = await appleRunner.start(urls);
+    // Indexation de ce qui vient d'arriver (la veille ne couvre pas ce dossier).
+    try {
+      for (const name of readdirSync(appleDir)) {
+        if (!/\.(flac|m4a|mp3|aac|wav)$/i.test(name)) continue;
+        await indexOne(db, join(appleDir, name));
+      }
+      broadcastLibraryChanged();
+    } catch (error) {
+      journal?.log({ kind: "process", event: "apple.index-failed", message: String(error) });
+    }
+    return result;
+  };
   registerIpc(db, {
+    apple: {
+      status: appleStatus,
+      saveCookies: (text: string) => saveCookies(userData, text).then(() => appleStatus()),
+      preview: applePreview,
+      start: appleStart,
+      cancel: async () => {
+        appleRunner?.cancel();
+      },
+    },
     setCompact: (on: boolean) => {
       const win = BrowserWindow.getAllWindows()[0];
       if (!win) return;
@@ -289,6 +390,9 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
+
 
 
 

@@ -13,6 +13,7 @@ import {
   Plus,
   Settings,
   type LucideIcon,
+  Music4,
 } from "lucide-react";
 import type { PlaylistRow } from "../../shared/types";
 import { hasDragTracks, readDragTracks } from "../lib/dnd";
@@ -43,6 +44,7 @@ const LIBRARY: readonly NavEntry[] = [
   { key: "playlists", label: "Playlists", icon: ListMusic, route: { name: "playlists" } },
   { key: "favorites", label: "Favoris", icon: Heart, route: { name: "favorites" } },
   { key: "downloads", label: "Téléchargements", icon: Download, route: { name: "downloads" } },
+  { key: "apple", label: "Apple Music", icon: Music4, route: { name: "apple" } },
 ];
 const SETTINGS: NavEntry = {
   key: "settings",
@@ -310,3 +312,4 @@ function EmptyInvite(): JSX.Element {
     </button>
   );
 }
+

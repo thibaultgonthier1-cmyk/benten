@@ -36,6 +36,14 @@ export const CHANNELS = {
   IMPORT_PREVIEW: "import:preview",
   IMPORT_COMMIT: "import:commit",
   DIALOG_PICK_FILE: "dialog:pick-file",
+  /** Apple Music : cookies, aperçu d''une playlist, téléchargement. */
+  APPLE_STATUS: "apple:status",
+  APPLE_SAVE_COOKIES: "apple:save-cookies",
+  APPLE_PREVIEW: "apple:preview",
+  APPLE_START: "apple:start",
+  APPLE_CANCEL: "apple:cancel",
+  /** Push Main -> Renderer : avancement du téléchargement Apple. */
+  APPLE_PROGRESS: "apple:progress",
   /** T17 — mode compact (fenêtre 420×132, toujours au premier plan). */
   WINDOW_SET_COMPACT: "window:set-compact",
   /** Push Main -> Renderer : un travail a changé d'état. */
@@ -43,6 +51,7 @@ export const CHANNELS = {
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
 
 
 

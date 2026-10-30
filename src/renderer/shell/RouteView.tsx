@@ -11,6 +11,7 @@ import { pageTransition } from "../theme/ds/motion";
 import type { Album } from "../lib/library";
 import { BentenMark } from "../ui/BentenMark";
 import { DownloadsView } from "../views/DownloadsView";
+import { AppleMusicView } from "../views/AppleMusicView";
 import { fxHostMounted, requestFx } from "../ui/FxOverlay";
 import { Button } from "../ui/Button";
 import { useMotion, useMotionLevel } from "../ui/useMotion";
@@ -187,6 +188,8 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
       return <PlaylistView id={route.id} scrollRef={scrollRef} actions={actions} />;
     case "downloads":
       return <DownloadsView />;
+    case "apple":
+      return <AppleMusicView />;
     case "search":
       return <SearchView q={route.q} actions={actions} />;
     default:
@@ -198,6 +201,8 @@ function titleOf(route: Route): string {
   switch (route.name) {
     case "downloads":
       return "Téléchargements";
+    case "apple":
+      return "Apple Music";
     case "settings":
       return "Réglages";
     default:
@@ -292,6 +297,7 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
 
 
 
