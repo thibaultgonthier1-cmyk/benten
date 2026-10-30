@@ -1,6 +1,7 @@
 import type { QualityMode, TrackRow } from "../../shared/types";
 import type { Decoder } from "./decoder";
 import { crossfadeGains, crossfadeStartTime, nextStartTime, normalizeCrossfade, shouldPreload } from "./schedule";
+import { alignFadeStart, estimateBpm, quantizeFadeToBeats } from "./beats";
 import { buildOrder, nextInOrder, prevInOrder, type RepeatMode } from "./order";
 
 export type { RepeatMode } from "./order";
@@ -199,6 +200,13 @@ export class AudioEngine {
   private sourceGain: GainNode | null = null;
   /** Gain dédié à la source programmée (n'existe qu'en mode fondu). */
   private scheduledGain: GainNode | null = null;
+  /**
+   * Tempo de la piste courante, quand il est connu. Sert à caler le fondu sur une mesure
+   * (`alignFadeStart`) au lieu d'une durée arbitraire. `null` = fondu à durée fixe.
+   */
+  private crossfadeBpm: number | null = null;
+  /** Faut-il caler le fondu sur le tempo ? (réglage utilisateur) */
+  private beatMatched = true;
 
   /**
    * @param context  `AudioContext` partage (injectable → mockable).
@@ -428,6 +436,17 @@ export class AudioEngine {
     const buffer = this.buffer;
     if (!buffer) return;
     this.teardownSource();
+    // Tempo : calculé une fois sur les échantillons déjà décodés (aucun coût réseau), seulement
+    // si le fondu est actif. Sert à caler la transition sur une mesure.
+    if (this.crossfadeSec > 0 && this.beatMatched) {
+      try {
+        this.crossfadeBpm = estimateBpm(buffer.getChannelData(0), buffer.sampleRate);
+      } catch {
+        this.crossfadeBpm = null;
+      }
+    } else {
+      this.crossfadeBpm = null;
+    }
     const source = this.context.createBufferSource();
     source.buffer = buffer;
     // En mode fondu, chaque source a SON gain : c'est lui qu'on baisse pendant que la suivante
@@ -996,8 +1015,16 @@ export class AudioEngine {
     const prevStart = this.startedAtCtxTime - this.startOffsetSec;
     const endTime = nextStartTime(prevStart, this.durationSec);
     // Fondu : on démarre la suivante AVANT la fin ; gapless : exactement à la fin.
-    const fadeSec = this.crossfadeSec;
-    const when = fadeSec > 0 ? crossfadeStartTime(endTime, fadeSec, prevStart) : endTime;
+    const requested = this.crossfadeSec;
+    // Durée quantifiée sur la mesure de la piste sortante, puis départ recalé sur un temps :
+    // l'oreille entend une transition musicale, pas un fondu posé au hasard.
+    const fadeSec = requested > 0 ? quantizeFadeToBeats(requested, this.crossfadeBpm) : 0;
+    const when =
+      requested > 0
+        ? this.crossfadeBpm === null
+          ? crossfadeStartTime(endTime, fadeSec, prevStart)
+          : alignFadeStart(prevStart, endTime, fadeSec, this.crossfadeBpm)
+        : endTime;
     const source = this.context.createBufferSource();
     source.buffer = buffer;
 
@@ -1267,6 +1294,19 @@ export class AudioEngine {
     return this.crossfadeSec;
   }
 
+  /**
+   * Cale (ou non) le fondu sur le tempo détecté. Avec le calage, la durée est arrondie à un
+   * nombre entier de mesures et le départ tombe sur un temps ; sans, on garde une durée fixe.
+   */
+  setBeatMatchedCrossfade(enabled: boolean): void {
+    this.beatMatched = enabled === true;
+  }
+
+  /** Tempo détecté pour la piste courante (diagnostic / affichage), ou `null`. */
+  getCurrentBpm(): number | null {
+    return this.crossfadeBpm;
+  }
+
   /** Volume utilisateur courant [0,1], lu depuis le noeud dedie (source de verite du graphe). */
   getVolume(): number {
     const v = this.volumeGain.gain.value;
@@ -1351,6 +1391,8 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+
+
 
 
 

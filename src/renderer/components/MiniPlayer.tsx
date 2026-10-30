@@ -4,9 +4,11 @@ import { formatTime } from "../lib/library";
 import { Cover } from "./Cover";
 import { QualityBadge } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
+import type { AudioEngine } from "../audio/engine";
 import { GoldMedallion } from "../ui/GoldMedallion";
 import { BiwaString } from "../ui/BiwaString";
 import { SleepTimerMenu } from "./SleepTimerMenu";
+import { CrossfadeMenu } from "./CrossfadeMenu";
 import { EqualizerPanel } from "./EqualizerPanel";
 import { useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
@@ -22,7 +24,7 @@ const SEEK_STEP_SEC = 5;
  * Cliquer (ou Entree/Espace) ouvre la vue lecture plein ecran ; la barre est un `slider` operable
  * au clavier (fleches / Debut / Fin).
  */
-export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Element | null {
+export function MiniPlayer({ controls, engine }: { controls: PlayerControls; engine?: AudioEngine | null }): JSX.Element | null {
   const [eqOpen, setEqOpen] = useState(false);
   const track = usePlayer((s) => s.currentTrack);
   const status = usePlayer((s) => s.status);
@@ -138,6 +140,7 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
         >
           <Shuffle size={16} strokeWidth={1.75} aria-hidden />
         </button>
+        <CrossfadeMenu engine={engine ?? null} />
         <SleepTimerMenu />
         <button
           className="ic"
@@ -192,6 +195,9 @@ export function MiniPlayer({ controls }: { controls: PlayerControls }): JSX.Elem
     </div>
   );
 }
+
+
+
 
 
 

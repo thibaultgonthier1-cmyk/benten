@@ -182,7 +182,7 @@ export function App(): JSX.Element {
   return (
     <>
       <Intro onDone={() => undefined} />
-      <Shell views={views} controls={controls} player={<MiniPlayer controls={controls} />} />
+      <Shell views={views} controls={controls} player={<MiniPlayer controls={controls} engine={engine} />} />
 
       <NowPlaying controls={controls} />
       <QueuePanel />
@@ -194,6 +194,7 @@ export function App(): JSX.Element {
     </>
   );
 }
+
 
 
 

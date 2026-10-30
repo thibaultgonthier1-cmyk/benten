@@ -21,6 +21,10 @@ export interface PersistedSettings {
   /** T17B — égaliseur : 10 gains en dB (grave → aigu), et son activation. */
   eqEnabled: boolean;
   eqGains: number[];
+  /** Fondu enchaîné (s) ; 0 = désactivé. */
+  crossfadeSec: number;
+  /** Cale le fondu sur le tempo détecté (mesures entières). */
+  crossfadeBeatMatched: boolean;
   /** Vue Titres : regroupe les versions d'un même morceau sous l'original (Tâche 7). */
   groupVersions: boolean;
 }
@@ -36,6 +40,8 @@ export const DEFAULT_SETTINGS: Readonly<PersistedSettings> = Object.freeze({
   groupVersions: true,
   eqEnabled: false,
   eqGains: [...FLAT_EQ],
+  crossfadeSec: 0,
+  crossfadeBeatMatched: true,
 });
 
 export interface SettingsState extends PersistedSettings {
@@ -43,6 +49,8 @@ export interface SettingsState extends PersistedSettings {
   setShowIntro(show: boolean): void;
   setEqEnabled(on: boolean): void;
   setEqGains(gains: readonly number[]): void;
+  setCrossfade(seconds: number): void;
+  setCrossfadeBeatMatched(on: boolean): void;
   setGroupVersions(on: boolean): void;
   /** Lit la clé `"settings"` d'`app_state` et l'applique (no-op hors fenêtre, ne lève jamais). */
   load(): Promise<void>;
@@ -67,6 +75,8 @@ export function serializeSettings(s: PersistedSettings): string {
     groupVersions: s.groupVersions,
     eqEnabled: s.eqEnabled,
     eqGains: s.eqGains,
+    crossfadeSec: s.crossfadeSec,
+    crossfadeBeatMatched: s.crossfadeBeatMatched,
   });
 }
 
@@ -91,6 +101,14 @@ export function restoreSettings(raw: string): PersistedSettings {
       : DEFAULT_SETTINGS.motionIntensity,
     showIntro: typeof o.showIntro === "boolean" ? o.showIntro : DEFAULT_SETTINGS.showIntro,
     eqEnabled: typeof o.eqEnabled === "boolean" ? o.eqEnabled : DEFAULT_SETTINGS.eqEnabled,
+    crossfadeSec:
+      typeof o.crossfadeSec === "number" && o.crossfadeSec > 0
+        ? Math.min(12, o.crossfadeSec)
+        : 0,
+    crossfadeBeatMatched:
+      typeof o.crossfadeBeatMatched === "boolean"
+        ? o.crossfadeBeatMatched
+        : DEFAULT_SETTINGS.crossfadeBeatMatched,
     eqGains:
       Array.isArray(o.eqGains) && o.eqGains.length === EQ_BAND_COUNT
         ? (o.eqGains as unknown[]).map((v) => {
@@ -139,6 +157,15 @@ export function createSettingsStore(
 
     setEqEnabled(on) {
       set({ eqEnabled: on === true });
+    },
+
+    setCrossfade(seconds) {
+      const value = Number(seconds);
+      set({ crossfadeSec: Number.isFinite(value) && value > 0 ? Math.min(12, value) : 0 });
+    },
+
+    setCrossfadeBeatMatched(on) {
+      set({ crossfadeBeatMatched: on === true });
     },
 
     setEqGains(gains) {
@@ -200,6 +227,7 @@ export const settingsStore: SettingsStore = createSettingsStore();
 export function useSettings<T>(selector: (state: SettingsState) => T): T {
   return useStore(settingsStore, selector);
 }
+
 
 
 

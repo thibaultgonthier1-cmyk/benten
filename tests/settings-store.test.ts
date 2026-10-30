@@ -13,6 +13,8 @@ describe("restoreSettings", () => {
       motionIntensity: "full",
   eqEnabled: false,
   eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  crossfadeSec: 0,
+  crossfadeBeatMatched: true,
       showIntro: true,
       groupVersions: true,
     });
@@ -25,6 +27,8 @@ describe("restoreSettings", () => {
       groupVersions: true,
       eqEnabled: false,
       eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      crossfadeSec: 0,
+      crossfadeBeatMatched: true,
     });
     expect(restoreSettings("")).toEqual(DEFAULT_SETTINGS);
     expect(restoreSettings("null")).toEqual(DEFAULT_SETTINGS);
@@ -38,11 +42,13 @@ describe("restoreSettings", () => {
       groupVersions: true,
       eqEnabled: false,
       eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      crossfadeSec: 0,
+      crossfadeBeatMatched: true,
     });
   });
 
   it("aller-retour serialize → restore identique", () => {
-    const s = { motionIntensity: "subtle" as const, showIntro: false, groupVersions: false, eqEnabled: false, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+    const s = { motionIntensity: "subtle" as const, showIntro: false, groupVersions: false, eqEnabled: false, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], crossfadeSec: 0, crossfadeBeatMatched: true };
     expect(restoreSettings(serializeSettings(s))).toEqual(s);
   });
 
@@ -60,7 +66,7 @@ describe("groupVersions (Tâche 7)", () => {
   });
 
   it("sérialisé avec les autres réglages et restauré (aller-retour)", () => {
-    const s = { motionIntensity: "full" as const, showIntro: true, groupVersions: false, eqEnabled: false, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
+    const s = { motionIntensity: "full" as const, showIntro: true, groupVersions: false, eqEnabled: false, eqGains: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], crossfadeSec: 0, crossfadeBeatMatched: true };
     expect(JSON.parse(serializeSettings(s))).toEqual(s);
     expect(restoreSettings(serializeSettings(s)).groupVersions).toBe(false);
   });
@@ -136,12 +142,12 @@ describe("settings store (persistance via api injectée)", () => {
     store.getState().setMotionIntensity("reduced");
     expect(writes.at(-1)).toEqual([
       "settings",
-      '{"motionIntensity":"reduced","showIntro":false,"groupVersions":true,"eqEnabled":false,"eqGains":[0,0,0,0,0,0,0,0,0,0]}',
+      '{"motionIntensity":"reduced","showIntro":false,"groupVersions":true,"eqEnabled":false,"eqGains":[0,0,0,0,0,0,0,0,0,0],"crossfadeSec":0,"crossfadeBeatMatched":true}',
     ]);
     store.getState().setShowIntro(true);
     expect(writes.at(-1)).toEqual([
       "settings",
-      '{"motionIntensity":"reduced","showIntro":true,"groupVersions":true,"eqEnabled":false,"eqGains":[0,0,0,0,0,0,0,0,0,0]}',
+      '{"motionIntensity":"reduced","showIntro":true,"groupVersions":true,"eqEnabled":false,"eqGains":[0,0,0,0,0,0,0,0,0,0],"crossfadeSec":0,"crossfadeBeatMatched":true}',
     ]);
   });
 
@@ -169,6 +175,7 @@ describe("settings store (persistance via api injectée)", () => {
     expect(store.getState().motionIntensity).toBe("subtle");
   });
 });
+
 
 
 
