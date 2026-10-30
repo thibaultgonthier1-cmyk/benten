@@ -48,6 +48,12 @@ export interface BiwaStringProps {
   buffered?: number;
   /** Recherche demandée (fin du glisser, clic, clavier). */
   onSeek(fraction: number): void;
+  /**
+   * Recherche PENDANT le glissement (facultatif). Sans elle, le son ne bouge qu'au relâchement :
+   * on tire la corde, rien ne suit, puis ça saute d'un coup. Le composant limite lui-même le
+   * débit (voir `LIVE_SEEK_MS`) pour ne pas relancer la source 60 fois par seconde.
+   */
+  onScrubMove?(fraction: number): void;
   onScrubStart?(): void;
   onScrubEnd?(): void;
   /** Variante fine (volume). */
@@ -67,6 +73,9 @@ export interface BiwaStringProps {
   formatValue?(fraction: number): string;
   className?: string;
 }
+
+/** Débit de la recherche pendant le glissement (ms) : ~8 par seconde, assez fluide et peu coûteux. */
+const LIVE_SEEK_MS = 120;
 
 /** Hauteur de la zone sensible (px). */
 const HEIGHT = 28;
@@ -99,6 +108,7 @@ function BiwaStringImpl({
   value,
   buffered,
   onSeek,
+  onScrubMove,
   onScrubStart,
   onScrubEnd,
   thin = false,
@@ -157,8 +167,9 @@ function BiwaStringImpl({
   // Props lues par la boucle (sans la redémarrer à chaque rendu).
   const live = useRef({ playing, analyser, level, still, H, duration, formatValue, trackKey });
   live.current = { playing, analyser, level, still, H, duration, formatValue, trackKey };
-  const callbacks = useRef({ onSeek, onScrubStart, onScrubEnd });
-  callbacks.current = { onSeek, onScrubStart, onScrubEnd };
+  const lastLiveSeek = useRef(0);
+  const callbacks = useRef({ onSeek, onScrubMove, onScrubStart, onScrubEnd });
+  callbacks.current = { onSeek, onScrubMove, onScrubStart, onScrubEnd };
   const timeBuf = useRef<Uint8Array<ArrayBuffer> | null>(null);
 
   const displayFraction = (now: number): number => {
@@ -392,6 +403,12 @@ function BiwaStringImpl({
       if (!live.current.still) setTarget(e, rect);
       showBubble(f, true);
       if (live.current.still) draw(performance.now());
+      // Le son suit le doigt : au plus une recherche toutes les LIVE_SEEK_MS.
+      const now = performance.now();
+      if (now - lastLiveSeek.current >= LIVE_SEEK_MS) {
+        lastLiveSeek.current = now;
+        callbacks.current.onScrubMove?.(f);
+      }
       return;
     }
     if (e.pointerType === "mouse") showBubble(f, true);
@@ -535,3 +552,4 @@ function BiwaStringImpl({
 }
 
 export const BiwaString = memo(BiwaStringImpl);
+

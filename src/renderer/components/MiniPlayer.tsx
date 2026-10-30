@@ -183,6 +183,7 @@ export function MiniPlayer({ controls, engine }: { controls: PlayerControls; eng
           className="mp-biwa"
           value={frac}
           onSeek={(fraction) => controls.seekFraction(fraction)}
+          onScrubMove={(fraction) => controls.seekFraction(fraction)}
           playing={playing}
           trackKey={trackId}
           duration={dur}
@@ -195,6 +196,7 @@ export function MiniPlayer({ controls, engine }: { controls: PlayerControls; eng
     </div>
   );
 }
+
 
 
 
