@@ -18,6 +18,7 @@ import { attachMainJournal, createJournalWriter, watchWindowJournal, type Journa
 import { enforceSingleInstance, focusWindow, reportFatalStartup } from "./instance";
 import { backfillAddedAt } from "./library/addedAt";
 import { addSource } from "./library/repository";
+import { indexLibrary } from "./library/indexer";
 import { backupDb, openDbSafe, wireDbClose } from "./library/dbsafety";
 import { indexOne } from "./library/indexer";
 import { getSources, removeTracks } from "./library/repository";
@@ -472,6 +473,24 @@ app.whenReady().then(() => {
   // Demarre la veille sur les sources deja persistees (apres la creation de la fenetre).
   startWatcher();
 
+  // Rattrapage au démarrage : la veille a `ignoreInitial: true`, donc les fichiers arrivés pendant
+  // que l'app était fermée (téléchargements terminés la nuit, dossier copié à la main…) ne sont
+  // JAMAIS vus. On scanne une fois, en arrière-plan, après un court délai pour ne pas retarder
+  // l'affichage de la fenêtre.
+  setTimeout(() => {
+    const roots = getSources(db).map((source) => source.path);
+    if (roots.length === 0) return;
+    journal?.log({ kind: "process", event: "library.startup-scan", sources: roots.length });
+    void indexLibrary(db, roots)
+      .then((result) => {
+        if (result.added > 0) broadcastLibraryChanged();
+        journal?.log({ kind: "process", event: "library.startup-scan-done", added: result.added, skipped: result.skipped });
+      })
+      .catch((error: unknown) => {
+        journal?.log({ kind: "process", event: "library.startup-scan-failed", message: String(error) });
+      });
+  }, 4000);
+
   // Fermeture propre de la veille a l'arret de l'app.
   app.on("will-quit", () => {
     const previous = watcher;
@@ -490,6 +509,8 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
 
 
 

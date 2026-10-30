@@ -406,8 +406,27 @@ export function getTrackStat(
  * Enregistre une racine de bibliothèque comme source persistée. Idempotent sur `path`
  * (`INSERT OR IGNORE` : une racine déjà présente n'est ni dupliquée ni réhorodatée).
  */
+/**
+ * Chemin de source normalisé : séparateurs unifiés, antislashs doublés réduits, casse Windows
+ * ignorée. Sans cela, le même dossier pouvait entrer deux fois (`C:\X` et `C:\\X`) et être
+ * scanné en double — observé en vrai après un scan lancé avec un chemin mal échappé.
+ */
+export function normalizeSourcePath(raw: string): string {
+  // On ne RÉÉCRIT PAS les séparateurs (un chemin POSIX reste POSIX) : on se contente de réduire
+  // les antislashs doublés et de retirer les séparateurs de fin.
+  return String(raw ?? "")
+    .trim()
+    .replace(/\\\\+/g, "\\")
+    .replace(/[\\/]+$/, "");
+}
+
 export function addSource(db: Db, path: string): void {
-  stmts(db).insertSource.run(path, Date.now());
+  const clean = normalizeSourcePath(path);
+  if (clean.length === 0) return;
+  // Comparaison insensible à la casse : Windows ne distingue pas `Music` de `music`.
+  const known = getSources(db).some((source) => source.path.toLowerCase() === clean.toLowerCase());
+  if (known) return;
+  stmts(db).insertSource.run(clean, Date.now());
 }
 
 /** Racines persistées, de la plus ancienne à la plus récente. */
@@ -579,3 +598,5 @@ export function reorderPlaylist(db: Db, id: number, from: number, to: number): v
     s.touchPlaylist.run(Date.now(), id);
   })();
 }
+
+
