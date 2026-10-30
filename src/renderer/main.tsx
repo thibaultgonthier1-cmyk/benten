@@ -7,6 +7,8 @@ import "./theme/ds/tokens.css";
 import { App } from "./App";
 import { settingsStore, useSettings } from "./state/settings";
 import { reducedMotionFor } from "./theme/ds/motion";
+import { applyPalette } from "./theme/palettes";
+import "./theme/palettes.css";
 
 // Préchauffe les polices embarquées : @fontsource découpe le japonais en tranches `unicode-range`
 // chargées à la demande ; on charge d'emblée les tranches de base (latin + kana, ~30 Ko locaux par
@@ -46,7 +48,11 @@ void settingsStore
   .getState()
   .load()
   .finally(() => {
-    createRoot(document.getElementById("root") as HTMLElement).render(
+    // La palette est appliquée AVANT le premier rendu : sinon l'interface apparaît en or
+// puis bascule, ce qui produit un clignotement de couleur au lancement.
+applyPalette(settingsStore.getState().palette);
+
+createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
         <MotionRoot>
           <App />
@@ -54,3 +60,5 @@ void settingsStore
       </React.StrictMode>,
     );
   });
+
+

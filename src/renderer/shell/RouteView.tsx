@@ -12,6 +12,7 @@ import type { Album } from "../lib/library";
 import { BentenMark } from "../ui/BentenMark";
 import { DownloadsView } from "../views/DownloadsView";
 import { AppleMusicView } from "../views/AppleMusicView";
+import { PalettePicker } from "../views/PalettePicker";
 import { fxHostMounted, requestFx } from "../ui/FxOverlay";
 import { Button } from "../ui/Button";
 import { useMotion, useMotionLevel } from "../ui/useMotion";
@@ -190,6 +191,8 @@ function RoutePage({ route, scrollRef, actions }: PageProps): JSX.Element {
       return <DownloadsView />;
     case "apple":
       return <AppleMusicView />;
+    case "settings":
+      return <SettingsView />;
     case "search":
       return <SearchView q={route.q} actions={actions} />;
     default:
@@ -208,6 +211,23 @@ function titleOf(route: Route): string {
     default:
       return "Benten";
   }
+}
+
+/**
+ * Réglages. Aujourd'hui : les palettes. Le reste des préférences vit dans les panneaux dédiés
+ * (mouvement dans la vitrine DA, fondu dans la barre de lecture, égaliseur dans son panneau).
+ */
+function SettingsView(): JSX.Element {
+  return (
+    <section className="section settings-view">
+      <div className="page-head">
+        <span className="eyebrow">設定 · Réglages</span>
+        <h1>Personnaliser</h1>
+        <p className="page-sub">L'accent de l'interface, sans toucher au laque ni à l'encre.</p>
+      </div>
+      <PalettePicker />
+    </section>
+  );
 }
 
 function UnderConstruction({ title }: { title: string }): JSX.Element {
@@ -297,6 +317,7 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
 
 
 

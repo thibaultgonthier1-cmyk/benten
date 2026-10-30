@@ -1,3 +1,4 @@
+import { DEFAULT_PALETTE, applyPalette, normalizePalette, type PaletteId } from "../theme/palettes";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { MotionIntensity } from "../theme/ds/motion";
@@ -25,6 +26,8 @@ export interface PersistedSettings {
   crossfadeSec: number;
   /** Cale le fondu sur le tempo détecté (mesures entières). */
   crossfadeBeatMatched: boolean;
+  /** Palette d'accent (or par défaut). */
+  palette: PaletteId;
   /** Vue Titres : regroupe les versions d'un même morceau sous l'original (Tâche 7). */
   groupVersions: boolean;
 }
@@ -42,6 +45,7 @@ export const DEFAULT_SETTINGS: Readonly<PersistedSettings> = Object.freeze({
   eqGains: [...FLAT_EQ],
   crossfadeSec: 0,
   crossfadeBeatMatched: true,
+  palette: DEFAULT_PALETTE,
 });
 
 export interface SettingsState extends PersistedSettings {
@@ -51,6 +55,7 @@ export interface SettingsState extends PersistedSettings {
   setEqGains(gains: readonly number[]): void;
   setCrossfade(seconds: number): void;
   setCrossfadeBeatMatched(on: boolean): void;
+  setPalette(id: PaletteId): void;
   setGroupVersions(on: boolean): void;
   /** Lit la clé `"settings"` d'`app_state` et l'applique (no-op hors fenêtre, ne lève jamais). */
   load(): Promise<void>;
@@ -77,6 +82,7 @@ export function serializeSettings(s: PersistedSettings): string {
     eqGains: s.eqGains,
     crossfadeSec: s.crossfadeSec,
     crossfadeBeatMatched: s.crossfadeBeatMatched,
+    palette: s.palette,
   });
 }
 
@@ -109,6 +115,7 @@ export function restoreSettings(raw: string): PersistedSettings {
       typeof o.crossfadeBeatMatched === "boolean"
         ? o.crossfadeBeatMatched
         : DEFAULT_SETTINGS.crossfadeBeatMatched,
+    palette: normalizePalette(o.palette),
     eqGains:
       Array.isArray(o.eqGains) && o.eqGains.length === EQ_BAND_COUNT
         ? (o.eqGains as unknown[]).map((v) => {
@@ -162,6 +169,12 @@ export function createSettingsStore(
     setCrossfade(seconds) {
       const value = Number(seconds);
       set({ crossfadeSec: Number.isFinite(value) && value > 0 ? Math.min(12, value) : 0 });
+    },
+
+    setPalette(id) {
+      const next = normalizePalette(id);
+      set({ palette: next });
+      applyPalette(next);
     },
 
     setCrossfadeBeatMatched(on) {
@@ -227,6 +240,7 @@ export const settingsStore: SettingsStore = createSettingsStore();
 export function useSettings<T>(selector: (state: SettingsState) => T): T {
   return useStore(settingsStore, selector);
 }
+
 
 
 

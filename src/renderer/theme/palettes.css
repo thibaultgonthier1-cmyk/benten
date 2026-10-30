@@ -1,0 +1,130 @@
+/* Palettes d'accent.
+   Chaque bloc ne redéfinit QUE les variables d'accent : surfaces, texte et traits restent communs.
+   C'est ce qui garantit qu'aucune palette ne casse la lisibilité. */
+
+:root[data-palette='argent'] {
+  --gold: #c9cfd6;
+  --gold-light: #eef2f6;
+  --gold-deep: #6f757c;
+  --accent: #c9cfd6;
+  --accent-press: #a3aab2;
+  --accent-soft: rgba(201, 207, 214, 0.14);
+  --accent-ring: rgba(201, 207, 214, 0.45);
+  --focus-ring: #c9cfd6;
+  --on-accent: #10151a;
+  --grad-btn: linear-gradient(180deg, #eef2f6 0%, #c9cfd6 55%, #98a0a8 100%);
+}
+
+:root[data-palette='indigo'] {
+  --gold: #6f86d6;
+  --gold-light: #a8b8f0;
+  --gold-deep: #3c4d94;
+  --accent: #6f86d6;
+  --accent-press: #5569b4;
+  --accent-soft: rgba(111, 134, 214, 0.16);
+  --accent-ring: rgba(111, 134, 214, 0.5);
+  --focus-ring: #a8b8f0;
+  --on-accent: #080d1c;
+  --grad-btn: linear-gradient(180deg, #a8b8f0 0%, #6f86d6 55%, #46579f 100%);
+}
+
+:root[data-palette='jade'] {
+  --gold: #63c9a0;
+  --gold-light: #9ce8c8;
+  --gold-deep: #2f7d5e;
+  --accent: #63c9a0;
+  --accent-press: #49a883;
+  --accent-soft: rgba(99, 201, 160, 0.15);
+  --accent-ring: rgba(99, 201, 160, 0.48);
+  --focus-ring: #9ce8c8;
+  --on-accent: #04150f;
+  --grad-btn: linear-gradient(180deg, #9ce8c8 0%, #63c9a0 55%, #3d9473 100%);
+}
+
+:root[data-palette='rouge'] {
+  --gold: #e0573f;
+  --gold-light: #f5927c;
+  --gold-deep: #8e2a1a;
+  --accent: #e0573f;
+  --accent-press: #b8412c;
+  --accent-soft: rgba(224, 87, 63, 0.15);
+  --accent-ring: rgba(224, 87, 63, 0.48);
+  --focus-ring: #f5927c;
+  --on-accent: #1a0603;
+  --grad-btn: linear-gradient(180deg, #f5927c 0%, #e0573f 55%, #ab3a28 100%);
+}
+
+:root[data-palette='brume'] {
+  --gold: #b9b2a6;
+  --gold-light: #e3ddd2;
+  --gold-deep: #6d675d;
+  --accent: #b9b2a6;
+  --accent-press: #948d81;
+  --accent-soft: rgba(185, 178, 166, 0.14);
+  --accent-ring: rgba(185, 178, 166, 0.45);
+  --focus-ring: #e3ddd2;
+  --on-accent: #14120f;
+  --grad-btn: linear-gradient(180deg, #e3ddd2 0%, #b9b2a6 55%, #8b857a 100%);
+}
+
+/* Sélecteur de palette (Réglages et menu rapide). */
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 10px;
+}
+
+.palette-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.palette-chip:hover {
+  border-color: var(--line-strong);
+}
+
+.palette-chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+
+.palette-chip__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+/* Le médaillon et l'anneau empruntent leur matière à l'accent : les reflets restent, la teinte
+   change. Sans ça, la palette ne repeignait que les textes et laissait le bouton lecture en or. */
+html[data-palette] .gm__disc {
+  background:
+    radial-gradient(120% 95% at 50% 12%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 46%),
+    radial-gradient(100% 100% at 50% 100%, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0) 55%),
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--gold-light) 78%, #fff) 0%,
+      var(--gold-light) 38%,
+      var(--gold) 72%,
+      var(--gold-deep) 100%
+    );
+}
+
+.gm.has-tex html[data-palette] .gm__disc {
+  background:
+    radial-gradient(120% 95% at 50% 12%, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 46%),
+    radial-gradient(100% 100% at 50% 100%, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0) 55%),
+    var(--gm-tex) center / cover,
+    var(--gold);
+}
+

@@ -521,18 +521,18 @@ function BiwaStringImpl({
       <svg className="biwa__svg" width="100%" height={H} aria-hidden="true" focusable="false">
         <defs>
           <linearGradient ref={gradRef} id={ids.grad} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="#8a6420" />
-            <stop offset="0.55" stopColor="#d4aa50" />
-            <stop offset="0.92" stopColor="#f0d38a" />
-            <stop offset="1" stopColor="#fff2cc" />
+            <stop offset="0" style={{ stopColor: "var(--gold-deep)" }} />
+            <stop offset="0.55" style={{ stopColor: "var(--gold)" }} />
+            <stop offset="0.92" style={{ stopColor: "var(--gold-light)" }} />
+            <stop offset="1" style={{ stopColor: "color-mix(in srgb, var(--gold-light) 55%, #fff)" }} />
           </linearGradient>
           <linearGradient ref={glowGradRef} id={ids.glow} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="#d4aa50" stopOpacity="0" />
-            <stop offset="0.6" stopColor="#d4aa50" stopOpacity="0.35" />
-            <stop offset="1" stopColor="#f0d38a" stopOpacity="1" />
+            <stop offset="0" style={{ stopColor: "var(--gold)" }} stopOpacity="0" />
+            <stop offset="0.6" style={{ stopColor: "var(--gold)" }} stopOpacity="0.35" />
+            <stop offset="1" style={{ stopColor: "var(--gold-light)" }} stopOpacity="1" />
           </linearGradient>
           <radialGradient id={ids.knob} cx="0.4" cy="0.32" r="0.75">
-            <stop offset="0" stopColor="#fbecc0" />
+            <stop offset="0" style={{ stopColor: "color-mix(in srgb, var(--gold-light) 40%, #fff)" }} />
             <stop offset="0.45" stopColor="#e2bd68" />
             <stop offset="1" stopColor="#9c7428" />
           </radialGradient>
@@ -564,5 +564,6 @@ function BiwaStringImpl({
 }
 
 export const BiwaString = memo(BiwaStringImpl);
+
 
 
