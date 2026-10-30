@@ -74,8 +74,17 @@ export interface BiwaStringProps {
   className?: string;
 }
 
-/** Débit de la recherche pendant le glissement (ms) : ~8 par seconde, assez fluide et peu coûteux. */
-const LIVE_SEEK_MS = 120;
+/**
+ * Débit de la recherche pendant le glissement (ms).
+ *
+ * 120 ms donnait un son qui sautait par paliers perceptibles : on descend à 45 ms (~22 par
+ * seconde). En dessous, on relancerait la source à chaque frame pour un gain inaudible — chaque
+ * recherche crée un BufferSource, ce n'est pas gratuit.
+ */
+const LIVE_SEEK_MS = 45;
+
+/** En deçà de cet écart (fraction), on ne relance pas la source : le saut serait inaudible. */
+const LIVE_SEEK_MIN_DELTA = 0.002;
 
 /** Hauteur de la zone sensible (px). */
 const HEIGHT = 28;
@@ -168,6 +177,7 @@ function BiwaStringImpl({
   const live = useRef({ playing, analyser, level, still, H, duration, formatValue, trackKey });
   live.current = { playing, analyser, level, still, H, duration, formatValue, trackKey };
   const lastLiveSeek = useRef(0);
+  const lastLiveFraction = useRef(0);
   const callbacks = useRef({ onSeek, onScrubMove, onScrubStart, onScrubEnd });
   callbacks.current = { onSeek, onScrubMove, onScrubStart, onScrubEnd };
   const timeBuf = useRef<Uint8Array<ArrayBuffer> | null>(null);
@@ -405,8 +415,10 @@ function BiwaStringImpl({
       if (live.current.still) draw(performance.now());
       // Le son suit le doigt : au plus une recherche toutes les LIVE_SEEK_MS.
       const now = performance.now();
-      if (now - lastLiveSeek.current >= LIVE_SEEK_MS) {
+      const moved = Math.abs(f - lastLiveFraction.current);
+      if (now - lastLiveSeek.current >= LIVE_SEEK_MS && moved >= LIVE_SEEK_MIN_DELTA) {
         lastLiveSeek.current = now;
+        lastLiveFraction.current = f;
         callbacks.current.onScrubMove?.(f);
       }
       return;
@@ -552,4 +564,5 @@ function BiwaStringImpl({
 }
 
 export const BiwaString = memo(BiwaStringImpl);
+
 
