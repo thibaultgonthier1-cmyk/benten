@@ -75,9 +75,17 @@ function LacquerDiscImpl({ artKey = null, tint, playing, size = 240, className }
     }
     spin.setPlaying(playing);
     if (stopLoop.current || spin.idle() || !el) return;
+    // La rotation est une décoration : la simuler à la fréquence de l'écran (240 Hz sur certains
+    // moniteurs) écrivait `transform` 240 fois par seconde pour un mouvement que l'œil lit à 60.
+    // On plafonne l'ÉCRITURE à 60 Hz, la physique continue à son pas réel.
+    let sinceWrite = 0;
     stopLoop.current = startFrameLoop("lacquer-disc", (dt) => {
       spin.step(dt);
-      el.style.transform = `rotate(${spin.angle().toFixed(3)}deg)`;
+      sinceWrite += dt;
+      if (sinceWrite >= 1 / 60) {
+        sinceWrite = 0;
+        el.style.transform = `rotate(${spin.angle().toFixed(3)}deg)`;
+      }
       if (spin.idle()) {
         stopLoop.current = null;
         return false;
@@ -203,3 +211,4 @@ function LacquerDiscImpl({ artKey = null, tint, playing, size = 240, className }
 }
 
 export const LacquerDisc = memo(LacquerDiscImpl);
+

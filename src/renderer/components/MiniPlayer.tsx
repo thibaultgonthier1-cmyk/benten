@@ -6,7 +6,7 @@ import { QualityBadge } from "./QualityBadge";
 import type { PlayerControls } from "./controls";
 import type { AudioEngine } from "../audio/engine";
 import { GoldMedallion } from "../ui/GoldMedallion";
-import { BiwaString } from "../ui/BiwaString";
+import { BarProgress } from "./BarProgress";
 import { SleepTimerMenu } from "./SleepTimerMenu";
 import { CrossfadeMenu } from "./CrossfadeMenu";
 import { EqualizerPanel } from "./EqualizerPanel";
@@ -28,8 +28,6 @@ export function MiniPlayer({ controls, engine }: { controls: PlayerControls; eng
   const [eqOpen, setEqOpen] = useState(false);
   const track = usePlayer((s) => s.currentTrack);
   const status = usePlayer((s) => s.status);
-  const positionSec = usePlayer((s) => s.positionSec);
-  const durationSec = usePlayer((s) => s.durationSec);
   const isFav = usePlayer((s) => (track ? s.favoriteIds.has(track.id) : false));
   const repeat = usePlayer((s) => s.repeat);
   const shuffle = usePlayer((s) => s.shuffle);
@@ -37,9 +35,9 @@ export function MiniPlayer({ controls, engine }: { controls: PlayerControls; eng
   if (!track) return null;
   const trackId = track.id;
   const playing = status === "playing";
-  const dur = durationSec || track.durationSec || 0;
-  const frac = dur > 0 ? Math.min(1, positionSec / dur) : 0;
-  const pct = frac * 100;
+  // Durée de repli seulement : la position et la durée vivantes sont lues par `BarProgress`,
+  // pour que la barre ne se redessine plus 15 fois par seconde.
+  const dur = track.durationSec || 0;
   const seed = `${track.albumId}:${track.album}`;
 
   const open = (): void => playerStore.getState().setNowPlayingOpen(true);
@@ -51,6 +49,10 @@ export function MiniPlayer({ controls, engine }: { controls: PlayerControls; eng
   const onBarKey = (e: React.KeyboardEvent): void => {
     if (dur <= 0) return;
     const step = SEEK_STEP_SEC / dur;
+    // Lecture ponctuelle dans le store : pas besoin d'un abonnement permanent pour une touche.
+    const state = playerStore.getState();
+    const currentDur = state.durationSec || dur;
+    const frac = currentDur > 0 ? Math.min(1, state.positionSec / currentDur) : 0;
     let f: number | null = null;
     if (e.key === "ArrowRight" || e.key === "ArrowUp") f = Math.min(1, frac + step);
     else if (e.key === "ArrowLeft" || e.key === "ArrowDown") f = Math.max(0, frac - step);
@@ -178,24 +180,19 @@ export function MiniPlayer({ controls, engine }: { controls: PlayerControls; eng
             <path d="M12 20.5l-1.3-1.2C5.4 14.5 2.5 11.9 2.5 8.6 2.5 6.2 4.4 4.3 6.8 4.3c1.4 0 2.7.65 3.6 1.7l1.6 1.9 1.6-1.9c.9-1.05 2.2-1.7 3.6-1.7 2.4 0 4.3 1.9 4.3 4.3 0 3.3-2.9 5.9-8.2 10.7L12 20.5z" />
           </svg>
         </button>
-        <span className="mp-time">{formatTime(positionSec)}</span>
-                <BiwaString
-          className="mp-biwa"
-          value={frac}
-          onSeek={(fraction) => controls.seekFraction(fraction)}
-          onScrubMove={(fraction) => controls.seekFraction(fraction)}
+        <BarProgress
+          fallbackDurationSec={dur}
           playing={playing}
           trackKey={trackId}
-          duration={dur}
-          label="Progression"
+          onSeek={(fraction) => controls.seekFraction(fraction)}
         />
-        <span className="mp-time">{formatTime(dur)}</span>
         <QualityBadge track={track} variant="pill" />
       </div>
       {eqOpen && <EqualizerPanel onClose={() => setEqOpen(false)} />}
     </div>
   );
 }
+
 
 
 
