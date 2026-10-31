@@ -2,12 +2,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Bibliothèque : l'accueil du bureau, adapté au format téléphone.
-///
-/// Reprend l'en-tête du desktop (« 今宵 · ce soir » / « Ta bibliothèque, en local »), la grille de
-/// pochettes avec halo coloré, et les mêmes micro-animations.
 struct LibraryView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
+    @EnvironmentObject private var router: AppRouter
     @State private var showImporter = false
 
     // Colonnes calculées d'après l'écran réel : 2 sur SE/mini, 3 sur les autres iPhone,
@@ -67,12 +65,24 @@ struct LibraryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showImporter = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(Theme.gold)
+                    HStack(spacing: 4) {
+                        // Accès direct à la recherche, même quand une musique joue.
+                        Button {
+                            Haptics.tap()
+                            router.tab = .search
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 18))
+                                .foregroundStyle(Theme.ivory.opacity(0.85))
+                        }
+                        Button {
+                            Haptics.press()
+                            showImporter = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(Theme.gold)
+                        }
                     }
                 }
             }
@@ -144,12 +154,8 @@ struct AlbumTile: View {
     let action: () -> Void
     @State private var pressed = false
 
-    private var glow: Color {
-        if let url = track.artworkURL, let image = UIImage(contentsOfFile: url.path) {
-            return Color(uiColor: image.dominantColor)
-        }
-        return Theme.gold
-    }
+    // Teinte mémorisée : la moyenne de l'image n'est calculée qu'une fois par pochette.
+    private var glow: Color { ArtworkCache.shared.tint(for: track) }
 
     var body: some View {
         Button(action: {
@@ -158,7 +164,6 @@ struct AlbumTile: View {
         }) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack {
-                    // Le halo reprend la teinte de la pochette : chaque tuile éclaire son coin.
                     CoverGlow(color: glow, intensity: playing ? 0.95 : 0.6)
                     ArtworkView(track: track)
                         .aspectRatio(1, contentMode: .fit)
@@ -169,11 +174,14 @@ struct AlbumTile: View {
                         )
                         .overlay(alignment: .bottomTrailing) {
                             if playing {
-                                // La pastille dorée signale la lecture en cours, comme le médaillon du bureau.
                                 Circle()
                                     .fill(Theme.goldGradient)
                                     .frame(width: 26, height: 26)
-                                    .overlay(Image(systemName: "waveform").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.ink))
+                                    .overlay(
+                                        Image(systemName: "waveform")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(Theme.ink)
+                                    )
                                     .padding(8)
                             }
                         }
@@ -205,7 +213,9 @@ struct ArtworkView: View {
 
     var body: some View {
         ZStack {
-            if let url = track.artworkURL, let image = UIImage(contentsOfFile: url.path) {
+            // Cache : l'image est décodée UNE fois puis gardée en mémoire. Sans ça, chaque passage
+            // dans la grille redécodait la pochette et faisait saccader le défilement.
+            if let image = ArtworkCache.shared.image(for: track) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -225,7 +235,6 @@ struct ArtworkView: View {
 /// Barre de lecture réduite, au-dessus des onglets.
 struct MiniPlayer: View {
     @EnvironmentObject private var player: Player
-    @State private var appear = false
 
     var body: some View {
         if let track = player.current {
@@ -247,7 +256,6 @@ struct MiniPlayer: View {
 
                 Spacer(minLength: 6)
 
-                // Médaillon doré du bureau : le bouton de lecture est le point focal.
                 Button {
                     Haptics.press()
                     player.toggle()
@@ -261,7 +269,10 @@ struct MiniPlayer: View {
                     .frame(width: 38, height: 38)
                     .shadow(color: Theme.gold.opacity(0.45), radius: 10, y: 3)
                 }
-                Button { player.next() } label: {
+                Button {
+                    Haptics.tap()
+                    player.next()
+                } label: {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 15))
                         .foregroundStyle(Theme.ivory.opacity(0.85))
@@ -276,32 +287,33 @@ struct MiniPlayer: View {
                     .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
             )
             .padding(.horizontal, 10)
-            .onTapGesture { player.showFullScreen = true }
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-            .onAppear {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { appear = true }
+            .onTapGesture {
+                Haptics.tap()
+                player.showFullScreen = true
             }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 }
 
 /// Vue plein écran : grand disque laqué, pochette centrée devant, transport doré.
+///
+/// Fermeture par le chevron OU en tirant vers le bas. Les commandes de boucle et d'aléatoire sont
+/// ICI, comme sur le bureau, au lieu d'être cachées dans les réglages.
 struct NowPlayingView: View {
     @EnvironmentObject private var player: Player
-    // Seule cette vue observe l'horloge : le reste de l'app ne se redessine pas pendant la
-    // lecture.
     @EnvironmentObject private var clock: PlaybackClock
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dragOffset: CGFloat = 0
 
     var body: some View {
         ZStack {
             AnimatedBackdrop()
 
-            VStack(spacing: 20) {
+            VStack(spacing: 18) {
                 Capsule()
-                    .fill(Color.white.opacity(0.22))
-                    .frame(width: 36, height: 5)
+                    .fill(Color.white.opacity(0.28))
+                    .frame(width: 44, height: 5)
                     .padding(.top, 10)
 
                 Spacer(minLength: 4)
@@ -346,10 +358,16 @@ struct NowPlayingView: View {
                     .padding(.horizontal, 28)
 
                     HStack(spacing: 36) {
-                        Button { player.previous() } label: {
+                        Button {
+                            Haptics.tap()
+                            player.previous()
+                        } label: {
                             Image(systemName: "backward.fill").font(.system(size: 20))
                         }
-                        Button { player.toggle() } label: {
+                        Button {
+                            Haptics.press()
+                            player.toggle()
+                        } label: {
                             ZStack {
                                 Circle().fill(Theme.goldGradient)
                                 Image(systemName: player.playing ? "pause.fill" : "play.fill")
@@ -358,21 +376,51 @@ struct NowPlayingView: View {
                             }
                             .frame(width: 68, height: 68)
                             .shadow(color: Theme.gold.opacity(0.45), radius: 18, y: 6)
-                    .scaleEffect(player.playing && !reduceMotion ? 1.03 : 1)
-                    .animation(reduceMotion ? nil : Motion.spring, value: player.playing)
+                            .scaleEffect(player.playing && !reduceMotion ? 1.03 : 1)
+                            .animation(reduceMotion ? nil : Motion.spring, value: player.playing)
                         }
-                        Button { player.next() } label: {
+                        Button {
+                            Haptics.tap()
+                            player.next()
+                        } label: {
                             Image(systemName: "forward.fill").font(.system(size: 20))
                         }
                     }
                     .foregroundStyle(Theme.ivory)
-                    .padding(.bottom, 30)
+
+                    // Boucle et aléatoire : visibles dans la vue lecture, pas dans les réglages.
+                    HStack(spacing: 44) {
+                        Button {
+                            Haptics.choose()
+                            player.shuffle.toggle()
+                        } label: {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(player.shuffle ? Theme.gold : Theme.dim)
+                        }
+                        Button {
+                            Haptics.choose()
+                            switch player.repeatMode {
+                            case .off: player.repeatMode = .all
+                            case .all: player.repeatMode = .one
+                            case .one: player.repeatMode = .off
+                            }
+                        } label: {
+                            Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(player.repeatMode == .off ? Theme.dim : Theme.gold)
+                        }
+                    }
+                    .padding(.top, 12)
+                    .padding(.bottom, 34)
                 }
 
                 Spacer(minLength: 0)
             }
+            .offset(y: max(0, dragOffset))
             .overlay(alignment: .topTrailing) {
                 Button {
+                    Haptics.tap()
                     player.showFullScreen = false
                 } label: {
                     Image(systemName: "chevron.down")
@@ -381,19 +429,19 @@ struct NowPlayingView: View {
                         .padding(16)
                 }
             }
+            .gesture(
+                // Glissement vers le bas : referme le panneau (geste attendu sur iOS).
+                DragGesture(minimumDistance: 24)
+                    .onChanged { value in
+                        dragOffset = max(0, value.translation.height)
+                    }
+                    .onEnded { value in
+                        if value.translation.height > 90 {
+                            player.showFullScreen = false
+                        }
+                        withAnimation(Motion.quick) { dragOffset = 0 }
+                    }
+            )
         }
     }
-
-    private func time(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
-    }
 }
-
-
-
-
-
-
-
