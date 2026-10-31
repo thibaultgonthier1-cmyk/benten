@@ -14,7 +14,7 @@
 const DB_NAME = "benten-mobile";
 const DB_STORE = "tracks";
 const DB_VERSION = 1;
-const VERSION = "1.3.0"; // affichée dans les réglages : permet de vérifier la version installée
+const VERSION = "1.4.0"; // affichée dans les réglages : permet de vérifier la version installée
 
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -494,6 +494,10 @@ syncRun?.addEventListener("click", () => {
 /* ------------------------------ Démarrage ------------------------------ */
 
 async function start() {
+  // Version affichée dans l'en-tête : on voit d'un coup d'œil si l'app installée est la
+  // bonne, sans ouvrir les réglages.
+  const badge = $("version");
+  if (badge) badge.textContent = `v${VERSION}`;
   render();
   say("prêt");
   const saved = syncSettings();
@@ -525,5 +529,6 @@ async function start() {
 }
 
 start().catch((error) => fail("démarrage", error));
+
 
 
