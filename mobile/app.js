@@ -36,6 +36,11 @@ const filesInput = $("files");
 const statusEl = $("status");
 
 let tracks = [];
+/** `off` = arrêt en fin de liste, `all` = on recommence, `one` = le même titre en boucle. */
+let repeatMode = "all";
+let shuffle = false;
+/** Ordre de lecture : la liste, ou une permutation mélangée (recalculée à chaque tour). */
+let playOrder = [];
 let currentIndex = -1;
 let objectUrl = null;
 /** `true` quand le stockage persistant fonctionne ; sinon on reste en mémoire (session seulement). */
@@ -165,9 +170,47 @@ function play(index) {
   render();
 }
 
+/** Position suivante/précédente selon l''ordre courant et le mode de répétition. */
+function nextIndex(delta) {
+  if (tracks.length === 0) return null;
+  if (repeatMode === "one" && delta > 0 && currentIndex >= 0) return currentIndex;
+  const order = playOrder.length === tracks.length ? playOrder : tracks.map((_, i) => i);
+  const position = order.indexOf(currentIndex);
+  const target = position + delta;
+  if (target >= 0 && target < order.length) return order[target];
+  if (repeatMode === "off") return null;
+  // Rebouchon : on repart de l''autre bout (et on remélange si l''aléatoire est actif).
+  if (shuffle) buildOrder();
+  const wrapped = ((target % order.length) + order.length) % order.length;
+  return order[wrapped] ?? null;
+}
+
 function step(delta) {
-  if (tracks.length === 0) return;
-  play((currentIndex + delta + tracks.length) % tracks.length);
+  const index = nextIndex(delta);
+  if (index === null) {
+    audio.pause();
+    say("fin de la liste");
+    return;
+  }
+  play(index);
+}
+
+/** Reconstruit l''ordre de lecture (mélangé si demandé), en gardant la piste courante en tête. */
+function buildOrder() {
+  const indices = tracks.map((_, i) => i);
+  if (!shuffle) {
+    playOrder = indices;
+    return;
+  }
+  for (let i = indices.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  if (currentIndex >= 0) {
+    const at = indices.indexOf(currentIndex);
+    if (at > 0) [indices[0], indices[at]] = [indices[at], indices[0]];
+  }
+  playOrder = indices;
 }
 
 /* -------------------------------- Événements -------------------------------- */
@@ -199,6 +242,7 @@ filesInput.addEventListener("change", async () => {
       stored += 1;
     }
   }
+  buildOrder();
   render();
   say(
     stored === 0
@@ -267,4 +311,75 @@ async function start() {
   }
 }
 
+/* -------------------------------- Réglages -------------------------------- */
+
+const sheet = $("sheet");
+const sheetInfo = $("sheetInfo");
+const shuffleBtn = $("shuffle");
+const clearBtn = $("clear");
+
+function refreshSheet() {
+  if (!sheet) return;
+  for (const button of sheet.querySelectorAll("[data-repeat]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.repeat === repeatMode));
+  }
+  if (shuffleBtn) shuffleBtn.setAttribute("aria-pressed", String(shuffle));
+  if (sheetInfo) {
+    sheetInfo.textContent = `${tracks.length} morceau(x) · stockage ${persistent ? "sur l'appareil" : "en mémoire (temporaire)"}`;
+  }
+}
+
+function openSheet() {
+  if (!sheet) return;
+  refreshSheet();
+  sheet.hidden = false;
+}
+function closeSheet() {
+  if (sheet) sheet.hidden = true;
+}
+
+$("settingsOpen")?.addEventListener("click", openSheet);
+$("sheetClose")?.addEventListener("click", closeSheet);
+sheet?.addEventListener("click", (event) => {
+  if (event.target === sheet) closeSheet(); // toucher le fond ferme la feuille
+});
+
+for (const button of sheet?.querySelectorAll("[data-repeat]") ?? []) {
+  button.addEventListener("click", () => {
+    repeatMode = button.dataset.repeat ?? "all";
+    refreshSheet();
+  });
+}
+
+shuffleBtn?.addEventListener("click", () => {
+  shuffle = !shuffle;
+  buildOrder();
+  refreshSheet();
+});
+
+clearBtn?.addEventListener("click", async () => {
+  tracks = [];
+  currentIndex = -1;
+  audio.pause();
+  audio.removeAttribute("src");
+  if (persistent) {
+    try {
+      const db = await openDb();
+      await new Promise((resolve, reject) => {
+        const request = db.transaction(DB_STORE, "readwrite").objectStore(DB_STORE).clear();
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      fail("vidage", error);
+    }
+  }
+  render();
+  refreshSheet();
+  say("bibliothèque vidée");
+});
+
 start().catch((error) => fail("démarrage", error));
+
+
+

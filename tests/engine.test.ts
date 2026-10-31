@@ -571,3 +571,37 @@ describe("AudioEngine", () => {
 
 
 
+
+describe("passage automatique à la fin d'une piste", () => {
+  it("avance à la suivante quand le fondu est ACTIF (pas de blocage silencieux)", async () => {
+    const ctx = new FakeAudioContext();
+    const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(20)));
+    await engine.setQueue([track({ id: 1 }), track({ id: 2 })], 0);
+    engine.setCrossfade(6);
+    engine.play();
+    // Laisse le préchargement de la suivante aboutir (sinon ce n'est pas le cas testé).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const first = ctx.sources[0]!;
+    first.onended?.(); // fin naturelle de la première
+    // Le chargement de la suivante est asynchrone quand elle n'était pas préchargée.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(engine.getState().trackId).toBe(2);
+    expect(engine.getState().status).toBe("playing");
+    // La piste promue doit elle aussi savoir annoncer sa fin, sinon la file s'arrête au morceau 2.
+    const promoted = ctx.sources.find((source) => source !== first && source.onended !== null);
+    expect(promoted).toBeDefined();
+  });
+
+  it("avance aussi quand le fondu est COUPÉ (gapless historique)", async () => {
+    const ctx = new FakeAudioContext();
+    const engine = makeEngine(ctx, okDecoder(new FakeAudioBuffer(20)));
+    await engine.setQueue([track({ id: 1 }), track({ id: 2 })], 0);
+    engine.play();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    ctx.sources[0]!.onended?.();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(engine.getState().trackId).toBe(2);
+    expect(engine.getState().status).toBe("playing");
+  });
+});
+

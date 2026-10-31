@@ -22,6 +22,7 @@
           <small>lecture locale</small>
         </div>
       </div>
+      <button id="settingsOpen" type="button" class="icon-btn" aria-label="Réglages">⚙</button>
       <label class="import">
         importer
         <input id="files" type="file" accept="audio/*" multiple hidden />
@@ -55,8 +56,37 @@
       </div>
     </footer>
 
+    <!-- Panneau de réglages : sans ça, l'app mobile n'offrait aucun contrôle (ni aléatoire, ni
+         répétition, ni moyen de vider la bibliothèque). -->
+    <div id="sheet" class="sheet" hidden>
+      <div class="sheet__panel" role="dialog" aria-label="Réglages">
+        <h2>Réglages</h2>
+        <div class="sheet__row">
+          <span>Répéter</span>
+          <div class="seg" role="group" aria-label="Répétition">
+            <button type="button" data-repeat="off" aria-pressed="false">non</button>
+            <button type="button" data-repeat="all" aria-pressed="true">toute la liste</button>
+            <button type="button" data-repeat="one" aria-pressed="false">ce titre</button>
+          </div>
+        </div>
+        <div class="sheet__row">
+          <span>Aléatoire</span>
+          <div class="seg">
+            <button id="shuffle" type="button" aria-pressed="false">non</button>
+          </div>
+        </div>
+        <div class="sheet__row">
+          <span>Bibliothèque</span>
+          <button id="clear" type="button" class="danger">vider</button>
+        </div>
+        <p class="sheet__hint" id="sheetInfo">—</p>
+        <button id="sheetClose" type="button" class="sheet__close">Fermer</button>
+      </div>
+    </div>
+
     <audio id="audio" preload="metadata"></audio>
     <script src="./app.js"></script>
   </body>
 </html>
+
 
