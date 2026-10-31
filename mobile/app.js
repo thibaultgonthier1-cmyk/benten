@@ -4,54 +4,84 @@
  * POURQUOI PAS UNE APP iOS
  * iOS n'exécute pas Electron, et fabriquer un `.ipa` exige un Mac avec Xcode. Cette page est donc
  * une application web installable : on l'ouvre une fois depuis Safari, « Partager ▸ Sur l'écran
- * d'accueil », et elle s'ouvre ensuite comme une app, hors-ligne, sans PC allumé.
+ * d'accueil », et elle s'ouvre ensuite comme une app, sans PC allumé.
  *
  * CE QU'ELLE FAIT
  * - import de fichiers audio depuis Fichiers / iCloud (sélecteur natif) ;
- * - stockage DANS l'appareil (IndexedDB : les fichiers restent sur le téléphone) ;
- * - lecture, pause, suivant/précédent, déplacement dans la piste, reprise automatique ;
- * - hors-ligne complet une fois installée (service worker).
+ * - stockage DANS l'appareil (IndexedDB) quand c'est possible, sinon en mémoire pour la session ;
+ * - lecture, pause, suivant/précédent, déplacement dans la piste ;
+ * - hors-ligne une fois installée (service worker).
  *
- * CE QU'ELLE NE FAIT PAS — et c'est structurel, pas un manque de travail
- * - scanner un dossier : iOS l'interdit à toute app ;
- * - télécharger depuis Apple Music ou YouTube : pas de processus externe possible sur iOS.
+ * RIEN NE DOIT MOURIR EN SILENCE : chaque échec est affiché à l'écran. Un module qui plante sans
+ * message donne exactement ce que l'utilisateur a signalé — « ça charge et ça ne fait rien ».
  */
 
 const DB_NAME = "benten-mobile";
 const DB_STORE = "tracks";
 const DB_VERSION = 1;
 
-const audio = document.getElementById("audio");
-const library = document.getElementById("library");
-const player = document.getElementById("player");
-const titleEl = document.getElementById("title");
-const artistEl = document.getElementById("artist");
-const seekEl = document.getElementById("seek");
-const curEl = document.getElementById("t-cur");
-const durEl = document.getElementById("t-dur");
-const toggleBtn = document.getElementById("toggle");
-const nextBtn = document.getElementById("next");
-const prevBtn = document.getElementById("prev");
-const filesInput = document.getElementById("files");
+const $ = (id) => document.getElementById(id);
+const audio = $("audio");
+const library = $("library");
+const player = $("player");
+const titleEl = $("title");
+const artistEl = $("artist");
+const seekEl = $("seek");
+const curEl = $("t-cur");
+const durEl = $("t-dur");
+const toggleBtn = $("toggle");
+const nextBtn = $("next");
+const prevBtn = $("prev");
+const filesInput = $("files");
+const statusEl = $("status");
 
-let tracks = []; // { id, title, artist, blob, addedAt }
+let tracks = [];
 let currentIndex = -1;
 let objectUrl = null;
+/** `true` quand le stockage persistant fonctionne ; sinon on reste en mémoire (session seulement). */
+let persistent = false;
+let dbPromise = null;
+
+/* ------------------------------- Messages ------------------------------- */
+
+function say(message, kind = "info") {
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.dataset.kind = kind;
+}
+
+/** Affiche une erreur à l'écran ET dans la console : jamais d'échec muet. */
+function fail(where, error) {
+  const message = error && error.message ? error.message : String(error);
+  console.error(`[benten] ${where}`, error);
+  say(`${where} : ${message}`, "error");
+}
 
 /* ------------------------------- Stockage ------------------------------- */
 
 function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("stockage local indisponible (navigation privée ?)"));
+      return;
+    }
+    let request;
+    try {
+      request = indexedDB.open(DB_NAME, DB_VERSION);
+    } catch (error) {
+      reject(error);
+      return;
+    }
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE, { keyPath: "id" });
-      }
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error ?? new Error("ouverture impossible"));
+    request.onblocked = () => reject(new Error("base verrouillée par un autre onglet"));
   });
+  return dbPromise;
 }
 
 async function loadTracks() {
@@ -85,16 +115,14 @@ function formatTime(seconds) {
 function splitName(name) {
   const clean = name.replace(/\.[^.]+$/, "").replace(/_/g, " ").trim();
   const parts = clean.split(" - ");
-  if (parts.length >= 2) {
-    return { artist: parts[0].trim(), title: parts.slice(1).join(" - ").trim() };
-  }
+  if (parts.length >= 2) return { artist: parts[0].trim(), title: parts.slice(1).join(" - ").trim() };
   return { artist: "Fichier importé", title: clean };
 }
 
 function render() {
   if (tracks.length === 0) {
     library.innerHTML =
-      '<p class="empty">Aucune musique sur cet appareil.<br />Touche <b>importer</b> et choisis des fichiers depuis Fichiers ou iCloud.</p>';
+      '<p class="empty">Aucune musique sur cet appareil.<br />Touche <b>importer</b> et choisis des fichiers dans Fichiers ou iCloud.</p>';
     player.hidden = true;
     return;
   }
@@ -103,15 +131,19 @@ function render() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "track" + (index === currentIndex ? " is-playing" : "");
-    button.innerHTML = `
-      <span class="track__index">${index === currentIndex ? "♪" : index + 1}</span>
-      <span class="track__text">
-        <span class="track__title"></span>
-        <span class="track__artist"></span>
-      </span>`;
-    // textContent : un nom de fichier ne doit jamais être interprété comme du HTML.
-    button.querySelector(".track__title").textContent = track.title;
-    button.querySelector(".track__artist").textContent = track.artist;
+    const indexEl = document.createElement("span");
+    indexEl.className = "track__index";
+    indexEl.textContent = index === currentIndex ? "♪" : String(index + 1);
+    const text = document.createElement("span");
+    text.className = "track__text";
+    const title = document.createElement("span");
+    title.className = "track__title";
+    title.textContent = track.title; // jamais interprété comme du HTML
+    const artist = document.createElement("span");
+    artist.className = "track__artist";
+    artist.textContent = track.artist;
+    text.append(title, artist);
+    button.append(indexEl, text);
     button.addEventListener("click", () => play(index));
     library.appendChild(button);
   });
@@ -129,43 +161,62 @@ function play(index) {
   titleEl.textContent = track.title;
   artistEl.textContent = track.artist;
   player.hidden = false;
-  void audio.play().catch(() => undefined);
+  audio.play().catch((error) => fail("lecture refusée", error));
   render();
 }
 
-function next(delta) {
+function step(delta) {
   if (tracks.length === 0) return;
-  const index = (currentIndex + delta + tracks.length) % tracks.length;
-  play(index);
+  play((currentIndex + delta + tracks.length) % tracks.length);
 }
 
 /* -------------------------------- Événements -------------------------------- */
 
 filesInput.addEventListener("change", async () => {
   const files = [...(filesInput.files ?? [])];
+  filesInput.value = "";
   if (files.length === 0) return;
+  say(`import de ${files.length} fichier(s)…`);
+  let stored = 0;
   for (const file of files) {
     const { artist, title } = splitName(file.name);
-    await saveTrack({
+    const track = {
       id: `${file.name}:${file.size}:${file.lastModified}`,
       title,
       artist,
       blob: file,
       addedAt: Date.now(),
-    });
+    };
+    try {
+      if (persistent) await saveTrack(track);
+      stored += 1;
+      // En mémoire, on remplace un éventuel doublon pour ne pas empiler deux fois le même fichier.
+      tracks = [...tracks.filter((item) => item.id !== track.id), track];
+    } catch (error) {
+      persistent = false;
+      fail("enregistrement", error);
+      tracks = [...tracks.filter((item) => item.id !== track.id), track];
+      stored += 1;
+    }
   }
-  tracks = await loadTracks();
   render();
-  filesInput.value = "";
+  say(
+    stored === 0
+      ? "aucun fichier importé"
+      : persistent
+        ? `${tracks.length} morceau(x) sur l'appareil`
+        : `${tracks.length} morceau(x) — session seulement (stockage indisponible)`,
+    persistent ? "info" : "error",
+  );
 });
 
 toggleBtn.addEventListener("click", () => {
-  if (audio.paused) void audio.play().catch(() => undefined);
+  if (audio.paused) audio.play().catch((error) => fail("lecture refusée", error));
   else audio.pause();
 });
 
-nextBtn.addEventListener("click", () => next(1));
-prevBtn.addEventListener("click", () => next(-1));
+nextBtn.addEventListener("click", () => step(1));
+prevBtn.addEventListener("click", () => step(-1));
 
 audio.addEventListener("play", () => {
   toggleBtn.textContent = "❚❚";
@@ -183,7 +234,8 @@ audio.addEventListener("timeupdate", () => {
   const ratio = audio.duration > 0 ? audio.currentTime / audio.duration : 0;
   seekEl.value = String(Math.round(ratio * 1000));
 });
-audio.addEventListener("ended", () => next(1));
+audio.addEventListener("error", () => fail("audio", audio.error ?? new Error("format illisible")));
+audio.addEventListener("ended", () => step(1));
 
 seekEl.addEventListener("input", () => {
   if (!Number.isFinite(audio.duration)) return;
@@ -192,10 +244,27 @@ seekEl.addEventListener("input", () => {
 
 /* ------------------------------ Démarrage ------------------------------ */
 
-tracks = await loadTracks().catch(() => []);
-render();
+async function start() {
+  // Le sélecteur doit répondre même si le stockage ne fonctionne pas.
+  render();
+  say("prêt");
+  try {
+    tracks = await loadTracks();
+    persistent = true;
+    render();
+    say(tracks.length === 0 ? "prêt — importe tes morceaux" : `${tracks.length} morceau(x) sur l'appareil`);
+  } catch (error) {
+    persistent = false;
+    fail("stockage local", error);
+    say("stockage local indisponible — import possible, mais perdu à la fermeture", "error");
+  }
 
-// Service worker : c'est lui qui rend l'app disponible hors-ligne une fois installée.
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js").catch(() => undefined);
+  // Service worker : hors-ligne une fois installée. Son échec (HTTP sans TLS) n'empêche rien.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch((error) => {
+      console.warn("[benten] service worker non enregistré", error);
+    });
+  }
 }
+
+start().catch((error) => fail("démarrage", error));

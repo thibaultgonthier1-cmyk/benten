@@ -255,3 +255,19 @@ body {
     transition: none !important;
   }
 }
+
+/* Ligne d'état : discrète quand tout va bien, franchement lisible en cas d'erreur. */
+.status {
+  margin: 0 18px 6px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.status[data-kind='error'] {
+  color: #f5927c;
+}
+
+/* Le sélecteur de fichiers doit pouvoir être touché même si le libellé est petit. */
+.import input[type='file'] {
+  display: none;
+}

@@ -28,6 +28,9 @@
       </label>
     </header>
 
+    <!-- Ligne d'état : tout échec visible ici plutôt que dans la console du téléphone. -->
+    <p id="status" class="status" role="status">chargement…</p>
+
     <main id="library" class="library" aria-live="polite">
       <p class="empty">
         Aucune musique sur cet appareil.<br />
@@ -53,6 +56,7 @@
     </footer>
 
     <audio id="audio" preload="metadata"></audio>
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js"></script>
   </body>
 </html>
+
