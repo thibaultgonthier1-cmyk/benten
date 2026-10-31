@@ -1,55 +1,80 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Bibliothèque : grille de pochettes, comme l'onglet d'accueil d'une app de musique.
+/// Bibliothèque : l'accueil du bureau, adapté au format téléphone.
+///
+/// Reprend l'en-tête du desktop (« 今宵 · ce soir » / « Ta bibliothèque, en local »), la grille de
+/// pochettes avec halo coloré, et les mêmes micro-animations.
 struct LibraryView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @State private var showImporter = false
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
+    private let columns = [GridItem(.adaptive(minimum: 148), spacing: 16)]
 
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack {
+                AnimatedBackdrop()
+
                 if library.tracks.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: 18) {
-                            ForEach(Array(library.tracks.enumerated()), id: \.element.id) { offset, track in
-                                Button {
-                                    player.play(library.tracks, startingAt: offset)
-                                    player.showFullScreen = true
-                                } label: {
-                                    trackCell(track)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        library.delete(track)
-                                    } label: {
-                                        Label("Supprimer", systemImage: "trash")
+                        VStack(alignment: .leading, spacing: 18) {
+                            header
+
+                            LazyVGrid(columns: columns, spacing: 22) {
+                                ForEach(Array(library.tracks.enumerated()), id: \.element.id) { offset, track in
+                                    AlbumTile(track: track, playing: player.current?.id == track.id) {
+                                        player.play(library.tracks, startingAt: offset)
+                                        player.showFullScreen = true
+                                    }
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            library.delete(track)
+                                        } label: {
+                                            Label("Supprimer", systemImage: "trash")
+                                        }
                                     }
                                 }
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 90)
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 96)
                     }
                 }
             }
-            .background(Palette.ink.ignoresSafeArea())
-            .navigationTitle("Bibliothèque")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(Theme.goldGradient)
+                            .frame(width: 26, height: 26)
+                            .shadow(color: Theme.gold.opacity(0.5), radius: 8)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Benten")
+                                .font(.system(size: 18, design: .serif))
+                                .foregroundStyle(Theme.ivory)
+                            Text("LECTURE LOCALE")
+                                .font(.system(size: 8, weight: .semibold))
+                                .tracking(1.6)
+                                .foregroundStyle(Theme.dim)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showImporter = true
                     } label: {
-                        Label("Importer", systemImage: "plus.circle.fill")
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(Theme.gold)
                     }
                 }
             }
+            .toolbarBackground(Theme.ink, for: .navigationBar)
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav, .aiff],
@@ -73,43 +98,103 @@ struct LibraryView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "music.note.house")
-                .font(.system(size: 46))
-                .foregroundStyle(Palette.gold)
-            Text("Aucune musique")
-                .font(.title3.weight(.medium))
-            Text("Touche + pour choisir des fichiers dans Fichiers ou iCloud.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("今宵 · ce soir")
+                .font(.system(size: 11, weight: .medium))
+                .tracking(2.2)
+                .foregroundStyle(Theme.gold.opacity(0.75))
+            Text("Ta bibliothèque,\nen local")
+                .serifTitle(30)
+            Text("\(library.tracks.count) morceau\(library.tracks.count > 1 ? "x" : "") · sur cet iPhone")
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.dim)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, 8)
     }
 
-    private func trackCell(_ track: Track) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ArtworkView(track: track)
-                .aspectRatio(1, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.06))
-                )
-            Text(track.title)
-                .font(.callout.weight(.medium))
-                .lineLimit(1)
-            Text(track.artist)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Theme.goldGradient)
+                    .frame(width: 78, height: 78)
+                    .shadow(color: Theme.gold.opacity(0.35), radius: 22)
+                Image(systemName: "music.note")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(Theme.ink)
+            }
+            Text("Aucune musique")
+                .serifTitle(24)
+            Text("Touche + pour choisir des fichiers dans Fichiers ou iCloud, ou récupère ta bibliothèque du PC depuis les Réglages.")
+                .font(.footnote)
+                .foregroundStyle(Theme.dim)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 44)
         }
     }
 }
 
-/// Pochette : image extraite du fichier, ou repli dessiné (dégradé stable par titre).
+/// Tuile d'album : pochette, halo de sa propre couleur, titre, artiste.
+struct AlbumTile: View {
+    let track: Track
+    let playing: Bool
+    let action: () -> Void
+    @State private var pressed = false
+
+    private var glow: Color {
+        if let url = track.artworkURL, let image = UIImage(contentsOfFile: url.path) {
+            return image.dominantColor
+        }
+        return Theme.gold
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    // Le halo reprend la teinte de la pochette : chaque tuile éclaire son coin.
+                    CoverGlow(color: glow, intensity: playing ? 0.95 : 0.6)
+                    ArtworkView(track: track)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+                                .strokeBorder(Theme.hairline)
+                        )
+                        .overlay(alignment: .bottomTrailing) {
+                            if playing {
+                                // La pastille dorée signale la lecture en cours, comme le médaillon du bureau.
+                                Circle()
+                                    .fill(Theme.goldGradient)
+                                    .frame(width: 26, height: 26)
+                                    .overlay(Image(systemName: "waveform").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.ink))
+                                    .padding(8)
+                            }
+                        }
+                }
+                Text(track.title)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(Theme.ivory)
+                    .lineLimit(1)
+                Text(track.artist)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.dim)
+                    .lineLimit(1)
+            }
+            .scaleEffect(pressed ? 0.96 : 1)
+            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: pressed)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in pressed = true }
+                .onEnded { _ in pressed = false }
+        )
+    }
+}
+
+/// Pochette : image extraite du fichier, ou repli dessiné (dégradé or).
 struct ArtworkView: View {
     let track: Track
 
@@ -120,16 +205,12 @@ struct ArtworkView: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                LinearGradient(
-                    colors: [Palette.goldLight.opacity(0.85), Palette.gold.opacity(0.55)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(Palette.ink.opacity(0.65))
-                )
+                Theme.goldGradient
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 24, weight: .light))
+                            .foregroundStyle(Theme.ink.opacity(0.6))
+                    )
             }
         }
         .clipped()
@@ -139,114 +220,138 @@ struct ArtworkView: View {
 /// Barre de lecture réduite, au-dessus des onglets.
 struct MiniPlayer: View {
     @EnvironmentObject private var player: Player
+    @State private var appear = false
 
     var body: some View {
         if let track = player.current {
             HStack(spacing: 12) {
                 ArtworkView(track: track)
-                    .frame(width: 42, height: 42)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(track.title).font(.callout).lineLimit(1)
-                    Text(track.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(track.title)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.ivory)
+                        .lineLimit(1)
+                    Text(track.artist)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.dim)
+                        .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 6)
 
+                // Médaillon doré du bureau : le bouton de lecture est le point focal.
                 Button { player.toggle() } label: {
-                    Image(systemName: player.playing ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20))
+                    ZStack {
+                        Circle().fill(Theme.goldGradient)
+                        Image(systemName: player.playing ? "pause.fill" : "play.fill")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Theme.ink)
+                    }
+                    .frame(width: 38, height: 38)
+                    .shadow(color: Theme.gold.opacity(0.45), radius: 10, y: 3)
                 }
                 Button { player.next() } label: {
-                    Image(systemName: "forward.fill").font(.system(size: 16))
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.ivory.opacity(0.85))
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.ink2)
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.hairline))
+                    .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
+            )
+            .padding(.horizontal, 10)
             .onTapGesture { player.showFullScreen = true }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .onAppear {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) { appear = true }
+            }
         }
     }
 }
 
-/// Vue plein écran : grande pochette, disque, progression, transport.
+/// Vue plein écran : grand disque laqué, pochette centrée devant, transport doré.
 struct NowPlayingView: View {
     @EnvironmentObject private var player: Player
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Palette.ink, .black], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            AnimatedBackdrop()
 
-            VStack(spacing: 22) {
+            VStack(spacing: 20) {
                 Capsule()
-                    .fill(Color.white.opacity(0.25))
+                    .fill(Color.white.opacity(0.22))
                     .frame(width: 36, height: 5)
-                    .padding(.top, 8)
+                    .padding(.top, 10)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
 
                 if let track = player.current {
                     ZStack {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [Color(white: 0.12), .black],
-                                    center: .center,
-                                    startRadius: 20,
-                                    endRadius: 220
-                                )
-                            )
-                            .frame(width: min(UIScreen.main.bounds.width * 0.82, 340))
-
+                        LacquerDisc(playing: player.playing)
+                            .frame(width: min(UIScreen.main.bounds.width * 0.84, 340))
                         ArtworkView(track: track)
-                            .frame(width: min(UIScreen.main.bounds.width * 0.58, 240))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.6), radius: 24, y: 12)
+                            .frame(width: min(UIScreen.main.bounds.width * 0.56, 232))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .shadow(color: .black.opacity(0.65), radius: 26, y: 14)
                     }
 
-                    VStack(spacing: 4) {
-                        Text(track.title).font(.title3.weight(.semibold)).multilineTextAlignment(.center)
-                        Text(track.artist).font(.subheadline).foregroundStyle(.secondary)
+                    VStack(spacing: 5) {
+                        Text(track.title)
+                            .font(.system(size: 22, design: .serif))
+                            .foregroundStyle(Theme.ivory)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                        Text(track.artist)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.dim)
                     }
                     .padding(.horizontal, 28)
 
-                    VStack(spacing: 6) {
+                    VStack(spacing: 4) {
                         Slider(
-                            value: Binding(
-                                get: { player.position },
-                                set: { player.seek(to: $0) }
-                            ),
+                            value: Binding(get: { player.position }, set: { player.seek(to: $0) }),
                             in: 0...max(1, player.duration)
                         )
-                        .tint(Palette.gold)
+                        .tint(Theme.gold)
 
                         HStack {
                             Text(time(player.position))
                             Spacer()
                             Text(time(player.duration))
                         }
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.dim)
                     }
                     .padding(.horizontal, 28)
 
-                    HStack(spacing: 34) {
+                    HStack(spacing: 36) {
                         Button { player.previous() } label: {
-                            Image(systemName: "backward.fill").font(.system(size: 22))
+                            Image(systemName: "backward.fill").font(.system(size: 20))
                         }
                         Button { player.toggle() } label: {
-                            Image(systemName: player.playing ? "pause.circle.fill" : "play.circle.fill")
-                                .font(.system(size: 64))
-                                .foregroundStyle(Palette.gold)
+                            ZStack {
+                                Circle().fill(Theme.goldGradient)
+                                Image(systemName: player.playing ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 24, weight: .bold))
+                                    .foregroundStyle(Theme.ink)
+                            }
+                            .frame(width: 68, height: 68)
+                            .shadow(color: Theme.gold.opacity(0.45), radius: 18, y: 6)
                         }
                         Button { player.next() } label: {
-                            Image(systemName: "forward.fill").font(.system(size: 22))
+                            Image(systemName: "forward.fill").font(.system(size: 20))
                         }
                     }
-                    .foregroundStyle(Palette.ivory)
-                    .padding(.bottom, 26)
+                    .foregroundStyle(Theme.ivory)
+                    .padding(.bottom, 30)
                 }
 
                 Spacer(minLength: 0)
@@ -255,8 +360,10 @@ struct NowPlayingView: View {
                 Button {
                     player.showFullScreen = false
                 } label: {
-                    Image(systemName: "chevron.down").font(.system(size: 18, weight: .semibold))
-                        .padding(14)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.ivory.opacity(0.8))
+                        .padding(16)
                 }
             }
         }

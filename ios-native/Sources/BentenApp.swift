@@ -16,18 +16,12 @@ struct BentenApp: App {
                 .environmentObject(library)
                 .environmentObject(player)
                 .preferredColorScheme(.dark)
-                .tint(Palette.gold)
+                .tint(Theme.gold)
         }
     }
 }
 
-/// Les couleurs de la DA : laque noir, or, ivoire.
-enum Palette {
-    static let gold = Color(red: 0.831, green: 0.667, blue: 0.314)
-    static let goldLight = Color(red: 0.941, green: 0.827, blue: 0.541)
-    static let ink = Color(red: 0.039, green: 0.035, blue: 0.031)
-    static let ivory = Color(red: 0.953, green: 0.937, blue: 0.910)
-}
+
 
 /// Trois onglets, comme une app de musique : bibliothèque, recherche, réglages.
 struct RootView: View {
@@ -61,3 +55,4 @@ struct RootView: View {
         }
     }
 }
+

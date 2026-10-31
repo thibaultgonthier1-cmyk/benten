@@ -68,7 +68,7 @@ struct SettingsView: View {
                         Text("Fondu enchaîné : \(player.crossfade == 0 ? "désactivé" : "\(Int(player.crossfade)) s")")
                             .font(.subheadline)
                         Slider(value: $player.crossfade, in: 0...12, step: 1)
-                            .tint(Palette.gold)
+                            .tint(Theme.gold)
                     }
                 }
 
@@ -95,7 +95,7 @@ struct SettingsView: View {
 
                     if sync.running {
                         ProgressView(value: sync.progress)
-                            .tint(Palette.gold)
+                            .tint(Theme.gold)
                     }
                     if !sync.status.isEmpty {
                         Text(sync.status)
@@ -127,6 +127,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(AnimatedBackdrop())
             .navigationTitle("Réglages")
             .confirmationDialog("Supprimer tous les morceaux ?", isPresented: $confirmDelete) {
                 Button("Tout supprimer", role: .destructive) { library.deleteAll() }
@@ -147,4 +149,6 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
+
 
