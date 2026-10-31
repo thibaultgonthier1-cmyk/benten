@@ -147,3 +147,41 @@ export function bassSwapWeights(progress: number): { outgoingLowGain: number; in
   const incomingLowGain = Math.min(1, Math.max(0, (t - 0.5) * 2));
   return { outgoingLowGain, incomingLowGain };
 }
+/**
+ * Accord de tempo pour un enchaînement « à la DJ ».
+ *
+ * Apple (AutoMix, iOS 26) fait du *time-stretch* : il change la vitesse SANS changer la hauteur.
+ * Ici, on n'a que `playbackRate`, qui change les deux. On s'en sert donc seulement pour de PETITS
+ * écarts : jusqu'à 6 %, la dérive de hauteur est perçue comme un « pitch ride » de platine, pas comme
+ * une fausse note. Au-delà, on préfère ne rien faire — un morceau faux est pire qu'un tempo libre.
+ *
+ * @param outgoingBpm Tempo de la piste qui s'arrête.
+ * @param incomingBpm Tempo de la piste qui arrive.
+ * @param maxRatio    Écart maximal accepté (0,06 = 6 %).
+ * @returns Le facteur de vitesse à appliquer à l'entrante (1 = aucun ajustement).
+ */
+export function tempoMatchRatio(
+  outgoingBpm: number | null,
+  incomingBpm: number | null,
+  maxRatio = 0.06,
+): number {
+  if (
+    outgoingBpm === null ||
+    incomingBpm === null ||
+    !Number.isFinite(outgoingBpm) ||
+    !Number.isFinite(incomingBpm) ||
+    outgoingBpm <= 0 ||
+    incomingBpm <= 0
+  ) {
+    return 1;
+  }
+  const ratio = outgoingBpm / incomingBpm;
+  const limit = Math.max(0, maxRatio);
+  if (Math.abs(ratio - 1) > limit) return 1; // trop loin : on laisse la piste à son tempo
+  return Math.round(ratio * 1000) / 1000;
+}
+
+/** Vrai si les deux tempos peuvent être accordés sans déformer sensiblement la hauteur. */
+export function canTempoMatch(outgoingBpm: number | null, incomingBpm: number | null, maxRatio = 0.06): boolean {
+  return tempoMatchRatio(outgoingBpm, incomingBpm, maxRatio) !== 1;
+}

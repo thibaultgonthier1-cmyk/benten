@@ -316,7 +316,8 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     expect(engine.getQueueIndex()).toBe(10);
     expect(engine.getState()).toMatchObject({ status: "playing", trackId: 110 });
     // Fondu anti-clic : la rampe de gain a ete utilisee.
-    const gain = (live.connectedTo as FakeGain).gain;
+    // La source entre dans son propre gain, puis dans le gain anti-clic (les rampes vivent là).
+    const gain = (live.connectedTo as unknown as { connectedTo: FakeGain }).connectedTo.gain;
     expect(gain.linearRampToValueAtTime).toHaveBeenCalled();
   });
 
@@ -332,7 +333,7 @@ describe("AudioEngine — file d'attente / gapless / anti-clic", () => {
     );
     engine.play();
     const first = ctx.sources[0]!;
-    const gain = (first.connectedTo as FakeGain).gain;
+    const gain = (first.connectedTo as unknown as { connectedTo: FakeGain }).connectedTo.gain;
     await engine.next();
     await flush();
     expect(first.stopped).toBe(true);
@@ -589,7 +590,7 @@ describe("AudioEngine — updateQueue a chaud (Task 11)", () => {
     );
     engine.play();
     const first = ctx.sources[0]!;
-    const gain = (first.connectedTo as FakeGain).gain;
+    const gain = (first.connectedTo as unknown as { connectedTo: FakeGain }).connectedTo.gain;
     await engine.jumpTo(2);
     await flush();
     expect(first.stopped).toBe(true);
@@ -850,3 +851,5 @@ describe("AudioEngine — shuffle & repeat (Task 12)", () => {
     expect(unplayable).not.toHaveBeenCalled(); // sautee sans jamais tenter de la jouer
   });
 });
+
+

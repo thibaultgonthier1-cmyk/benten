@@ -1,7 +1,7 @@
 import type { QualityMode, TrackRow } from "../../shared/types";
 import type { Decoder } from "./decoder";
 import { crossfadeGains, crossfadeStartTime, nextStartTime, normalizeCrossfade, shouldPreload } from "./schedule";
-import { alignFadeStart, estimateBpm, quantizeFadeToBeats } from "./beats";
+import { alignFadeStart, estimateBpm, quantizeFadeToBeats, tempoMatchRatio } from "./beats";
 import { buildOrder, nextInOrder, prevInOrder, type RepeatMode } from "./order";
 
 export type { RepeatMode } from "./order";
@@ -446,6 +446,24 @@ export class AudioEngine {
    * Décode un fichier UNE SEULE FOIS, même si plusieurs appelants le demandent en même temps
    * (préchargement au survol + lecture au clic). C'est ce qui supprime le doublon de décodage.
    */
+  /** Tempos déjà calculés, par longueur de buffer (l'analyse coûte cher, on la mémoïse). */
+  private readonly bpmCache = new Map<number, number | null>();
+
+  /** Tempo d'un buffer déjà décodé, ou `null` si l'analyse n'est pas concluante. */
+  private bpmOf(buffer: AudioBuffer): number | null {
+    const key = buffer.length;
+    const known = this.bpmCache.get(key);
+    if (known !== undefined) return known;
+    let value: number | null = null;
+    try {
+      value = estimateBpm(buffer.getChannelData(0), buffer.sampleRate);
+    } catch {
+      value = null;
+    }
+    this.bpmCache.set(key, value);
+    return value;
+  }
+
   /** Taille mémoire réelle d'un buffer décodé (Float32 × canaux × échantillons). */
   private static decodedBytes(buffer: AudioBuffer): number {
     const channels = buffer.numberOfChannels || 1;
@@ -572,18 +590,16 @@ export class AudioEngine {
     }
     const source = this.context.createBufferSource();
     source.buffer = buffer;
-    // En mode fondu, chaque source a SON gain : c'est lui qu'on baisse pendant que la suivante
-    // monte. À fondu 0, on garde le câblage historique (une seule source -> `gain`).
-    if (this.crossfadeSec > 0) {
-      const sg = this.context.createGain();
-      sg.gain.value = 1;
-      source.connect(sg);
-      sg.connect(this.gain);
-      this.sourceGain = sg;
-    } else {
-      source.connect(this.gain);
-      this.sourceGain = null;
-    }
+    // CHAQUE source a son propre gain, même quand le fondu est désactivé.
+    //
+    // Avant, ce nœud n'existait qu'en mode fondu : activer le fondu en cours de lecture
+    // laissait donc la piste en cours sans gain dédié — impossible de l'abaisser — et la
+    // suivante montait sur une piste restée à plein volume (gonflement audible).
+    const sg = this.context.createGain();
+    sg.gain.value = 1;
+    source.connect(sg);
+    sg.connect(this.gain);
+    this.sourceGain = sg;
     this.attachEndedHandler(source);
     const start = clamp(offsetSec, 0, this.durationSec);
     this.startOffsetSec = start;
@@ -1164,6 +1180,15 @@ export class AudioEngine {
       }
       incoming.gain.setValueAtTime(next, when);
       incoming.gain.linearRampToValueAtTime(1, fadeEnd);
+      // Accord de tempo : l'entrante est calée sur le tempo de la sortante, puis revient à son
+      // propre tempo une fois le fondu passé. Écart limité (voir `tempoMatchRatio`) parce que
+      // `playbackRate` change AUSSI la hauteur — Apple, lui, fait du time-stretch.
+      const incomingBpm = this.beatMatched ? this.bpmOf(buffer) : null;
+      const tempoRatio = tempoMatchRatio(this.crossfadeBpm, incomingBpm);
+      if (tempoRatio !== 1) {
+        source.playbackRate.setValueAtTime(tempoRatio, when);
+        source.playbackRate.linearRampToValueAtTime(1, fadeEnd + 1.5);
+      }
       source.connect(incoming);
       incoming.connect(this.gain);
       this.scheduledGain = incoming;
@@ -1518,6 +1543,7 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+
 
 
 

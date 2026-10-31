@@ -105,8 +105,8 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
-/* Le médaillon et l'anneau empruntent leur matière à l'accent : les reflets restent, la teinte
-   change. Sans ça, la palette ne repeignait que les textes et laissait le bouton lecture en or. */
+/* Le médaillon emprunte sa matière à l'ACCENT : les reflets restent, la teinte change.
+   Sans ça, la palette ne repeignait que les textes et laissait le bouton lecture en or. */
 html[data-palette] .gm__disc {
   background:
     radial-gradient(120% 95% at 50% 12%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 46%),
@@ -120,11 +120,17 @@ html[data-palette] .gm__disc {
     );
 }
 
-.gm.has-tex html[data-palette] .gm__disc {
+/* Le médaillon porte une TEXTURE de feuille d'or (`--gm-tex`) posée en style inline par le
+   composant : elle écrase la palette et laissait le bouton jaune. Hors palette or, on la retire.
+   En or, on la garde : c'est l'identité de la DA. */
+html[data-palette]:not([data-palette='or']) .gm__disc {
+  --gm-tex: none;
+}
+
+html[data-palette] .gm.has-tex .gm__disc {
   background:
     radial-gradient(120% 95% at 50% 12%, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 46%),
     radial-gradient(100% 100% at 50% 100%, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0) 55%),
     var(--gm-tex) center / cover,
     var(--gold);
 }
-

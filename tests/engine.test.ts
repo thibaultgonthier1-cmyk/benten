@@ -188,11 +188,16 @@ describe("AudioEngine", () => {
     await engine.load(track());
     engine.play();
     expect(ctx.createdSources).toBe(1);
-    // Deux GainNode : `gain` (fondu anti-clic) + `volumeGain` (volume utilisateur, Task 13).
-    expect(ctx.gainCount).toBe(2);
+    // Trois GainNode : `gain` (anti-clic), `volumeGain` (volume utilisateur), et le gain PROPRE à
+    // la source — celui qu'on abaisse pendant un fondu. Il existe toujours, même fondu coupé :
+    // sinon l'activer en cours de lecture ne pourrait plus baisser la piste en cours.
+    expect(ctx.gainCount).toBe(3);
     expect(ctx.analyserCount).toBe(1);
     const src = ctx.sources[0]!;
-    const gain = src.connectedTo as FakeGain;
+    // La source entre dans SON gain, qui entre dans le gain anti-clic, puis l'analyseur.
+    const sourceGain = src.connectedTo as FakeGain;
+    expect(sourceGain).toBeInstanceOf(FakeGain);
+    const gain = sourceGain.connectedTo as FakeGain;
     expect(gain).toBeInstanceOf(FakeGain);
     const analyser = gain.connectedTo as FakeAnalyser;
     expect(analyser).toBeInstanceOf(FakeAnalyser);
@@ -472,7 +477,7 @@ describe("AudioEngine", () => {
       await engine.setQueue([track({ id: 1 }), track({ id: 2 })], 0);
       engine.play();
       // `gain` + `volumeGain`, créés au constructeur : le gapless n''en ajoute aucun.
-      expect(local.gainCount).toBe(2);
+      expect(local.gainCount).toBe(3);
 
       // Fondu actif : chaque source reçoit son gain dédié, donc le compte monte.
       engine.setCrossfade(6);
@@ -498,6 +503,7 @@ describe("AudioEngine", () => {
       expect(s.status).toBe("paused"); // JAMAIS en lecture (pas de clic)
       expect(s.positionSec).toBeCloseTo(37, 5); // repositionne a la position d'avant
       // Le graphe est reconstruit sur le NOUVEAU contexte (un seul contexte vivant a la fois).
+      // Aucune source n'est encore créée : seulement `gain` + `volumeGain` sur le nouveau contexte.
       expect(ctx2.gainCount).toBe(2);
       expect(ctx2.analyserCount).toBe(1);
     });
@@ -508,7 +514,9 @@ describe("AudioEngine", () => {
       engine.play();
       ctx.currentTime = 37;
       const oldSource = ctx.sources[0]!;
-      const oldGain = oldSource.connectedTo as FakeGain; // noeud `gain` (fondus anti-clic)
+      // La source entre dans son gain, qui entre dans le gain partagé : les fondus anti-clic
+      // vivent sur CE dernier.
+      const oldGain = (oldSource.connectedTo as unknown as { connectedTo: FakeGain }).connectedTo;
 
       const ctx2 = new FakeAudioContext();
       await engine.rebuildContext(
@@ -516,7 +524,7 @@ describe("AudioEngine", () => {
         okDecoder(new FakeAudioBuffer(200)),
       );
 
-      // Anti-clic : le gain a ete RAMPE vers ~0 (et non coupe net) avant l'arret de la source.
+      // Anti-clic : le gain SHARED a ete rampe vers ~0 avant l'arret de la source.
       expect(oldGain.gain.ramps.length).toBeGreaterThan(0);
       const lastRamp = oldGain.gain.ramps.at(-1)!;
       expect(lastRamp.to).toBeLessThanOrEqual(0.01); // cible quasi silencieuse
@@ -546,10 +554,18 @@ describe("AudioEngine", () => {
       await expect(
         engine.rebuildContext(ctx2 as unknown as AudioContext, okDecoder(new FakeAudioBuffer(100))),
       ).resolves.toBeUndefined();
+      // Sans piste chargée : `gain` + `volumeGain` seulement.
       expect(ctx2.gainCount).toBe(2);
     });
   });
 });
+
+
+
+
+
+
+
 
 
 
