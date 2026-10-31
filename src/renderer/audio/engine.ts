@@ -2,6 +2,7 @@ import type { QualityMode, TrackRow } from "../../shared/types";
 import type { Decoder } from "./decoder";
 import { crossfadeGains, crossfadeStartTime, nextStartTime, normalizeCrossfade, shouldPreload } from "./schedule";
 import { alignFadeStart, estimateBpm, quantizeFadeToBeats, tempoMatchRatio } from "./beats";
+import { loudnessGain, needsLoudnessMatch, rmsOf } from "./loudness";
 import { buildOrder, nextInOrder, prevInOrder, type RepeatMode } from "./order";
 
 export type { RepeatMode } from "./order";
@@ -448,6 +449,24 @@ export class AudioEngine {
    */
   /** Tempos déjà calculés, par longueur de buffer (l'analyse coûte cher, on la mémoïse). */
   private readonly bpmCache = new Map<number, number | null>();
+
+  /** Niveaux efficaces déjà mesurés, par longueur de buffer (parcourir les échantillons coûte). */
+  private readonly rmsCache = new Map<number, number>();
+
+  /** Niveau efficace (RMS) d'un buffer décodé, mémorisé. */
+  private rmsOfBuffer(buffer: AudioBuffer): number {
+    const key = buffer.length;
+    const known = this.rmsCache.get(key);
+    if (known !== undefined) return known;
+    let value = 0;
+    try {
+      value = rmsOf(buffer.getChannelData(0));
+    } catch {
+      value = 0;
+    }
+    this.rmsCache.set(key, value);
+    return value;
+  }
 
   /** Tempo d'un buffer déjà décodé, ou `null` si l'analyse n'est pas concluante. */
   private bpmOf(buffer: AudioBuffer): number | null {
@@ -1189,6 +1208,18 @@ export class AudioEngine {
         source.playbackRate.setValueAtTime(tempoRatio, when);
         source.playbackRate.linearRampToValueAtTime(1, fadeEnd + 1.5);
       }
+
+      // Égalisation de niveau, comme un DJ (et comme le « Sound Check » d'Apple) : l'entrante est
+      // corrigée pour ne pas éclipser la sortante, puis revient à son niveau propre une fois le
+      // fondu passé — sinon le morceau resterait atténué du début à la fin.
+      const outgoingRms = this.buffer ? this.rmsOfBuffer(this.buffer) : 0;
+      const incomingRms = this.rmsOfBuffer(buffer);
+      if (needsLoudnessMatch(outgoingRms, incomingRms)) {
+        const level = loudnessGain(outgoingRms, incomingRms);
+        incoming.gain.setValueAtTime(next * level, when);
+        incoming.gain.linearRampToValueAtTime(level, fadeEnd);
+        incoming.gain.linearRampToValueAtTime(1, fadeEnd + 2);
+      }
       source.connect(incoming);
       incoming.connect(this.gain);
       this.scheduledGain = incoming;
@@ -1543,6 +1574,7 @@ export class AudioEngine {
     // Si la piste est devenue illisible, `load` a deja pose le statut `error` : on n'y touche pas.
   }
 }
+
 
 
 
