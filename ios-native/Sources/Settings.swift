@@ -242,6 +242,9 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Bundle.main.appVersion)
+            // L'appareil détecté : la grille de pochettes s'y adapte (2, 3, 4 ou 5 colonnes).
+            LabeledContent("Appareil", value: DeviceLayout.current.deviceName)
+            LabeledContent("Colonnes de pochettes", value: "\(DeviceLayout.current.gridColumns)")
             Text("Benten lit les fichiers de l'appareil, hors-ligne. iOS interdit à une app de parcourir un dossier : les morceaux viennent de Fichiers, d'iCloud, ou du PC par synchronisation.")
                 .font(.caption2)
                 .foregroundStyle(Theme.dim)
@@ -265,4 +268,5 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
 

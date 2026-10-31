@@ -66,11 +66,15 @@ final class Player: NSObject, ObservableObject {
     private var queue: [Track] = []
     private var queuePosition = 0
 
+    /// État avant une interruption système (appel, Siri, réveil) : sert à reprendre après.
+    private var wasPlayingBeforeInterruption = false
+
     override init() {
         super.init()
         configureEngine()
         configureSession()
         configureRemoteCommands()
+        observeAudioSession()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -112,8 +116,55 @@ final class Player: NSObject, ObservableObject {
 
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
+        // `.playback` est la catégorie des apps de musique : le son continue écran verrouillé et
+        // quand une autre app passe au premier plan. `.mixWithOthers` serait l'inverse.
         try? session.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetoothA2DP])
         try? session.setActive(true)
+    }
+
+    /// Suit la vie de la session audio : c'est ce qui distingue « ça joue » de « ça joue comme
+    /// Apple Music ».
+    ///
+    /// - INTERRUPTION (appel, Siri) : on met en pause, et on reprend seulement si on jouait ;
+    /// - FIN D'INTERRUPTION : on réactive la session et le moteur (iOS les a coupés) ;
+    /// - DÉBRANCHEMENT DU CASQUE : on met en pause, comme le fait Apple (le son ne part pas dans
+    ///   le haut-parleur du téléphone).
+    private func observeAudioSession() {
+        let center = NotificationCenter.default
+        center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+                switch type {
+                case .began:
+                    self.wasPlayingBeforeInterruption = self.playing
+                    self.pause()
+                case .ended:
+                    let optionsRaw = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                    let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
+                    if options.contains(.shouldResume) || self.wasPlayingBeforeInterruption {
+                        try? AVAudioSession.sharedInstance().setActive(true)
+                        if !self.engine.isRunning { try? self.engine.start() }
+                        self.resume()
+                    }
+                @unknown default:
+                    break
+                }
+            }
+        }
+
+        center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            Task { @MainActor in
+                guard let self else { return }
+                guard let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                      let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
+                // Casque débranché : on met en pause (comportement iOS attendu).
+                if reason == .oldDeviceUnavailable {
+                    self.pause()
+                }
+            }
+        }
     }
 
     private func applyEqualizer() {
@@ -416,3 +467,4 @@ final class Player: NSObject, ObservableObject {
         return min(1, max(0, position / duration))
     }
 }
+

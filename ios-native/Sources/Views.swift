@@ -10,7 +10,9 @@ struct LibraryView: View {
     @EnvironmentObject private var player: Player
     @State private var showImporter = false
 
-    private let columns = [GridItem(.adaptive(minimum: 148), spacing: 16)]
+    // Colonnes calculées d'après l'écran réel : 2 sur SE/mini, 3 sur les autres iPhone,
+    // 4-5 sur iPad. Les pochettes gardent ainsi des proportions correctes partout.
+    private let layout = DeviceLayout.current
 
     var body: some View {
         NavigationStack {
@@ -24,7 +26,7 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 18) {
                             header
 
-                            LazyVGrid(columns: columns, spacing: 22) {
+                            LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 6) {
                                 ForEach(Array(library.tracks.enumerated()), id: \.element.id) { offset, track in
                                     AlbumTile(track: track, playing: player.current?.id == track.id) {
                                         player.play(library.tracks, startingAt: offset)
@@ -40,7 +42,7 @@ struct LibraryView: View {
                                 }
                             }
                         }
-                        .padding(.horizontal, 18)
+                        .padding(.horizontal, layout.pagePadding)
                         .padding(.bottom, 96)
                     }
                 }
@@ -375,4 +377,5 @@ struct NowPlayingView: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
+
 
