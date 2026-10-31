@@ -22,6 +22,7 @@ const EXPECTED: readonly AssetId[] = [
   "logo.animated",
   "scene.torii",
   "scene.benten",
+  "scene.parallax",
   "intro.gold",
 ];
 
@@ -44,7 +45,10 @@ describe("assets/manifest", () => {
       "logo.animated",
       "scene.torii",
       "scene.benten",
+      "scene.parallax",
+  "scene.parallax",
   "scene.benten",
+  "scene.parallax",
       "tex.lacquer",
       "tex.seigaihaDisc",
       "fx.pluck",
@@ -77,6 +81,7 @@ describe("assets/manifest", () => {
     expect(assetUrl(bad)).toBeNull();
   });
 });
+
 
 
 

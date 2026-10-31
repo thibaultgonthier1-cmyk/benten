@@ -13,6 +13,7 @@ import { BentenMark } from "../ui/BentenMark";
 import { DownloadsView } from "../views/DownloadsView";
 import { AppleMusicView } from "../views/AppleMusicView";
 import { PalettePicker } from "../views/PalettePicker";
+import { assetUrl } from "../assets/manifest";
 import { fxHostMounted, requestFx } from "../ui/FxOverlay";
 import { Button } from "../ui/Button";
 import { useMotion, useMotionLevel } from "../ui/useMotion";
@@ -220,7 +221,18 @@ function titleOf(route: Route): string {
 function SettingsView(): JSX.Element {
   return (
     <section className="section settings-view">
-      <div className="page-head">
+      <div className="page-head settings-head">
+        {/* Le logo animé (rendu After Effects) n'avait aucun emplacement : c'est ici qu'il a du
+            sens — l'écran où l'on personnalise l'application porte sa marque. */}
+        <video
+          className="settings-logo"
+          src={assetUrl("logo.animated") ?? undefined}
+          autoPlay
+          muted
+          loop
+          playsInline
+          aria-hidden="true"
+        />
         <span className="eyebrow">設定 · Réglages</span>
         <h1>Personnaliser</h1>
         <p className="page-sub">L'accent de l'interface, sans toucher au laque ni à l'encre.</p>
@@ -317,6 +329,8 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
+
 
 
 

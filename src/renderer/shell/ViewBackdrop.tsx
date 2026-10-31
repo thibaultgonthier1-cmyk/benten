@@ -26,7 +26,13 @@ import "./backdrop.css";
  * gardent une illustration fixe — une vidéo par vue coûterait trop de décodage pour un écran qu'on
  * traverse.
  */
-const SCENE_ROUTES: ReadonlySet<RouteName> = new Set<RouteName>(["home", "tracks", "albums"]);
+const SCENE_ROUTES: ReadonlySet<RouteName> = new Set<RouteName>([
+  "home",
+  "tracks",
+  "albums",
+  "artists",
+  "playlists",
+]);
 
 const BACKDROP_FOR: Readonly<Record<RouteName, AssetId | null>> = Object.freeze({
   home: "ill.onboarding",
@@ -70,7 +76,14 @@ export function ViewBackdrop(): JSX.Element | null {
   useEffect(() => {
     const isScene = SCENE_ROUTES.has(route);
     // L'accueil reçoit Benten (la joueuse de biwa) ; les listes, le torii.
-    const scene: AssetId = route === "home" ? "scene.benten" : "scene.torii";
+    // Une scène par famille de vues : Benten à l'accueil, le torii pour les listes, la parallaxe
+    // (instrument et goutte d'or) pour les artistes et les playlists.
+    const scene: AssetId =
+      route === "home"
+        ? "scene.benten"
+        : route === "artists" || route === "playlists"
+          ? "scene.parallax"
+          : "scene.torii";
     const url = isScene
       ? assetUrl(scene)
       : (() => {

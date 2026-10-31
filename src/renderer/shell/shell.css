@@ -671,3 +671,25 @@
   background: var(--bg);
   backdrop-filter: none;
 }
+
+/* Logo animé de l'écran Réglages : présent sans voler la vedette aux réglages eux-mêmes. */
+.settings-head {
+  position: relative;
+}
+
+.settings-logo {
+  display: block;
+  width: clamp(120px, 16vw, 190px);
+  height: auto;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Le logo se fige : on affiche la première image plutôt qu'une boucle. */
+  .settings-logo {
+    animation: none;
+  }
+}
