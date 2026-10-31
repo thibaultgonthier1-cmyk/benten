@@ -144,7 +144,7 @@ struct AlbumTile: View {
 
     private var glow: Color {
         if let url = track.artworkURL, let image = UIImage(contentsOfFile: url.path) {
-            return image.dominantColor
+            return Color(uiColor: image.dominantColor)
         }
         return Theme.gold
     }
@@ -375,3 +375,4 @@ struct NowPlayingView: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
+
