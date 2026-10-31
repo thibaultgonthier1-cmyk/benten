@@ -43,6 +43,9 @@ jobs:
       - name: Compiler (sans signature)
         working-directory: ios-native
         run: |
+          # `pipefail` : sans lui, un echec de xcodebuild etait masque par le `tail` qui suit,
+          # et l'etape paraissait verte alors que rien n'avait ete compile.
+          set -o pipefail
           xcodebuild \
             -project Benten.xcodeproj \
             -scheme Benten \
@@ -53,7 +56,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build | tee build.log | tail -n 60
+            build 2>&1 | tee build.log | tail -n 200
 
       - name: Empaqueter le .ipa
         run: |
@@ -71,3 +74,4 @@ jobs:
           path: out/benten-native-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+
