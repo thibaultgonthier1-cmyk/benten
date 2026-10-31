@@ -392,3 +392,45 @@ body {
   color: var(--accent);
   font-size: 13.5px;
 }
+
+/* ---------- Adaptation iPhone (retours d'usage) ---------- */
+
+/* iOS zoome automatiquement sur un champ dont la police fait moins de 16 px : on force 16 px pour
+   éviter ce saut de mise en page quand on tape l'adresse ou le jeton. */
+.sheet__col input,
+input[type='url'],
+input[type='text'],
+input[type='number'] {
+  font-size: 16px;
+}
+
+/* La feuille peut dépasser l'écran (adresse + jeton + limite + boutons) : elle doit défiler,
+   sinon les derniers boutons sont inaccessibles sur un petit iPhone. */
+.sheet__panel {
+  max-height: 88vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Clavier ouvert : on garde le bouton d'action au-dessus. */
+.sheet__panel {
+  padding-bottom: calc(28px + var(--safe-bottom));
+}
+
+/* Zones tactiles : 44 px minimum partout (recommandation Apple). */
+.seg button,
+.icon-btn,
+.import,
+.sync,
+.sheet__close,
+.danger {
+  min-height: 44px;
+}
+
+/* La ligne d'état ne doit jamais être coupée ni se confondre avec un titre. */
+.status {
+  min-height: 18px;
+  padding: 0 18px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}

@@ -399,7 +399,12 @@ function syncSettings() {
 }
 
 function saveSyncSettings(host, token, limit) {
-  localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token, limit }));
+  // écriture best-effort : un stockage refusé (navigation privée) ne doit pas bloquer le reste
+  try {
+    localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token, limit }));
+  } catch (error) {
+    console.warn("[benten] reglages de synchro non enregistres", error);
+  }
 }
 
 const syncHost = $("syncHost");
@@ -414,7 +419,10 @@ if (syncHost && syncToken) {
   if (saved.limit && syncLimit) syncLimit.value = String(saved.limit);
 }
 
-syncRun?.addEventListener("click", async () => {
+syncRun?.addEventListener("click", () => {
+  // Enveloppe TOTALE : la moindre exception doit s'afficher, jamais laisser le bouton muet.
+  void (async () => {
+  try {
   const host = (syncHost?.value ?? "").trim().replace(/\/+$/, "");
   const token = (syncToken?.value ?? "").trim();
   if (!host || !token) {
@@ -426,7 +434,7 @@ syncRun?.addEventListener("click", async () => {
   const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(5000, Math.floor(rawLimit)) : 5000;
   saveSyncSettings(host, token, limit);
   syncRun.disabled = true;
-  try {
+  {
     say("connexion au PC…");
     const response = await fetch(`${host}/api/library?token=${encodeURIComponent(token)}`);
     if (!response.ok) throw new Error(`le PC a répondu ${response.status} (jeton ou adresse ?)`);
@@ -462,14 +470,18 @@ syncRun?.addEventListener("click", async () => {
     render();
     refreshSheet();
     say(added === 0 ? "rien de nouveau sur le PC" : `${added} morceau(x) récupéré(s)`);
+  }
   } catch (error) {
     fail("synchronisation", error);
   } finally {
-    syncRun.disabled = false;
+    if (syncRun) syncRun.disabled = false;
   }
+  })();
 });
 
 start().catch((error) => fail("démarrage", error));
+
+
 
 
 

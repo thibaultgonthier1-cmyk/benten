@@ -79,6 +79,7 @@
           <span>Synchroniser avec le PC</span>
           <input id="syncHost" type="url" inputmode="url" placeholder="http://192.168.1.10:4321" autocomplete="off" />
           <input id="syncToken" type="text" inputmode="text" placeholder="jeton (affiché dans Réglages sur le PC)" autocomplete="off" />
+          <input id="syncLimit" type="number" min="1" max="5000" value="100" inputmode="numeric" placeholder="nombre de morceaux (vide = tout)" />
           <button id="syncRun" type="button" class="sync">Récupérer les nouveaux morceaux</button>
         </div>
         <div class="sheet__row">
