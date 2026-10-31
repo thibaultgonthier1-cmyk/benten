@@ -142,7 +142,8 @@ final class Library: ObservableObject {
               let formats = try? await track.load(.formatDescriptions),
               let format = formats.first
         else { return "m4a" }
-        switch format.mediaSubType {
+        // Comparaison sur la valeur brute : mediaSubType est un MediaSubType, pas un AudioFormatID.
+        switch format.mediaSubType.rawValue {
         case kAudioFormatMPEGLayer3: return "mp3"
         case kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatAppleLossless: return "m4a"
         case kAudioFormatFLAC: return "flac"
@@ -240,3 +241,4 @@ final class Library: ObservableObject {
 
     func track(withID id: UUID) -> Track? { tracks.first { $0.id == id } }
 }
+
