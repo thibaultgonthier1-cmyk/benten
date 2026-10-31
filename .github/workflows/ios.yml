@@ -59,6 +59,10 @@ jobs:
           PLIST=ios/ios/App/App/Info.plist
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST" 2>/dev/null || true
+          # NSAllowsLocalNetworking ne suffit pas toujours : WebKit refuse encore le clair vers
+          # une IP privee dans une WebView Capacitor (erreur « Load failed »). On autorise donc
+          # le HTTP en clair pour CETTE app seulement : elle ne parle qu au PC de l utilisateur.
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Benten se connecte a votre ordinateur sur le reseau local pour recuperer vos morceaux.'" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
 

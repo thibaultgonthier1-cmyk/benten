@@ -53,8 +53,17 @@ function say(message, kind = "info") {
   statusEl.dataset.kind = kind;
 }
 
-function fail(where, error) {
+/** Traduit les erreurs reseau de WebKit en conseil actionnable : « Load failed » ne dit rien. */
+function explainNetworkError(error) {
   const message = error && error.message ? error.message : String(error);
+  if (/load failed|network connection was lost|failed to fetch/i.test(message)) {
+    return "iOS a refuse la connexion. Reglages iPhone > Benten > Reseau local : autorise. Puis verifie que le PC est allume sur le meme Wi-Fi et que l adresse est la bonne.";
+  }
+  return message;
+}
+
+function fail(where, error) {
+  const message = explainNetworkError(error);
   console.error(`[benten] ${where}`, error);
   say(`${where} : ${message}`, "error");
 }
@@ -516,4 +525,5 @@ async function start() {
 }
 
 start().catch((error) => fail("démarrage", error));
+
 
