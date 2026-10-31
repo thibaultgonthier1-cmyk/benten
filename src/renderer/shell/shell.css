@@ -693,3 +693,35 @@
     animation: none;
   }
 }
+
+.settings-block {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-block h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.settings-hint {
+  margin: 0 0 10px;
+  max-width: 62ch;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+/* Adresse à recopier sur le téléphone : lisible, sélectionnable, jamais coupée. */
+.settings-url {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  color: var(--accent);
+  user-select: all;
+}

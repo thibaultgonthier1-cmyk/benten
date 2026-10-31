@@ -12,6 +12,8 @@ directories:
 # and package.json here.
 files:
   - out/**/*
+  # Page de l'app mobile servie sur le réseau local (installable sur iPhone).
+  - mobile/**/*
   - package.json
 
 # better-sqlite3 ships a native .node addon that cannot be require()'d from inside
@@ -40,3 +42,4 @@ nsis:
 
 portable:
   artifactName: "${productName} ${version} Portable.${ext}"
+

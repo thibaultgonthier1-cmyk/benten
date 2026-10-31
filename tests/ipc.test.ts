@@ -73,6 +73,7 @@ describe("registerIpc", () => {
       "audio:default-device",
       "audio:list-devices",
       "audio:read-file",
+      "benten:mobile-url",
       "dialog:pick-file",
       "dialog:pick-folder",
       "favorites:list",
@@ -599,6 +600,7 @@ describe("normalizePage / validateScanPaths", () => {
     expect(validateScanPaths([FIX])).toEqual([FIX]);
   });
 });
+
 
 
 

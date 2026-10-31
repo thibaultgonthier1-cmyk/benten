@@ -333,6 +333,8 @@ export function registerDiagnosticsIpc(writer: JournalWriter, versions: Diagnost
 
 /** Crochets optionnels du process Main (ex. : (re)démarrer la veille quand les sources changent). */
 export interface IpcHooks {
+  /** Adresse de l'app mobile sur le réseau local (serveur `mobile/`). */
+  mobileUrl?: () => string | null;
   /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
   onSourcesChanged?: () => void;
   /** Apple Music : prérequis, aperçu d'une playlist, téléchargement. Absent dans les tests. */
@@ -362,6 +364,11 @@ export interface IpcHooks {
 /** Enregistre les handlers IPC du process Main. audio:* arrive avec sa tache. */
 export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
   // ── Apple Music : prérequis, aperçu, téléchargement ─────────────────────────────────────────
+  ipcMain.handle(CHANNELS.MOBILE_URL, (event) => {
+    assertTrusted(event);
+    return hooks?.mobileUrl?.() ?? null;
+  });
+
   ipcMain.handle(CHANNELS.APPLE_STATUS, (event) => {
     assertTrusted(event);
     return hooks?.apple?.status() ?? { cookies: false, cookiesUpdatedAt: null, cookieEntries: 0, gamdl: false, gamdlVersion: null };
@@ -658,6 +665,7 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
 
 
 

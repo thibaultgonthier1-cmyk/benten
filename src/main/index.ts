@@ -31,9 +31,14 @@ registerArtScheme();
 // politique d'autoplay de Chromium laisserait l'AudioContext suspendu et « play » resterait muet.
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
+// App mobile : un petit serveur local sert la page installable sur l'iPhone.
+import { mobileUrl, startMobileServer, stopMobileServer } from "./mobileServer";
+
 // Identité Windows : sans ça, la barre des tâches regroupe l'app sous « Electron » et
 // certaines fonctions (notifications, épinglage) l'attribuent au mauvais programme.
 app.setAppUserModelId("com.benten.player");
+startMobileServer();
+app.on("before-quit", () => stopMobileServer());
 
 // Harnais de vérification CDP : en dev uniquement, ouvre le port de debogage distant pour que
 // `scripts/cdp-smoke.mjs` puisse piloter le vrai renderer. Garde sur ELECTRON_RENDERER_URL afin
@@ -388,6 +393,7 @@ app.whenReady().then(() => {
   }
 
   registerIpc(db, {
+    mobileUrl: () => mobileUrl(),
     apple: {
       status: appleStatus,
       saveCookies: (text: string) => saveCookies(userData, text).then(() => appleStatus()),
@@ -513,6 +519,8 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
 
 
 

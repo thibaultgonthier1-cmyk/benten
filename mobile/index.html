@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0a0908" />
+    <title>Benten</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <!-- Écran unique, plein écran : la bibliothèque, puis le lecteur en bas.
+         Pas de cadre « site web » — c'est une app, pas une page. -->
+    <header class="top">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true"></span>
+        <div>
+          <strong>Benten</strong>
+          <small>lecture locale</small>
+        </div>
+      </div>
+      <label class="import">
+        importer
+        <input id="files" type="file" accept="audio/*" multiple hidden />
+      </label>
+    </header>
+
+    <main id="library" class="library" aria-live="polite">
+      <p class="empty">
+        Aucune musique sur cet appareil.<br />
+        Touche <b>importer</b> et choisis des fichiers depuis Fichiers ou iCloud.
+      </p>
+    </main>
+
+    <footer class="player" id="player" hidden>
+      <div class="player__meta">
+        <span id="title">—</span>
+        <small id="artist"></small>
+      </div>
+      <input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Progression" />
+      <div class="player__times">
+        <span id="t-cur">0:00</span>
+        <span id="t-dur">0:00</span>
+      </div>
+      <div class="player__controls">
+        <button id="prev" type="button" aria-label="Précédent">◀◀</button>
+        <button id="toggle" type="button" class="play" aria-label="Lecture">▶</button>
+        <button id="next" type="button" aria-label="Suivant">▶▶</button>
+      </div>
+    </footer>
+
+    <audio id="audio" preload="metadata"></audio>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

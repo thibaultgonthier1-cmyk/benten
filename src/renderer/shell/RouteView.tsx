@@ -238,6 +238,43 @@ function SettingsView(): JSX.Element {
         <p className="page-sub">L'accent de l'interface, sans toucher au laque ni à l'encre.</p>
       </div>
       <PalettePicker />
+      <MobileCard />
+    </section>
+  );
+}
+
+/**
+ * Carte « iPhone » : donne l'adresse à ouvrir depuis Safari pour installer Benten Mobile.
+ *
+ * La page est servie par l'app sur le réseau local ; une fois installée (Partager ▸ Sur l'écran
+ * d'accueil), elle fonctionne HORS-LIGNE, sans PC allumé — c'est le service worker qui garde les
+ * fichiers. Aucun fichier de l'ordinateur n'est exposé : le serveur ne sert que `mobile/`.
+ */
+function MobileCard(): JSX.Element {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void window.benten?.mobileUrl?.().then((value) => {
+      if (alive) setUrl(value ?? null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <section className="settings-block">
+      <h3>Benten sur iPhone</h3>
+      <p className="settings-hint">
+        Ouvre cette adresse dans Safari sur ton téléphone (même Wi-Fi), puis Partager ▸ Sur l'écran
+        d'accueil. Ensuite, l'app fonctionne seule, sans ordinateur allumé.
+      </p>
+      <p className="settings-url">{url ?? "adresse indisponible — l'app doit être ouverte sur le Wi-Fi"}</p>
+      <p className="settings-hint">
+        Sur iPhone, les morceaux s'importent depuis Fichiers ou iCloud : iOS interdit à toute app de
+        parcourir un dossier.
+      </p>
     </section>
   );
 }
@@ -329,6 +366,7 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
 
 
 

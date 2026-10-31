@@ -44,6 +44,8 @@ export const CHANNELS = {
   IMPORT_COMMIT: "import:commit",
   DIALOG_PICK_FILE: "dialog:pick-file",
   /** Apple Music : cookies, aperçu d''une playlist, téléchargement. */
+  /** Adresse a ouvrir sur le telephone pour installer Benten Mobile. */
+  MOBILE_URL: "benten:mobile-url",
   APPLE_STATUS: "apple:status",
   APPLE_SAVE_COOKIES: "apple:save-cookies",
   APPLE_PREVIEW: "apple:preview",
@@ -58,6 +60,7 @@ export const CHANNELS = {
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
+
 
 
 

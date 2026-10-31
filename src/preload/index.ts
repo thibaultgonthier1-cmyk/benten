@@ -8,6 +8,8 @@ const invoke = <T>(channel: ChannelName, ...args: unknown[]): Promise<T> =>
 
 const api: BentenApi = {
   ping: () => invoke(CHANNELS.PING),
+  // Adresse à ouvrir sur l'iPhone pour installer Benten Mobile.
+  mobileUrl: () => invoke(CHANNELS.MOBILE_URL),
   library: {
     query: (args) => invoke(CHANNELS.LIBRARY_QUERY, args),
     scan: (paths) => invoke(CHANNELS.LIBRARY_SCAN, paths),
@@ -100,6 +102,8 @@ const api: BentenApi = {
 };
 
 contextBridge.exposeInMainWorld("benten", api);
+
+
 
 
 

@@ -249,6 +249,8 @@ export interface YoutubeStatusView {
   cookies?: boolean;
 }
 export interface BentenApi {
+  /** Adresse de Benten Mobile sur le réseau local (`null` si le serveur est arrêté). */
+  mobileUrl?(): Promise<string | null>;
   ping(): Promise<"pong">;
   library: {
     query(args: LibraryQueryArgs): Promise<LibraryQueryResult>;
@@ -368,6 +370,7 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 
 

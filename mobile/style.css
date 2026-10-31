@@ -1,0 +1,257 @@
+/* Benten Mobile — même langage que l'application de bureau : laque noir, encre, un seul accent.
+   Conçu pour iOS d'abord : zones tactiles larges (44 px), safe-area respectée, pas de zoom. */
+
+:root {
+  --ink: #0a0908;
+  --ink-2: #141110;
+  --ink-3: #1c1917;
+  --line: rgba(243, 239, 232, 0.12);
+  --text: #f3efe8;
+  --dim: rgba(243, 239, 232, 0.62);
+  --gold: #d4aa50;
+  --gold-light: #f0d38a;
+  --accent: var(--gold);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--safe-top);
+}
+
+/* ---------- En-tête ---------- */
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 30%, var(--gold-light), var(--gold) 60%, #8a6420 100%);
+  box-shadow: 0 0 14px rgba(212, 170, 80, 0.25);
+}
+
+.brand strong {
+  display: block;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+}
+
+.brand small {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.import {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--ink-2);
+  color: var(--accent);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- Bibliothèque ---------- */
+.library {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px 12px 18px;
+}
+
+.empty {
+  margin: 40px 20px;
+  color: var(--dim);
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.track {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.track:active,
+.track.is-playing {
+  background: var(--ink-3);
+}
+
+.track__index {
+  width: 22px;
+  flex: none;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.track.is-playing .track__index {
+  color: var(--accent);
+}
+
+.track__text {
+  min-width: 0;
+  flex: 1;
+}
+
+.track__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14.5px;
+}
+
+.track__artist {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* ---------- Lecteur ---------- */
+.player {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 18px calc(12px + var(--safe-bottom));
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(10, 9, 8, 0.86), var(--ink) 42%);
+  backdrop-filter: blur(18px);
+}
+
+.player__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 6px;
+}
+
+.player__meta span {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player__meta small {
+  font-size: 12px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Curseur large : fin à l'œil, généreux au doigt. */
+.seek {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+}
+
+.seek::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ink-3);
+}
+
+.seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.player__times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.player__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  margin-top: 8px;
+}
+
+.player__controls button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  letter-spacing: 0.12em;
+}
+
+.player__controls .play {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 30%, var(--gold-light), var(--gold) 62%, #8a6420 100%);
+  color: #1a1206;
+  font-size: 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 250, 232, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
