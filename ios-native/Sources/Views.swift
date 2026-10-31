@@ -152,7 +152,10 @@ struct AlbumTile: View {
     }
 
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            Haptics.tap()
+            action()
+        }) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack {
                     // Le halo reprend la teinte de la pochette : chaque tuile éclaire son coin.
@@ -184,8 +187,8 @@ struct AlbumTile: View {
                     .foregroundStyle(Theme.dim)
                     .lineLimit(1)
             }
-            .scaleEffect(pressed ? 0.96 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.7), value: pressed)
+            .scaleEffect(pressed ? 0.955 : 1)
+            .animation(Motion.quick, value: pressed)
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
@@ -245,7 +248,10 @@ struct MiniPlayer: View {
                 Spacer(minLength: 6)
 
                 // Médaillon doré du bureau : le bouton de lecture est le point focal.
-                Button { player.toggle() } label: {
+                Button {
+                    Haptics.press()
+                    player.toggle()
+                } label: {
                     ZStack {
                         Circle().fill(Theme.goldGradient)
                         Image(systemName: player.playing ? "pause.fill" : "play.fill")
@@ -282,6 +288,11 @@ struct MiniPlayer: View {
 /// Vue plein écran : grand disque laqué, pochette centrée devant, transport doré.
 struct NowPlayingView: View {
     @EnvironmentObject private var player: Player
+    // Seule cette vue observe l'horloge : le reste de l'app ne se redessine pas pendant la
+    // lecture.
+    @EnvironmentObject private var clock: PlaybackClock
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -319,15 +330,15 @@ struct NowPlayingView: View {
 
                     VStack(spacing: 4) {
                         Slider(
-                            value: Binding(get: { player.position }, set: { player.seek(to: $0) }),
-                            in: 0...max(1, player.duration)
+                            value: Binding(get: { clock.position }, set: { player.seek(to: $0) }),
+                            in: 0...max(1, clock.duration)
                         )
                         .tint(Theme.gold)
 
                         HStack {
-                            Text(time(player.position))
+                            Text(clock.formatted(clock.position))
                             Spacer()
-                            Text(time(player.duration))
+                            Text(clock.formatted(clock.duration))
                         }
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(Theme.dim)
@@ -347,6 +358,8 @@ struct NowPlayingView: View {
                             }
                             .frame(width: 68, height: 68)
                             .shadow(color: Theme.gold.opacity(0.45), radius: 18, y: 6)
+                    .scaleEffect(player.playing && !reduceMotion ? 1.03 : 1)
+                    .animation(reduceMotion ? nil : Motion.spring, value: player.playing)
                         }
                         Button { player.next() } label: {
                             Image(systemName: "forward.fill").font(.system(size: 20))
@@ -377,5 +390,10 @@ struct NowPlayingView: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
+
+
+
+
+
 
 

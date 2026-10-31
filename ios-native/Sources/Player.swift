@@ -17,7 +17,10 @@ final class Player: NSObject, ObservableObject {
 
     @Published private(set) var current: Track?
     @Published private(set) var playing = false
-    @Published private(set) var position: Double = 0
+    /// Horloge séparée : la grille des pochettes ne se redessine plus à chaque tick.
+    let clock = PlaybackClock()
+    /// Position courante, en lecture seule (lue par les vues qui ne veulent qu'un instantané).
+    var position: Double { clock.position }
     @Published private(set) var currentBPM: Double?
     @Published var showFullScreen = false
     @Published var repeatMode: RepeatMode = .all { didSet { rebuildOrder() } }
@@ -256,6 +259,7 @@ final class Player: NSObject, ObservableObject {
         deckA.play()
         playing = true
         fading = false
+        syncClock(seconds)
         updateNowPlaying()
         refreshTempo(for: track)
     }
@@ -306,7 +310,7 @@ final class Player: NSObject, ObservableObject {
         let wasPlaying = playing
         activeDeck?.stop()
         let clamped = max(0, min(seconds, duration))
-        position = clamped
+        clock.position = clamped
         startedAt = Date().addingTimeInterval(-clamped)
         if let deck = activeDeck {
             schedule(on: deck, file: file, from: AVAudioFramePosition(clamped * file.processingFormat.sampleRate))
@@ -350,7 +354,8 @@ final class Player: NSObject, ObservableObject {
 
     private func tick() {
         guard playing, let startedAt else { return }
-        position = min(duration, max(0, Date().timeIntervalSince(startedAt)))
+        clock.position = min(duration, max(0, Date().timeIntervalSince(startedAt)))
+        clock.duration = duration
 
         if crossfade > 0, !fading, duration > 0, repeatMode != .one {
             // La durée est ARRONDIE À UNE MESURE de la piste sortante, comme sur le PC : le fondu
@@ -462,9 +467,13 @@ final class Player: NSObject, ObservableObject {
         return Double(file.length) / file.processingFormat.sampleRate
     }
 
-    var progress: Double {
-        guard duration > 0 else { return 0 }
-        return min(1, max(0, position / duration))
+    /// Met l'horloge à jour pour un nouveau morceau.
+    private func syncClock(_ seconds: Double) {
+        clock.position = seconds
+        clock.duration = duration
     }
+
+    var progress: Double { clock.progress }
 }
+
 

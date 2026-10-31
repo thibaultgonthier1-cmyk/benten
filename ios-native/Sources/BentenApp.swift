@@ -15,6 +15,7 @@ struct BentenApp: App {
             RootView()
                 .environmentObject(library)
                 .environmentObject(player)
+                .environmentObject(player.clock)
                 .preferredColorScheme(.dark)
                 .tint(Theme.gold)
         }
@@ -55,4 +56,5 @@ struct RootView: View {
         }
     }
 }
+
 
