@@ -55,7 +55,8 @@ final class ArtworkCache {
 /// quand on écoutait un morceau.
 @MainActor
 final class AppRouter: ObservableObject {
-    enum Tab: Int { case library = 0, search = 1, settings = 2 }
+    enum Tab: Int { case library = 0, favorites = 1, playlists = 2, search = 3, settings = 4 }
     @Published var tab: Tab = .library
 }
+
 

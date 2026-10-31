@@ -306,6 +306,8 @@ struct MiniPlayer: View {
 /// ICI, comme sur le bureau, au lieu d'être cachées dans les réglages.
 struct NowPlayingView: View {
     @EnvironmentObject private var player: Player
+    @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var playlists: PlaylistStore
     @EnvironmentObject private var clock: PlaybackClock
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragOffset: CGFloat = 0
@@ -392,8 +394,8 @@ struct NowPlayingView: View {
                     }
                     .foregroundStyle(Theme.ivory)
 
-                    // Boucle et aléatoire : visibles dans la vue lecture, pas dans les réglages.
-                    HStack(spacing: 44) {
+                    // Boucle, aléatoire, cœur et ajout à une playlist : tout est ici.
+                    HStack(spacing: 34) {
                         Button {
                             Haptics.choose()
                             player.shuffle.toggle()
@@ -413,6 +415,31 @@ struct NowPlayingView: View {
                             Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
                                 .font(.system(size: 17, weight: .medium))
                                 .foregroundStyle(player.repeatMode == .off ? Theme.dim : Theme.accent)
+                        }
+                        Button {
+                            Haptics.choose()
+                            favorites.toggle(track.id)
+                        } label: {
+                            Image(systemName: favorites.contains(track.id) ? "heart.fill" : "heart")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(favorites.contains(track.id) ? Theme.accent : Theme.dim)
+                        }
+                        Menu {
+                            ForEach(playlists.items) { playlist in
+                                Button(playlist.name) {
+                                    Haptics.choose()
+                                    playlists.add(track.id, to: playlist.id)
+                                }
+                            }
+                            Button {
+                                playlists.create(named: track.title, from: [track.id])
+                            } label: {
+                                Label("Nouvelle playlist", systemImage: "plus")
+                            }
+                        } label: {
+                            Image(systemName: "text.badge.plus")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(Theme.dim)
                         }
                     }
                     .padding(.top, 12)
@@ -625,3 +652,4 @@ enum TimeFormatting {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
+

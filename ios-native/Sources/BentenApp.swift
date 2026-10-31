@@ -10,6 +10,8 @@ struct BentenApp: App {
     @StateObject private var library = Library()
     @StateObject private var player = Player()
     @StateObject private var router = AppRouter()
+    @StateObject private var favorites = FavoritesStore()
+    @StateObject private var playlists = PlaylistStore()
     // La palette est persistée ; changer sa valeur force la reconstruction de la coquille
     // (Theme utilise une variable statique, sans objet observable).
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
@@ -23,6 +25,8 @@ struct BentenApp: App {
                 .environmentObject(library)
                 .environmentObject(player)
                 .environmentObject(router)
+                .environmentObject(favorites)
+                .environmentObject(playlists)
                 .environmentObject(player.clock)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
@@ -46,6 +50,14 @@ struct RootView: View {
                 LibraryView()
                     .tabItem { Label("Bibliothèque", systemImage: "music.note.list") }
                     .tag(AppRouter.Tab.library)
+
+                FavoritesView()
+                    .tabItem { Label("Favoris", systemImage: "heart") }
+                    .tag(AppRouter.Tab.favorites)
+
+                PlaylistsView()
+                    .tabItem { Label("Playlists", systemImage: "music.note.list") }
+                    .tag(AppRouter.Tab.playlists)
 
                 SearchView()
                     .tabItem { Label("Recherche", systemImage: "magnifyingglass") }
@@ -72,5 +84,6 @@ struct RootView: View {
         }
     }
 }
+
 
 
