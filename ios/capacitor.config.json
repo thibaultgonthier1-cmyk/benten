@@ -1,0 +1,9 @@
+{
+  "appId": "com.benten.player",
+  "appName": "Benten",
+  "webDir": "../mobile",
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#0a0908"
+  }
+}
