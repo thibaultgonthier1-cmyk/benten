@@ -19,6 +19,16 @@ enum Theme {
     /// Palette active, choisie dans les Réglages. La valeur est aussi persistée par `@AppStorage`.
     nonisolated(unsafe) static var active: Palette = .or
 
+    /// Style d'interface : l'identité Benten (sérif, halos, disque) ou les conventions
+    /// d'Apple Music (SF Pro, tuiles nettes, pochette plein écran, volume).
+    ///
+    /// Les deux sont proposés parce qu'ils ne servent pas la même chose : Benten pour l'ambiance,
+    /// Apple Music pour l'ergonomie qu'on a déjà dans les doigts.
+    nonisolated(unsafe) static var appleStyle = false
+
+    /// Rayon des pochettes : 14 (Benten) ou 7 (Apple Music, qui reste très serré).
+    static var coverRadius: CGFloat { appleStyle ? 7 : tileRadius }
+
     static var accent: Color { active.accent }
     static var accentLight: Color { active.accentLight }
     static var accentDeep: Color { active.accentDeep }
@@ -42,7 +52,10 @@ struct SerifTitle: ViewModifier {
     var size: CGFloat = 28
     func body(content: Content) -> some View {
         content
-            .font(.system(size: size, weight: .regular, design: .serif))
+            // Style Apple Music : SF Pro en gras, comme tous ses titres. Benten : sérif.
+            .font(Theme.appleStyle
+                  ? .system(size: size * 0.92, weight: .bold)
+                  : .system(size: size, weight: .regular, design: .serif))
             .foregroundStyle(Theme.ivory)
     }
 }
@@ -135,3 +148,4 @@ struct LacquerDisc: View {
         }
     }
 }
+

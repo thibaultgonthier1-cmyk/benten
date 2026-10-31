@@ -68,12 +68,14 @@ struct SettingsView: View {
     @AppStorage("sync.limit") private var syncLimit = 100
     @State private var sleepMinutes = 0
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
+    @AppStorage("design") private var designRaw = "benten"
 
     var body: some View {
         NavigationStack {
             ZStack {
                 AnimatedBackdrop()
                 Form {
+                    designSection
                     paletteSection
                     syncSection
                     playbackSection
@@ -126,6 +128,29 @@ struct SettingsView: View {
             .padding(.vertical, 4)
         } header: {
             Text("Couleur d'accent").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
+    /// Deux grammaires visuelles. Benten : sérif, halos, disque laqué. Apple Music : SF Pro en
+    /// gras, pochettes nettes, grande pochette, volume en bas.
+    private var designSection: some View {
+        Section {
+            Picker("Style", selection: $designRaw) {
+                Text("Benten").tag("benten")
+                Text("Apple Music").tag("apple")
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: designRaw) { value in
+                Haptics.choose()
+                Theme.appleStyle = value == "apple"
+            }
+            Text(designRaw == "apple"
+                 ? "Titres en SF Pro gras, pochettes sans halo, grande pochette, curseur de volume."
+                 : "Titres en sérif, halos colorés derrière les pochettes, disque laqué en lecture.")
+                .font(.caption2)
+                .foregroundStyle(Theme.dim)
+        } header: {
+            Text("Interface").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
@@ -307,6 +332,7 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
 
 
 

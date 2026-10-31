@@ -5,13 +5,14 @@ import SwiftUI
 /// Le laque, l'encre et l'ivoire ne changent jamais : seule la teinte d'ACCENT bouge. C'est ce qui
 /// garantit qu'aucune palette ne dégrade la lisibilité — même règle que sur le PC.
 enum Palette: String, CaseIterable, Identifiable {
-    case or, argent, indigo, jade, vermillon, brume
+    case or, rose, argent, indigo, jade, vermillon, brume
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .or: return "Or"
+        case .rose: return "Rosé (Apple Music)"
         case .argent: return "Argent"
         case .indigo: return "Indigo"
         case .jade: return "Jade"
@@ -26,6 +27,7 @@ enum Palette: String, CaseIterable, Identifiable {
     var accent: Color {
         switch self {
         case .or: return Color(red: 0.831, green: 0.667, blue: 0.314)        // #D4AA50
+        case .rose: return Color(red: 0.980, green: 0.169, blue: 0.337)       // #FA2B56
         case .argent: return Color(red: 0.788, green: 0.812, blue: 0.839)     // #C9CFD6
         case .indigo: return Color(red: 0.435, green: 0.525, blue: 0.839)     // #6F86D6
         case .jade: return Color(red: 0.388, green: 0.788, blue: 0.627)       // #63C9A0
@@ -37,6 +39,7 @@ enum Palette: String, CaseIterable, Identifiable {
     var accentLight: Color {
         switch self {
         case .or: return Color(red: 0.941, green: 0.827, blue: 0.541)        // #F0D38A
+        case .rose: return Color(red: 1.0, green: 0.427, blue: 0.545)         // #FF6D8B
         case .argent: return Color(red: 0.933, green: 0.949, blue: 0.965)     // #EEF2F6
         case .indigo: return Color(red: 0.659, green: 0.722, blue: 0.941)     // #A8B8F0
         case .jade: return Color(red: 0.612, green: 0.910, blue: 0.784)       // #9CE8C8
@@ -48,6 +51,7 @@ enum Palette: String, CaseIterable, Identifiable {
     var accentDeep: Color {
         switch self {
         case .or: return Color(red: 0.541, green: 0.392, blue: 0.125)        // #8A6420
+        case .rose: return Color(red: 0.741, green: 0.078, blue: 0.212)       // #BD1436
         case .argent: return Color(red: 0.435, green: 0.459, blue: 0.486)     // #6F757C
         case .indigo: return Color(red: 0.235, green: 0.302, blue: 0.580)     // #3C4D94
         case .jade: return Color(red: 0.184, green: 0.490, blue: 0.369)       // #2F7D5E
@@ -60,3 +64,4 @@ enum Palette: String, CaseIterable, Identifiable {
         LinearGradient(colors: [accentLight, accent, accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
+

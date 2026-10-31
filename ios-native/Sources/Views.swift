@@ -109,6 +109,22 @@ struct LibraryView: View {
                         }
                     }
                 }
+                if Theme.appleStyle {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            ForEach(BrowseMode.allCases, id: \.self) { value in
+                                Button {
+                                    mode = value
+                                } label: {
+                                    Label(value.rawValue, systemImage: mode == value ? "checkmark" : "")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "line.3.horizontal.decrease")
+                                .foregroundStyle(Theme.accent)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 4) {
                         // Accès direct à la recherche, même quand une musique joue.
@@ -173,14 +189,18 @@ struct LibraryView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.dim)
 
-            // Les trois vues du PC, dans un sélecteur compact.
-            Picker("Parcourir", selection: $mode) {
-                ForEach(BrowseMode.allCases, id: \.self) { value in
-                    Text(value.rawValue).tag(value)
+            // Apple Music n'utilise pas de sélecteur segmenté : il met un MENU dans la barre
+            // (« Bibliothèque ⌄ »). On garde le segmenté comme signature Benten, et le menu
+            // quand le style Apple est actif — les deux sont dans les Réglages.
+            if !Theme.appleStyle {
+                Picker("Parcourir", selection: $mode) {
+                    ForEach(BrowseMode.allCases, id: \.self) { value in
+                        Text(value.rawValue).tag(value)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .padding(.top, 6)
             }
-            .pickerStyle(.segmented)
-            .padding(.top, 6)
         }
         .padding(.top, 8)
     }
@@ -224,12 +244,13 @@ struct AlbumTile: View {
         }) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack {
-                    CoverGlow(color: glow, intensity: playing ? 0.95 : 0.6)
+                    // Apple Music ne pose aucun halo : la pochette est nette, sur fond noir.
+                    CoverGlow(color: glow, intensity: Theme.appleStyle ? 0 : (playing ? 0.95 : 0.6))
                     ArtworkView(track: track)
                         .aspectRatio(1, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+                            RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous)
                                 .strokeBorder(Theme.hairline)
                         )
                         .overlay(alignment: .bottomTrailing) {
@@ -367,6 +388,8 @@ struct NowPlayingView: View {
     @EnvironmentObject private var clock: PlaybackClock
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragOffset: CGFloat = 0
+    /// Volume système : en style Apple, le curseur est dans la vue lecture.
+    @State private var volume: Double = 1
 
     var body: some View {
         ZStack {
@@ -382,12 +405,23 @@ struct NowPlayingView: View {
 
                 if let track = player.current {
                     ZStack {
-                        LacquerDisc(playing: player.playing)
-                            .frame(width: min(UIScreen.main.bounds.width * 0.84, 340))
+                        // Le disque laqué est la signature de Benten. Apple Music n'en a pas :
+                        // en style Apple, la pochette occupe l'espace (86 % de la largeur).
+                        if !Theme.appleStyle {
+                            LacquerDisc(playing: player.playing)
+                                .frame(width: min(UIScreen.main.bounds.width * 0.84, 340))
+                        }
                         ArtworkView(track: track)
-                            .frame(width: min(UIScreen.main.bounds.width * 0.56, 232))
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .shadow(color: .black.opacity(0.65), radius: 26, y: 14)
+                            .frame(width: min(
+                                UIScreen.main.bounds.width * (Theme.appleStyle ? 0.86 : 0.56),
+                                Theme.appleStyle ? 360 : 232
+                            ))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.appleStyle ? 10 : 18, style: .continuous))
+                            .shadow(
+                                color: .black.opacity(Theme.appleStyle ? 0.35 : 0.65),
+                                radius: Theme.appleStyle ? 12 : 26,
+                                y: Theme.appleStyle ? 6 : 14
+                            )
                     }
 
                     VStack(spacing: 5) {
@@ -499,7 +533,26 @@ struct NowPlayingView: View {
                         }
                     }
                     .padding(.top, 12)
-                    .padding(.bottom, 34)
+                    .padding(.bottom, Theme.appleStyle ? 14 : 34)
+
+                    // Bas d'écran d'Apple Music : AirPlay et volume.
+                    if Theme.appleStyle {
+                        HStack(spacing: 14) {
+                            Image(systemName: "airplayaudio")
+                                .font(.system(size: 15))
+                                .foregroundStyle(Theme.ivory.opacity(0.7))
+                            Image(systemName: "speaker.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Theme.ivory.opacity(0.5))
+                            Slider(value: $volume, in: 0...1)
+                                .tint(Theme.ivory.opacity(0.85))
+                            Image(systemName: "speaker.wave.3.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.ivory.opacity(0.5))
+                        }
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 26)
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -555,12 +608,12 @@ struct AlbumTileView: View {
                 onPlay()
             }) {
                 ZStack {
-                    CoverGlow(color: glow, intensity: isPlaying ? 0.95 : 0.6)
+                    CoverGlow(color: glow, intensity: Theme.appleStyle ? 0 : (isPlaying ? 0.95 : 0.6))
                     ArtworkView(track: album.artworkTrack)
                         .aspectRatio(1, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+                            RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous)
                                 .strokeBorder(Theme.hairline)
                         )
                         .overlay(alignment: .bottomTrailing) {
@@ -729,7 +782,7 @@ struct ArtistTileView: View {
                 onPlay()
             }) {
                 ZStack {
-                    CoverGlow(color: glow, intensity: isPlaying ? 0.95 : 0.6)
+                    CoverGlow(color: glow, intensity: Theme.appleStyle ? 0 : (isPlaying ? 0.95 : 0.6))
                     ArtworkView(track: artist.artworkTrack)
                         // Les artistes sont ronds sur Apple Music : même repère visuel ici.
                         .aspectRatio(1, contentMode: .fit)
@@ -869,3 +922,5 @@ struct ArtistDetailView: View {
         }
     }
 }
+
+
