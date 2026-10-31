@@ -12,80 +12,87 @@
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <!-- Écran unique, plein écran : la bibliothèque, puis le lecteur en bas.
-         Pas de cadre « site web » — c'est une app, pas une page. -->
     <header class="top">
       <div class="brand">
         <span class="brand__mark" aria-hidden="true"></span>
-        <div>
+        <div class="brand__txt">
           <strong>Benten</strong>
           <small>lecture locale</small>
         </div>
       </div>
-      <button id="settingsOpen" type="button" class="icon-btn" aria-label="Réglages">⚙</button>
-      <label class="import">
-        importer
-        <input id="files" type="file" accept="audio/*" multiple hidden />
-      </label>
+      <div class="top__actions">
+        <button id="settingsOpen" type="button" class="icon-btn" aria-label="Réglages">⚙</button>
+        <label class="import">
+          importer
+          <input id="files" type="file" accept="audio/*" multiple hidden />
+        </label>
+      </div>
     </header>
 
-    <!-- Ligne d'état : tout échec visible ici plutôt que dans la console du téléphone. -->
     <p id="status" class="status" role="status">chargement…</p>
 
-    <main id="library" class="library" aria-live="polite">
-      <p class="empty">
-        Aucune musique sur cet appareil.<br />
-        Touche <b>importer</b> et choisis des fichiers depuis Fichiers ou iCloud.
-      </p>
-    </main>
+    <nav class="tabs" aria-label="Sections">
+      <button type="button" data-tab="library" aria-pressed="true">Bibliothèque</button>
+      <button type="button" data-tab="playing" aria-pressed="false">En lecture</button>
+    </nav>
 
-    <footer class="player" id="player" hidden>
-      <div class="player__meta">
-        <span id="title">—</span>
-        <small id="artist"></small>
+    <main id="library" class="library" aria-live="polite"></main>
+
+    <!-- Vue « En lecture » : grande pochette, disque, transport — comme la vue du PC. -->
+    <section id="stage" class="stage" hidden>
+      <div class="stage__art">
+        <div class="disc" aria-hidden="true"></div>
+        <div class="cover" id="cover"><span id="coverText">♪</span></div>
       </div>
+      <h1 id="title">—</h1>
+      <p id="artist" class="artist"></p>
       <input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Progression" />
-      <div class="player__times">
+      <div class="times">
         <span id="t-cur">0:00</span>
         <span id="t-dur">0:00</span>
       </div>
-      <div class="player__controls">
+      <div class="transport">
         <button id="prev" type="button" aria-label="Précédent">◀◀</button>
         <button id="toggle" type="button" class="play" aria-label="Lecture">▶</button>
         <button id="next" type="button" aria-label="Suivant">▶▶</button>
       </div>
-    </footer>
+    </section>
 
-    <!-- Panneau de réglages : sans ça, l'app mobile n'offrait aucun contrôle (ni aléatoire, ni
-         répétition, ni moyen de vider la bibliothèque). -->
     <div id="sheet" class="sheet" hidden>
       <div class="sheet__panel" role="dialog" aria-label="Réglages">
         <h2>Réglages</h2>
-        <div class="sheet__row">
-          <span>Répéter</span>
-          <div class="seg" role="group" aria-label="Répétition">
-            <button type="button" data-repeat="off" aria-pressed="false">non</button>
-            <button type="button" data-repeat="all" aria-pressed="true">toute la liste</button>
-            <button type="button" data-repeat="one" aria-pressed="false">ce titre</button>
-          </div>
-        </div>
-        <div class="sheet__row">
-          <span>Aléatoire</span>
-          <div class="seg">
-            <button id="shuffle" type="button" aria-pressed="false">non</button>
-          </div>
-        </div>
+
         <div class="sheet__row sheet__col">
-          <span>Synchroniser avec le PC</span>
-          <input id="syncHost" type="url" inputmode="url" placeholder="http://192.168.1.10:4321" autocomplete="off" />
+          <span class="sheet__label">Synchroniser avec le PC</span>
+          <input id="syncHost" type="url" inputmode="url" placeholder="http://192.168.31.111:4321" autocomplete="off" />
           <input id="syncToken" type="text" inputmode="text" placeholder="jeton (affiché dans Réglages sur le PC)" autocomplete="off" />
           <input id="syncLimit" type="number" min="1" max="5000" value="100" inputmode="numeric" placeholder="nombre de morceaux (vide = tout)" />
-          <button id="syncRun" type="button" class="sync">Récupérer les nouveaux morceaux</button>
+          <div class="sheet__buttons">
+            <button id="syncTest" type="button" class="ghost">Tester</button>
+            <button id="syncRun" type="button" class="sync">Récupérer</button>
+          </div>
+          <p class="sheet__hint" id="syncInfo">—</p>
         </div>
+
         <div class="sheet__row">
-          <span>Bibliothèque</span>
+          <span class="sheet__label">Répéter</span>
+          <div class="seg" role="group" aria-label="Répétition">
+            <button type="button" data-repeat="off" aria-pressed="false">non</button>
+            <button type="button" data-repeat="all" aria-pressed="true">liste</button>
+            <button type="button" data-repeat="one" aria-pressed="false">titre</button>
+          </div>
+        </div>
+
+        <div class="sheet__row">
+          <span class="sheet__label">Aléatoire</span>
+          <div class="seg"><button id="shuffle" type="button" aria-pressed="false">non</button></div>
+        </div>
+
+        <div class="sheet__row">
+          <span class="sheet__label">Bibliothèque</span>
           <button id="clear" type="button" class="danger">vider</button>
         </div>
+
         <p class="sheet__hint" id="sheetInfo">—</p>
         <button id="sheetClose" type="button" class="sheet__close">Fermer</button>
       </div>
@@ -95,7 +102,3 @@
     <script src="./app.js"></script>
   </body>
 </html>
-
-
-
-

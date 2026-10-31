@@ -1,31 +1,29 @@
 /**
- * Benten Mobile — lecteur autonome pour iPhone.
+ * Benten Mobile — lecteur autonome pour iPhone, à la DA du bureau.
  *
- * POURQUOI PAS UNE APP iOS
- * iOS n'exécute pas Electron, et fabriquer un `.ipa` exige un Mac avec Xcode. Cette page est donc
- * une application web installable : on l'ouvre une fois depuis Safari, « Partager ▸ Sur l'écran
- * d'accueil », et elle s'ouvre ensuite comme une app, sans PC allumé.
+ * PRINCIPES
+ * - Rien n'échoue en silence : chaque erreur s'affiche dans la ligne d'état.
+ * - Aucun `await` de premier niveau : le démarrage est une fonction attrapée.
+ * - Les morceaux vivent sur le téléphone (IndexedDB), ou en mémoire si le stockage est refusé.
  *
- * CE QU'ELLE FAIT
- * - import de fichiers audio depuis Fichiers / iCloud (sélecteur natif) ;
- * - stockage DANS l'appareil (IndexedDB) quand c'est possible, sinon en mémoire pour la session ;
- * - lecture, pause, suivant/précédent, déplacement dans la piste ;
- * - hors-ligne une fois installée (service worker).
- *
- * RIEN NE DOIT MOURIR EN SILENCE : chaque échec est affiché à l'écran. Un module qui plante sans
- * message donne exactement ce que l'utilisateur a signalé — « ça charge et ça ne fait rien ».
+ * LIMITES iOS (structurelles)
+ * - pas de parcours de dossier : import par le sélecteur Fichiers ;
+ * - pas de téléchargement autonome : le PC sert la source (voir Synchronisation).
  */
 
 const DB_NAME = "benten-mobile";
 const DB_STORE = "tracks";
 const DB_VERSION = 1;
+const VERSION = "1.3.0"; // affichée dans les réglages : permet de vérifier la version installée
 
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
 const library = $("library");
-const player = $("player");
+const stage = $("stage");
 const titleEl = $("title");
 const artistEl = $("artist");
+const coverEl = $("cover");
+const coverText = $("coverText");
 const seekEl = $("seek");
 const curEl = $("t-cur");
 const durEl = $("t-dur");
@@ -34,18 +32,18 @@ const nextBtn = $("next");
 const prevBtn = $("prev");
 const filesInput = $("files");
 const statusEl = $("status");
+const sheet = $("sheet");
+const syncInfo = $("syncInfo");
+const sheetInfo = $("sheetInfo");
 
 let tracks = [];
-/** `off` = arrêt en fin de liste, `all` = on recommence, `one` = le même titre en boucle. */
-let repeatMode = "all";
-let shuffle = false;
-/** Ordre de lecture : la liste, ou une permutation mélangée (recalculée à chaque tour). */
-let playOrder = [];
 let currentIndex = -1;
 let objectUrl = null;
-/** `true` quand le stockage persistant fonctionne ; sinon on reste en mémoire (session seulement). */
 let persistent = false;
 let dbPromise = null;
+let repeatMode = "all";
+let shuffle = false;
+let playOrder = [];
 
 /* ------------------------------- Messages ------------------------------- */
 
@@ -55,7 +53,6 @@ function say(message, kind = "info") {
   statusEl.dataset.kind = kind;
 }
 
-/** Affiche une erreur à l'écran ET dans la console : jamais d'échec muet. */
 function fail(where, error) {
   const message = error && error.message ? error.message : String(error);
   console.error(`[benten] ${where}`, error);
@@ -84,7 +81,6 @@ function openDb() {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("ouverture impossible"));
-    request.onblocked = () => reject(new Error("base verrouillée par un autre onglet"));
   });
   return dbPromise;
 }
@@ -116,7 +112,6 @@ function formatTime(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** « Artiste - Titre » quand le nom de fichier suit cette convention, sinon le nom brut. */
 function splitName(name) {
   const clean = name.replace(/\.[^.]+$/, "").replace(/_/g, " ").trim();
   const parts = clean.split(" - ");
@@ -124,11 +119,17 @@ function splitName(name) {
   return { artist: "Fichier importé", title: clean };
 }
 
+/** Teinte stable dérivée du titre : chaque morceau a sa pochette, sans image à charger. */
+function tintFor(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) % 360;
+  return `linear-gradient(135deg, hsl(${hash} 42% 62%), hsl(${(hash + 28) % 360} 38% 44%))`;
+}
+
 function render() {
   if (tracks.length === 0) {
     library.innerHTML =
-      '<p class="empty">Aucune musique sur cet appareil.<br />Touche <b>importer</b> et choisis des fichiers dans Fichiers ou iCloud.</p>';
-    player.hidden = true;
+      '<p class="empty">Aucune musique sur cet appareil.<br />Touche <b>importer</b>, ou synchronise avec le PC (⚙).</p>';
     return;
   }
   library.innerHTML = "";
@@ -136,22 +137,42 @@ function render() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "track" + (index === currentIndex ? " is-playing" : "");
-    const indexEl = document.createElement("span");
-    indexEl.className = "track__index";
-    indexEl.textContent = index === currentIndex ? "♪" : String(index + 1);
+    const art = document.createElement("span");
+    art.className = "track__art";
+    art.style.background = tintFor(track.title);
+    art.textContent = index === currentIndex ? "♪" : String(index + 1);
     const text = document.createElement("span");
     text.className = "track__text";
     const title = document.createElement("span");
     title.className = "track__title";
-    title.textContent = track.title; // jamais interprété comme du HTML
+    title.textContent = track.title;
     const artist = document.createElement("span");
     artist.className = "track__artist";
     artist.textContent = track.artist;
     text.append(title, artist);
-    button.append(indexEl, text);
+    const time = document.createElement("span");
+    time.className = "track__time";
+    time.textContent = formatTime(track.durationSec ?? NaN);
+    button.append(art, text, time);
     button.addEventListener("click", () => play(index));
     library.appendChild(button);
   });
+}
+
+function showView(name) {
+  library.hidden = name !== "library";
+  stage.hidden = name !== "playing";
+  for (const button of document.querySelectorAll(".tabs button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.tab === name));
+  }
+}
+
+function paintStage(track) {
+  if (!track) return;
+  titleEl.textContent = track.title;
+  artistEl.textContent = track.artist;
+  coverEl.style.background = tintFor(track.title);
+  coverText.textContent = (track.title[0] ?? "♪").toUpperCase();
 }
 
 /* -------------------------------- Lecture -------------------------------- */
@@ -163,39 +184,12 @@ function play(index) {
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(track.blob);
   audio.src = objectUrl;
-  titleEl.textContent = track.title;
-  artistEl.textContent = track.artist;
-  player.hidden = false;
+  paintStage(track);
+  showView("playing");
   audio.play().catch((error) => fail("lecture refusée", error));
   render();
 }
 
-/** Position suivante/précédente selon l''ordre courant et le mode de répétition. */
-function nextIndex(delta) {
-  if (tracks.length === 0) return null;
-  if (repeatMode === "one" && delta > 0 && currentIndex >= 0) return currentIndex;
-  const order = playOrder.length === tracks.length ? playOrder : tracks.map((_, i) => i);
-  const position = order.indexOf(currentIndex);
-  const target = position + delta;
-  if (target >= 0 && target < order.length) return order[target];
-  if (repeatMode === "off") return null;
-  // Rebouchon : on repart de l''autre bout (et on remélange si l''aléatoire est actif).
-  if (shuffle) buildOrder();
-  const wrapped = ((target % order.length) + order.length) % order.length;
-  return order[wrapped] ?? null;
-}
-
-function step(delta) {
-  const index = nextIndex(delta);
-  if (index === null) {
-    audio.pause();
-    say("fin de la liste");
-    return;
-  }
-  play(index);
-}
-
-/** Reconstruit l''ordre de lecture (mélangé si demandé), en gardant la piste courante en tête. */
 function buildOrder() {
   const indices = tracks.map((_, i) => i);
   if (!shuffle) {
@@ -213,6 +207,29 @@ function buildOrder() {
   playOrder = indices;
 }
 
+function nextIndex(delta) {
+  if (tracks.length === 0) return null;
+  if (repeatMode === "one" && delta > 0 && currentIndex >= 0) return currentIndex;
+  const order = playOrder.length === tracks.length ? playOrder : tracks.map((_, i) => i);
+  const position = order.indexOf(currentIndex);
+  const target = position + delta;
+  if (target >= 0 && target < order.length) return order[target];
+  if (repeatMode === "off") return null;
+  if (shuffle) buildOrder();
+  const wrapped = ((target % order.length) + order.length) % order.length;
+  return order[wrapped] ?? null;
+}
+
+function step(delta) {
+  const index = nextIndex(delta);
+  if (index === null) {
+    audio.pause();
+    say("fin de la liste");
+    return;
+  }
+  play(index);
+}
+
 /* -------------------------------- Événements -------------------------------- */
 
 filesInput.addEventListener("change", async () => {
@@ -220,10 +237,9 @@ filesInput.addEventListener("change", async () => {
   filesInput.value = "";
   if (files.length === 0) return;
   say(`import de ${files.length} fichier(s)…`);
-  let stored = 0;
   for (const file of files) {
     const { artist, title } = splitName(file.name);
-    const track = {
+    const record = {
       id: `${file.name}:${file.size}:${file.lastModified}`,
       title,
       artist,
@@ -231,25 +247,19 @@ filesInput.addEventListener("change", async () => {
       addedAt: Date.now(),
     };
     try {
-      if (persistent) await saveTrack(track);
-      stored += 1;
-      // En mémoire, on remplace un éventuel doublon pour ne pas empiler deux fois le même fichier.
-      tracks = [...tracks.filter((item) => item.id !== track.id), track];
+      if (persistent) await saveTrack(record);
     } catch (error) {
       persistent = false;
       fail("enregistrement", error);
-      tracks = [...tracks.filter((item) => item.id !== track.id), track];
-      stored += 1;
     }
+    tracks = [...tracks.filter((item) => item.id !== record.id), record];
   }
   buildOrder();
   render();
   say(
-    stored === 0
-      ? "aucun fichier importé"
-      : persistent
-        ? `${tracks.length} morceau(x) sur l'appareil`
-        : `${tracks.length} morceau(x) — session seulement (stockage indisponible)`,
+    persistent
+      ? `${tracks.length} morceau(x) sur l'appareil`
+      : `${tracks.length} morceau(x) — session seulement (stockage indisponible)`,
     persistent ? "info" : "error",
   );
 });
@@ -258,17 +268,18 @@ toggleBtn.addEventListener("click", () => {
   if (audio.paused) audio.play().catch((error) => fail("lecture refusée", error));
   else audio.pause();
 });
-
 nextBtn.addEventListener("click", () => step(1));
 prevBtn.addEventListener("click", () => step(-1));
 
 audio.addEventListener("play", () => {
   toggleBtn.textContent = "❚❚";
   toggleBtn.setAttribute("aria-label", "Pause");
+  stage.classList.add("is-playing");
 });
 audio.addEventListener("pause", () => {
   toggleBtn.textContent = "▶";
   toggleBtn.setAttribute("aria-label", "Lecture");
+  stage.classList.remove("is-playing");
 });
 audio.addEventListener("loadedmetadata", () => {
   durEl.textContent = formatTime(audio.duration);
@@ -286,46 +297,52 @@ seekEl.addEventListener("input", () => {
   audio.currentTime = (Number(seekEl.value) / 1000) * audio.duration;
 });
 
-/* ------------------------------ Démarrage ------------------------------ */
+for (const button of document.querySelectorAll(".tabs button")) {
+  button.addEventListener("click", () => {
+    if (button.dataset.tab === "playing" && currentIndex < 0) {
+      say("aucun morceau en lecture");
+      return;
+    }
+    showView(button.dataset.tab);
+  });
+}
 
-async function start() {
-  // Le sélecteur doit répondre même si le stockage ne fonctionne pas.
-  render();
-  say("prêt");
+/* ------------------------------ Réglages ------------------------------ */
+
+const SYNC_KEY = "benten-sync";
+const syncHost = $("syncHost");
+const syncToken = $("syncToken");
+const syncLimit = $("syncLimit");
+const syncRun = $("syncRun");
+const syncTest = $("syncTest");
+
+function syncSettings() {
   try {
-    tracks = await loadTracks();
-    persistent = true;
-    render();
-    say(tracks.length === 0 ? "prêt — importe tes morceaux" : `${tracks.length} morceau(x) sur l'appareil`);
-  } catch (error) {
-    persistent = false;
-    fail("stockage local", error);
-    say("stockage local indisponible — import possible, mais perdu à la fermeture", "error");
-  }
-
-  // Service worker : hors-ligne une fois installée. Son échec (HTTP sans TLS) n'empêche rien.
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch((error) => {
-      console.warn("[benten] service worker non enregistré", error);
-    });
+    return JSON.parse(localStorage.getItem(SYNC_KEY) ?? "{}");
+  } catch {
+    return {};
   }
 }
 
-/* -------------------------------- Réglages -------------------------------- */
-
-const sheet = $("sheet");
-const sheetInfo = $("sheetInfo");
-const shuffleBtn = $("shuffle");
-const clearBtn = $("clear");
+function saveSyncSettings(host, token, limit) {
+  try {
+    localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token, limit }));
+  } catch (error) {
+    console.warn("[benten] réglages de synchro non enregistrés", error);
+  }
+}
 
 function refreshSheet() {
   if (!sheet) return;
   for (const button of sheet.querySelectorAll("[data-repeat]")) {
     button.setAttribute("aria-pressed", String(button.dataset.repeat === repeatMode));
   }
+  const shuffleBtn = $("shuffle");
   if (shuffleBtn) shuffleBtn.setAttribute("aria-pressed", String(shuffle));
   if (sheetInfo) {
-    sheetInfo.textContent = `${tracks.length} morceau(x) · stockage ${persistent ? "sur l'appareil" : "en mémoire (temporaire)"}`;
+    sheetInfo.textContent = `v${VERSION} · ${tracks.length} morceau(x) · stockage ${
+      persistent ? "sur l'appareil" : "en mémoire"
+    }`;
   }
 }
 
@@ -338,10 +355,16 @@ function closeSheet() {
   if (sheet) sheet.hidden = true;
 }
 
+function syncTargets() {
+  const host = (syncHost?.value ?? "").trim().replace(/\/+$/, "");
+  const token = (syncToken?.value ?? "").trim();
+  return { host, token };
+}
+
 $("settingsOpen")?.addEventListener("click", openSheet);
 $("sheetClose")?.addEventListener("click", closeSheet);
 sheet?.addEventListener("click", (event) => {
-  if (event.target === sheet) closeSheet(); // toucher le fond ferme la feuille
+  if (event.target === sheet) closeSheet();
 });
 
 for (const button of sheet?.querySelectorAll("[data-repeat]") ?? []) {
@@ -351,13 +374,13 @@ for (const button of sheet?.querySelectorAll("[data-repeat]") ?? []) {
   });
 }
 
-shuffleBtn?.addEventListener("click", () => {
+$("shuffle")?.addEventListener("click", () => {
   shuffle = !shuffle;
   buildOrder();
   refreshSheet();
 });
 
-clearBtn?.addEventListener("click", async () => {
+$("clear")?.addEventListener("click", async () => {
   tracks = [];
   currentIndex = -1;
   audio.pause();
@@ -379,113 +402,118 @@ clearBtn?.addEventListener("click", async () => {
   say("bibliothèque vidée");
 });
 
-/* ------------------------------ Synchronisation ------------------------------ */
-
-/**
- * Récupère depuis le PC les morceaux absents du téléphone.
- *
- * Le PC doit être allumé et Benten ouvert ; l'adresse et le jeton sont affichés dans ses Réglages.
- * Sans ce mécanisme, un iPhone ne peut RIEN récupérer tout seul : iOS interdit à une app de lancer
- * yt-dlp ou d'écrire où que ce soit hors de son bac à sable.
- */
-const SYNC_KEY = "benten-sync";
-
-function syncSettings() {
-  try {
-    return JSON.parse(localStorage.getItem(SYNC_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveSyncSettings(host, token, limit) {
-  // écriture best-effort : un stockage refusé (navigation privée) ne doit pas bloquer le reste
-  try {
-    localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token, limit }));
-  } catch (error) {
-    console.warn("[benten] reglages de synchro non enregistres", error);
-  }
-}
-
-const syncHost = $("syncHost");
-const syncToken = $("syncToken");
-const syncRun = $("syncRun");
-const syncLimit = $("syncLimit");
-
-if (syncHost && syncToken) {
-  const saved = syncSettings();
-  if (saved.host) syncHost.value = saved.host;
-  if (saved.token) syncToken.value = saved.token;
-  if (saved.limit && syncLimit) syncLimit.value = String(saved.limit);
-}
-
-syncRun?.addEventListener("click", () => {
-  // Enveloppe TOTALE : la moindre exception doit s'afficher, jamais laisser le bouton muet.
+/** Test de connexion : affiche le code HTTP ou l'erreur exacte, sans rien télécharger. */
+syncTest?.addEventListener("click", () => {
   void (async () => {
-  try {
-  const host = (syncHost?.value ?? "").trim().replace(/\/+$/, "");
-  const token = (syncToken?.value ?? "").trim();
-  if (!host || !token) {
-    say("renseigne l'adresse et le jeton du PC", "error");
-    return;
-  }
-  // Pas de plafond arbitraire : si l'utilisateur a la place, il a le droit. Vide = tout.
-  const rawLimit = Number(syncLimit?.value);
-  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(5000, Math.floor(rawLimit)) : 5000;
-  saveSyncSettings(host, token, limit);
-  syncRun.disabled = true;
-  {
-    say("connexion au PC…");
-    const response = await fetch(`${host}/api/library?token=${encodeURIComponent(token)}`);
-    if (!response.ok) throw new Error(`le PC a répondu ${response.status} (jeton ou adresse ?)`);
-    const payload = await response.json();
-    const remote = Array.isArray(payload.tracks) ? payload.tracks : [];
-    const known = new Set(tracks.map((track) => track.id));
-    const all = remote.filter((item) => !known.has(`pc:${item.id}`));
-    const missing = all.slice(0, limit);
-    const planned = missing.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0);
-    say(`${missing.length} morceau(x) à récupérer (~${(planned / 1048576).toFixed(0)} Mo), ${all.length} disponible(s)`);
-    let added = 0;
-    for (const item of missing) {
-      const audioResponse = await fetch(`${host}${item.audio}`);
-      if (!audioResponse.ok) continue;
-      const blob = await audioResponse.blob();
-      const record = {
-        id: `pc:${item.id}`,
-        title: item.title,
-        artist: item.artist,
-        blob,
-        addedAt: Date.now(),
-      };
-      try {
-        if (persistent) await saveTrack(record);
-        tracks = [...tracks.filter((track) => track.id !== record.id), record];
-        added += 1;
-      } catch (error) {
-        fail("enregistrement", error);
-      }
-      say(`${added}/${missing.length} récupéré(s)…`);
+    const { host, token } = syncTargets();
+    try {
+      if (!host) throw new Error("adresse vide");
+      if (!token) throw new Error("jeton vide");
+      syncInfo.textContent = "test en cours…";
+      const response = await fetch(`${host}/api/library?token=${encodeURIComponent(token)}`);
+      if (response.status === 403) throw new Error("jeton refusé par le PC (403)");
+      if (!response.ok) throw new Error(`le PC a répondu ${response.status}`);
+      const payload = await response.json();
+      const count = Array.isArray(payload.tracks) ? payload.tracks.length : 0;
+      syncInfo.textContent = `connexion OK — ${count} morceau(x) sur le PC`;
+    } catch (error) {
+      syncInfo.textContent = `échec : ${error instanceof Error ? error.message : String(error)}`;
     }
-    buildOrder();
-    render();
-    refreshSheet();
-    say(added === 0 ? "rien de nouveau sur le PC" : `${added} morceau(x) récupéré(s)`);
-  }
-  } catch (error) {
-    fail("synchronisation", error);
-  } finally {
-    if (syncRun) syncRun.disabled = false;
-  }
   })();
 });
 
+syncRun?.addEventListener("click", () => {
+  void (async () => {
+    try {
+      const { host, token } = syncTargets();
+      if (!host || !token) {
+        syncInfo.textContent = "adresse et jeton obligatoires";
+        say("renseigne l'adresse ET le jeton du PC", "error");
+        return;
+      }
+      const rawLimit = Number(syncLimit?.value);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(5000, Math.floor(rawLimit)) : 5000;
+      saveSyncSettings(host, token, limit);
+      if (syncRun) syncRun.disabled = true;
+      syncInfo.textContent = "récupération de la liste…";
+      const response = await fetch(`${host}/api/library?token=${encodeURIComponent(token)}`);
+      if (!response.ok) throw new Error(`le PC a répondu ${response.status}`);
+      const payload = await response.json();
+      const remote = Array.isArray(payload.tracks) ? payload.tracks : [];
+      const known = new Set(tracks.map((track) => track.id));
+      const missingAll = remote.filter((item) => !known.has(`pc:${item.id}`));
+      const missing = missingAll.slice(0, limit);
+      const planned = missing.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0);
+      syncInfo.textContent = `${missing.length} à récupérer (~${(planned / 1048576).toFixed(0)} Mo) sur ${missingAll.length}`;
+      let added = 0;
+      for (const item of missing) {
+        const audioResponse = await fetch(`${host}${item.audio}`);
+        if (!audioResponse.ok) continue;
+        const blob = await audioResponse.blob();
+        const record = {
+          id: `pc:${item.id}`,
+          title: item.title,
+          artist: item.artist,
+          blob,
+          addedAt: Date.now(),
+          durationSec: item.durationSec,
+        };
+        try {
+          if (persistent) await saveTrack(record);
+        } catch (error) {
+          persistent = false;
+          fail("enregistrement", error);
+        }
+        tracks = [...tracks.filter((track) => track.id !== record.id), record];
+        added += 1;
+        syncInfo.textContent = `${added}/${missing.length} récupéré(s)…`;
+      }
+      buildOrder();
+      render();
+      refreshSheet();
+      syncInfo.textContent = `${added} morceau(x) récupéré(s)`;
+      say(added === 0 ? "rien de nouveau sur le PC" : `${added} morceau(x) récupéré(s)`);
+    } catch (error) {
+      syncInfo.textContent = `échec : ${error instanceof Error ? error.message : String(error)}`;
+      fail("synchronisation", error);
+    } finally {
+      if (syncRun) syncRun.disabled = false;
+    }
+  })();
+});
+
+/* ------------------------------ Démarrage ------------------------------ */
+
+async function start() {
+  render();
+  say("prêt");
+  const saved = syncSettings();
+  if (saved.host && syncHost) syncHost.value = saved.host;
+  if (saved.token && syncToken) syncToken.value = saved.token;
+  if (saved.limit && syncLimit) syncLimit.value = String(saved.limit);
+  showView("library");
+  try {
+    tracks = await loadTracks();
+    persistent = true;
+    buildOrder();
+    render();
+    say(tracks.length === 0 ? `prêt — v${VERSION}` : `${tracks.length} morceau(x) · v${VERSION}`);
+  } catch (error) {
+    persistent = false;
+    fail("stockage local", error);
+    say("stockage indisponible — import possible, mais perdu à la fermeture", "error");
+  }
+  // Service worker : uniquement dans la PWA (page servie par le PC). Dans l'app native
+  // (Capacitor, protocole `capacitor:`), les fichiers sont déjà embarqués : un service worker
+  // n'y apporte rien et peut servir une ANCIENNE version — c'est exactement le piège qui a
+  // rendu l'app muette après une mise à jour.
+  const isNativeShell = location.protocol === "capacitor:" || typeof window.Capacitor !== "undefined";
+  if ("serviceWorker" in navigator && !isNativeShell) {
+    navigator.serviceWorker.register("./sw.js").catch((error) => {
+      console.warn("[benten] service worker non enregistré", error);
+    });
+  }
+}
+
 start().catch((error) => fail("démarrage", error));
-
-
-
-
-
-
-
-
 
