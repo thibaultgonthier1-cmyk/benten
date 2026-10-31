@@ -514,3 +514,32 @@ body {
 [hidden] {
   display: none !important;
 }
+
+/* Bandeau « ajouter à l'écran d'accueil » : discret, refermable, seulement dans Safari. */
+.install-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(212, 170, 80, 0.1);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.install-banner b {
+  color: var(--accent);
+}
+
+.install-banner button {
+  margin-left: auto;
+  min-width: 34px;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  font-size: 15px;
+}

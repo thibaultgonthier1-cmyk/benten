@@ -29,6 +29,12 @@
       </div>
     </header>
 
+    <!-- Bandeau d'installation : visible uniquement dans Safari, avant l'ajout à l'écran d'accueil. -->
+    <div id="install" class="install-banner" hidden>
+      <span>Pour avoir l'app sur l'écran d'accueil : <b>Partager</b> ▸ <b>Sur l'écran d'accueil</b></span>
+      <button id="installClose" type="button" aria-label="Masquer">✕</button>
+    </div>
+
     <p id="status" class="status" role="status">chargement…</p>
 
     <nav class="tabs" aria-label="Sections">
@@ -102,4 +108,5 @@
     <script src="./app.js"></script>
   </body>
 </html>
+
 

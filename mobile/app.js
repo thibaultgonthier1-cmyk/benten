@@ -14,7 +14,7 @@
 const DB_NAME = "benten-mobile";
 const DB_STORE = "tracks";
 const DB_VERSION = 1;
-const VERSION = "1.6.0"; // affichée dans les réglages : permet de vérifier la version installée
+const VERSION = "1.7.0"; // affichée dans les réglages : permet de vérifier la version installée
 
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -530,6 +530,18 @@ async function start() {
     );
   }
 
+  // Bandeau d'installation : uniquement dans Safari, et seulement si l'app n'est pas déjà
+  // installée sur l'écran d'accueil (mode standalone).
+  const installBanner = $("install");
+  const alreadyInstalled =
+    window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+  if (installBanner && !isNativeShell && !alreadyInstalled) {
+    installBanner.hidden = false;
+    $("installClose")?.addEventListener("click", () => {
+      installBanner.hidden = true;
+    });
+  }
+
   if ("serviceWorker" in navigator && !isNativeShell) {
     navigator.serviceWorker.register("./sw.js").catch((error) => {
       console.warn("[benten] service worker non enregistré", error);
@@ -538,6 +550,7 @@ async function start() {
 }
 
 start().catch((error) => fail("démarrage", error));
+
 
 
 
