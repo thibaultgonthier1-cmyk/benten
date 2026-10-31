@@ -15,6 +15,9 @@ struct Track: Identifiable, Codable, Equatable {
     var artworkName: String?    // nom du PNG dans Documents/Artwork
     var duration: Double
     var addedAt: Date
+    /// Identifiant du morceau sur le PC (nil pour un import local) : évite de récupérer deux fois
+    /// le même titre.
+    var remoteID: Int?
 
     var fileURL: URL { Library.audioDirectory.appendingPathComponent(fileName) }
     var artworkURL: URL? {
@@ -23,7 +26,8 @@ struct Track: Identifiable, Codable, Equatable {
     }
 }
 
-/// Bibliothèque : import depuis Fichiers / iCloud, métadonnées, pochettes, persistance.
+/// Bibliothèque : import depuis Fichiers / iCloud, récupération depuis le PC, métadonnées,
+/// pochettes, persistance.
 @MainActor
 final class Library: ObservableObject {
     static let audioDirectory = documents.appendingPathComponent("Audio", isDirectory: true)
@@ -64,12 +68,9 @@ final class Library: ObservableObject {
         }
     }
 
-    // MARK: - Import
+    // MARK: - Import depuis Fichiers / iCloud
 
     /// Importe des fichiers choisis dans Fichiers / iCloud.
-    ///
-    /// Chaque fichier est copié, ses métadonnées lues (titre, artiste, album, pochette), puis il est
-    /// ajouté à la bibliothèque. Un fichier illisible est ignoré sans interrompre les autres.
     func importFiles(_ urls: [URL]) async {
         importing = true
         defer { importing = false }
@@ -79,6 +80,7 @@ final class Library: ObservableObject {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
             let identifier = UUID()
+            // On GARDE l'extension d'origine : AVFoundation s'en sert pour choisir le décodeur.
             let ext = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
             let fileName = "\(identifier.uuidString).\(ext)"
             let destination = Self.audioDirectory.appendingPathComponent(fileName)
@@ -93,25 +95,90 @@ final class Library: ObservableObject {
                 continue
             }
 
-            let asset = AVURLAsset(url: destination)
-            let duration = (try? await asset.load(.duration)).map { CMTimeGetSeconds($0) } ?? 0
-            let metadata = await Self.readMetadata(asset: asset)
-            let artworkName = await Self.extractArtwork(asset: asset, identifier: identifier)
-
-            tracks.append(
-                Track(
-                    id: identifier,
-                    title: metadata.title ?? url.deletingPathExtension().lastPathComponent,
-                    artist: metadata.artist ?? "Artiste inconnu",
-                    album: metadata.album ?? "Album inconnu",
-                    fileName: fileName,
-                    artworkName: artworkName,
-                    duration: duration.isFinite ? duration : 0,
-                    addedAt: Date()
-                )
+            await register(
+                fileName: fileName,
+                identifier: identifier,
+                remoteID: nil,
+                fallbackTitle: url.deletingPathExtension().lastPathComponent
             )
-            save()
         }
+    }
+
+    // MARK: - Récupération depuis le PC
+
+    /// Adopte un fichier téléchargé depuis le PC.
+    ///
+    /// Le flux ne porte pas de nom : on écrit un fichier temporaire, on laisse AVFoundation
+    /// identifier le format réel, puis on renomme avec la bonne extension.
+    func adopt(data: Data, remote: Int, fallbackTitle: String, fallbackArtist: String) async {
+        guard !tracks.contains(where: { $0.remoteID == remote }) else { return }
+        let identifier = UUID()
+        let temporary = Self.audioDirectory.appendingPathComponent("\(identifier.uuidString).incoming")
+        do {
+            try data.write(to: temporary, options: .atomic)
+        } catch {
+            lastError = "écriture impossible : \(error.localizedDescription)"
+            return
+        }
+
+        let ext = await Self.detectExtension(at: temporary)
+        let fileName = "\(identifier.uuidString).\(ext)"
+        let destination = Self.audioDirectory.appendingPathComponent(fileName)
+        try? FileManager.default.moveItem(at: temporary, to: destination)
+
+        await register(
+            fileName: fileName,
+            identifier: identifier,
+            remoteID: remote,
+            fallbackTitle: fallbackTitle,
+            fallbackArtist: fallbackArtist
+        )
+    }
+
+    /// Devine l'extension à partir du type réel du flux (mp3, m4a, flac…).
+    private static func detectExtension(at url: URL) async -> String {
+        let asset = AVURLAsset(url: url)
+        guard let tracks = try? await asset.load(.tracks), let track = tracks.first,
+              let formats = try? await track.load(.formatDescriptions),
+              let format = formats.first
+        else { return "m4a" }
+        switch format.mediaSubType {
+        case kAudioFormatMPEGLayer3: return "mp3"
+        case kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatAppleLossless: return "m4a"
+        case kAudioFormatFLAC: return "flac"
+        case kAudioFormatOpus: return "opus"
+        default: return "m4a"
+        }
+    }
+
+    /// Enregistre un fichier déjà présent dans Documents/Audio : métadonnées, pochette, index.
+    private func register(
+        fileName: String,
+        identifier: UUID,
+        remoteID: Int?,
+        fallbackTitle: String,
+        fallbackArtist: String = "Artiste inconnu"
+    ) async {
+        let url = Self.audioDirectory.appendingPathComponent(fileName)
+        let asset = AVURLAsset(url: url)
+        let seconds = (try? await asset.load(.duration)).map { CMTimeGetSeconds($0) } ?? 0
+        let metadata = await Self.readMetadata(asset: asset)
+        let artworkName = await Self.extractArtwork(asset: asset, identifier: identifier)
+
+        tracks.append(
+            Track(
+                id: identifier,
+                title: metadata.title ?? fallbackTitle,
+                artist: metadata.artist ?? fallbackArtist,
+                album: metadata.album ?? "Album inconnu",
+                fileName: fileName,
+                artworkName: artworkName,
+                duration: seconds.isFinite ? max(0, seconds) : 0,
+                addedAt: Date(),
+                remoteID: remoteID
+            )
+        )
+        save()
     }
 
     private struct Metadata {

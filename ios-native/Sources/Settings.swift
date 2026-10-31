@@ -46,6 +46,11 @@ struct SettingsView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @State private var confirmDelete = false
+    @StateObject private var sync = SyncService()
+    // Adresse et jeton mémorisés entre deux lancements : on ne les retape pas.
+    @AppStorage("sync.base") private var syncBase = ""
+    @AppStorage("sync.token") private var syncToken = ""
+    @AppStorage("sync.limit") private var syncLimit = 100
 
     var body: some View {
         NavigationStack {
@@ -64,6 +69,38 @@ struct SettingsView: View {
                             .font(.subheadline)
                         Slider(value: $player.crossfade, in: 0...12, step: 1)
                             .tint(Palette.gold)
+                    }
+                }
+
+                Section("Synchroniser avec le PC") {
+                    // Le PC doit être allumé, sur le même Wi-Fi, Benten ouvert. L'adresse et le
+                    // jeton sont affichés dans les Réglages de l'app PC.
+                    TextField("http://192.168.1.10:4321", text: $syncBase)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    SecureField("jeton du PC", text: $syncToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Stepper("Morceaux à récupérer : \(syncLimit)", value: $syncLimit, in: 1...5000, step: 50)
+
+                    Button {
+                        Task {
+                            await sync.run(base: syncBase, token: syncToken, limit: syncLimit, library: library)
+                        }
+                    } label: {
+                        Label(sync.running ? "Récupération…" : "Récupérer depuis le PC", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(sync.running)
+
+                    if sync.running {
+                        ProgressView(value: sync.progress)
+                            .tint(Palette.gold)
+                    }
+                    if !sync.status.isEmpty {
+                        Text(sync.status)
+                            .font(.footnote)
+                            .foregroundStyle(sync.status.localizedCaseInsensitiveContains("récupéré") ? .green : .secondary)
                     }
                 }
 
@@ -110,3 +147,4 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
