@@ -335,6 +335,8 @@ export function registerDiagnosticsIpc(writer: JournalWriter, versions: Diagnost
 export interface IpcHooks {
   /** Adresse de l'app mobile sur le réseau local (serveur `mobile/`). */
   mobileUrl?: () => string | null;
+  /** Jeton exigé par l'API de synchronisation du serveur mobile. */
+  mobileToken?: () => string | null;
   /** Appelé après qu'un scan a (potentiellement) ajouté une source persistée. */
   onSourcesChanged?: () => void;
   /** Apple Music : prérequis, aperçu d'une playlist, téléchargement. Absent dans les tests. */
@@ -367,6 +369,11 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
   ipcMain.handle(CHANNELS.MOBILE_URL, (event) => {
     assertTrusted(event);
     return hooks?.mobileUrl?.() ?? null;
+  });
+
+  ipcMain.handle(CHANNELS.MOBILE_TOKEN, (event) => {
+    assertTrusted(event);
+    return hooks?.mobileToken?.() ?? null;
   });
 
   ipcMain.handle(CHANNELS.APPLE_STATUS, (event) => {
@@ -665,6 +672,8 @@ export function registerIpc(db: Database.Database, hooks?: IpcHooks): void {
     setState(db, key, value);
   });
 }
+
+
 
 
 

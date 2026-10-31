@@ -2,6 +2,8 @@ import { createServer, type Server } from "node:http";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { extname, join, normalize } from "node:path";
+import { createReadStream as openAudio } from "node:fs";
+import { isValidToken } from "./library/mobileToken";
 
 /**
  * Serveur de l'app mobile, sur le réseau local.
@@ -31,6 +33,22 @@ const TYPES: Readonly<Record<string, string>> = {
 
 let server: Server | null = null;
 
+/**
+ * Source de la bibliothèque pour la synchronisation : renvoie les morceaux indexés (identifiant,
+ * titre, artiste, durée, chemin). Branché par le Main après ouverture de la base — le serveur ne
+ * connaît pas SQLite, il ne fait que transporter.
+ */
+export interface MobileLibraryApi {
+  list(): { id: number; title: string; artist: string; album: string; durationSec: number; path: string }[];
+}
+
+let libraryApi: MobileLibraryApi | null = null;
+
+/** Branche la bibliothèque (appelé une fois la base ouverte). */
+export function bindMobileLibrary(api: MobileLibraryApi): void {
+  libraryApi = api;
+}
+
 /** Adresse IPv4 de la machine sur le réseau local, ou `null` si aucune interface active. */
 export function lanAddress(): string | null {
   for (const entries of Object.values(networkInterfaces())) {
@@ -59,7 +77,53 @@ export function startMobileServer(): void {
     return;
   }
   server = createServer((request, response) => {
-    const rawPath = (request.url ?? "/").split("?")[0] ?? "/";
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    const rawPath = url.pathname;
+
+    // --- API de synchronisation (jeton obligatoire) -------------------------------------------
+    // Sans jeton, n'importe qui sur le Wi-Fi pourrait aspirer la bibliothèque : il est exigé sur
+    // chaque requête et comparé à temps constant.
+    if (rawPath === "/api/library" || rawPath.startsWith("/api/audio/")) {
+      if (!isValidToken(url.searchParams.get("token"))) {
+        response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "jeton invalide" }));
+        return;
+      }
+      if (rawPath === "/api/library") {
+        let source: ReturnType<NonNullable<typeof libraryApi>["list"]> = [];
+        try {
+          source = libraryApi?.list() ?? [];
+        } catch (error) {
+          // Une erreur de requête ne doit JAMAIS laisser la requête pendre : on répond 500.
+          response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: error instanceof Error ? error.message : "erreur" }));
+          return;
+        }
+        const items = source.map(({ path, ...rest }) => ({
+          ...rest,
+          // L'URL de téléchargement est fournie prête à l'emploi : le téléphone n'a rien à deviner.
+          audio: `/api/audio/${rest.id}?token=${url.searchParams.get("token")}`,
+        }));
+        response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        response.end(JSON.stringify({ tracks: items }));
+        return;
+      }
+      const id = Number(rawPath.slice("/api/audio/".length));
+      const track = (libraryApi?.list() ?? []).find((item) => item.id === id);
+      if (!track || !existsSync(track.path)) {
+        response.writeHead(404, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "morceau introuvable" }));
+        return;
+      }
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": String(statSync(track.path).size),
+        "cache-control": "no-store",
+      });
+      openAudio(track.path).pipe(response);
+      return;
+    }
+
     // `normalize` + préfixe obligatoire : aucune remontée hors de `mobile/`.
     const rel = normalize(decodeURIComponent(rawPath === "/" ? "/index.html" : rawPath)).replace(/^([/\\])+/, "");
     const file = join(ROOT, rel);
@@ -89,3 +153,6 @@ export function stopMobileServer(): void {
   server?.close();
   server = null;
 }
+
+
+

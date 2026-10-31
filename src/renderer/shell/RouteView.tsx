@@ -252,11 +252,15 @@ function SettingsView(): JSX.Element {
  */
 function MobileCard(): JSX.Element {
   const [url, setUrl] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     void window.benten?.mobileUrl?.().then((value) => {
       if (alive) setUrl(value ?? null);
+    });
+    void window.benten?.mobileToken?.().then((value) => {
+      if (alive) setToken(value ?? null);
     });
     return () => {
       alive = false;
@@ -271,6 +275,10 @@ function MobileCard(): JSX.Element {
         d'accueil. Ensuite, l'app fonctionne seule, sans ordinateur allumé.
       </p>
       <p className="settings-url">{url ?? "adresse indisponible — l'app doit être ouverte sur le Wi-Fi"}</p>
+      <p className="settings-hint">
+        Jeton de synchronisation (à saisir une fois sur le téléphone, dans Réglages ▸ Synchroniser) :
+      </p>
+      <p className="settings-url settings-url--token">{token ?? "—"}</p>
       <p className="settings-hint">
         Sur iPhone, les morceaux s'importent depuis Fichiers ou iCloud : iOS interdit à toute app de
         parcourir un dossier.
@@ -366,6 +374,7 @@ function Onboarding(): JSX.Element {
     </section>
   );
 }
+
 
 
 

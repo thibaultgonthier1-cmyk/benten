@@ -251,6 +251,8 @@ export interface YoutubeStatusView {
 export interface BentenApi {
   /** Adresse de Benten Mobile sur le réseau local (`null` si le serveur est arrêté). */
   mobileUrl?(): Promise<string | null>;
+  /** Jeton à saisir sur le téléphone pour la synchronisation. */
+  mobileToken?(): Promise<string | null>;
   ping(): Promise<"pong">;
   library: {
     query(args: LibraryQueryArgs): Promise<LibraryQueryResult>;
@@ -370,6 +372,7 @@ declare global {
     benten: BentenApi;
   }
 }
+
 
 
 

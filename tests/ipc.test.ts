@@ -73,6 +73,7 @@ describe("registerIpc", () => {
       "audio:default-device",
       "audio:list-devices",
       "audio:read-file",
+      "benten:mobile-token",
       "benten:mobile-url",
       "dialog:pick-file",
       "dialog:pick-folder",

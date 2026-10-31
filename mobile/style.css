@@ -365,3 +365,30 @@ body {
   color: var(--text);
   font-size: 15px;
 }
+
+/* Bloc de synchronisation : champs empilés, lisibles au pouce. */
+.sheet__col {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.sheet__col input {
+  min-height: 42px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.sync {
+  min-height: 44px;
+  margin-top: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: rgba(212, 170, 80, 0.12);
+  color: var(--accent);
+  font-size: 13.5px;
+}

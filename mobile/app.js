@@ -379,7 +379,91 @@ clearBtn?.addEventListener("click", async () => {
   say("bibliothèque vidée");
 });
 
+/* ------------------------------ Synchronisation ------------------------------ */
+
+/**
+ * Récupère depuis le PC les morceaux absents du téléphone.
+ *
+ * Le PC doit être allumé et Benten ouvert ; l'adresse et le jeton sont affichés dans ses Réglages.
+ * Sans ce mécanisme, un iPhone ne peut RIEN récupérer tout seul : iOS interdit à une app de lancer
+ * yt-dlp ou d'écrire où que ce soit hors de son bac à sable.
+ */
+const SYNC_KEY = "benten-sync";
+
+function syncSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(SYNC_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveSyncSettings(host, token) {
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token }));
+}
+
+const syncHost = $("syncHost");
+const syncToken = $("syncToken");
+const syncRun = $("syncRun");
+
+if (syncHost && syncToken) {
+  const saved = syncSettings();
+  if (saved.host) syncHost.value = saved.host;
+  if (saved.token) syncToken.value = saved.token;
+}
+
+syncRun?.addEventListener("click", async () => {
+  const host = (syncHost?.value ?? "").trim().replace(/\/+$/, "");
+  const token = (syncToken?.value ?? "").trim();
+  if (!host || !token) {
+    say("renseigne l'adresse et le jeton du PC", "error");
+    return;
+  }
+  saveSyncSettings(host, token);
+  syncRun.disabled = true;
+  try {
+    say("connexion au PC…");
+    const response = await fetch(`${host}/api/library?token=${encodeURIComponent(token)}`);
+    if (!response.ok) throw new Error(`le PC a répondu ${response.status} (jeton ou adresse ?)`);
+    const payload = await response.json();
+    const remote = Array.isArray(payload.tracks) ? payload.tracks : [];
+    const known = new Set(tracks.map((track) => track.id));
+    const missing = remote.filter((item) => !known.has(`pc:${item.id}`));
+    say(`${missing.length} nouveau(x) sur ${remote.length} — récupération…`);
+    let added = 0;
+    for (const item of missing) {
+      const audioResponse = await fetch(`${host}${item.audio}`);
+      if (!audioResponse.ok) continue;
+      const blob = await audioResponse.blob();
+      const record = {
+        id: `pc:${item.id}`,
+        title: item.title,
+        artist: item.artist,
+        blob,
+        addedAt: Date.now(),
+      };
+      try {
+        if (persistent) await saveTrack(record);
+        tracks = [...tracks.filter((track) => track.id !== record.id), record];
+        added += 1;
+      } catch (error) {
+        fail("enregistrement", error);
+      }
+      say(`${added}/${missing.length} récupéré(s)…`);
+    }
+    buildOrder();
+    render();
+    refreshSheet();
+    say(added === 0 ? "rien de nouveau sur le PC" : `${added} morceau(x) récupéré(s)`);
+  } catch (error) {
+    fail("synchronisation", error);
+  } finally {
+    syncRun.disabled = false;
+  }
+});
+
 start().catch((error) => fail("démarrage", error));
+
 
 
 

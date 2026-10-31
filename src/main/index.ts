@@ -32,12 +32,14 @@ registerArtScheme();
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 // App mobile : un petit serveur local sert la page installable sur l'iPhone.
-import { mobileUrl, startMobileServer, stopMobileServer } from "./mobileServer";
+import { bindMobileLibrary, mobileUrl, startMobileServer, stopMobileServer } from "./mobileServer";
+import { ensureMobileToken, mobileToken, setMobileToken } from "./library/mobileToken";
 
 // Identité Windows : sans ça, la barre des tâches regroupe l'app sous « Electron » et
 // certaines fonctions (notifications, épinglage) l'attribuent au mauvais programme.
 app.setAppUserModelId("com.benten.player");
 startMobileServer();
+setMobileToken(ensureMobileToken(app.getPath("userData")));
 app.on("before-quit", () => stopMobileServer());
 
 // Harnais de vérification CDP : en dev uniquement, ouvre le port de debogage distant pour que
@@ -392,8 +394,28 @@ app.whenReady().then(() => {
     }
   }
 
+  // Synchronisation téléphone : le serveur mobile lit la bibliothèque par cette fonction.
+  bindMobileLibrary({
+    list: () =>
+      db
+        .prepare("select id, title, artist, album, duration_sec as durationSec, path from tracks where playable = 1 order by artist, album, title")
+        .all()
+        .map((raw) => {
+          const row = raw as { id: number; title: string; artist: string; album: string; durationSec: number; path: string };
+          return {
+            id: row.id,
+            title: row.title,
+            artist: row.artist,
+            album: row.album,
+            durationSec: row.durationSec,
+            path: row.path,
+          };
+        }),
+  });
+
   registerIpc(db, {
     mobileUrl: () => mobileUrl(),
+    mobileToken: () => mobileToken(),
     apple: {
       status: appleStatus,
       saveCookies: (text: string) => saveCookies(userData, text).then(() => appleStatus()),
@@ -519,6 +541,11 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
+
+
+
 
 
 
