@@ -421,7 +421,9 @@ syncRun?.addEventListener("click", async () => {
     say("renseigne l'adresse et le jeton du PC", "error");
     return;
   }
-  const limit = Math.max(1, Math.min(500, Number(syncLimit?.value) || 25));
+  // Pas de plafond arbitraire : si l'utilisateur a la place, il a le droit. Vide = tout.
+  const rawLimit = Number(syncLimit?.value);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(5000, Math.floor(rawLimit)) : 5000;
   saveSyncSettings(host, token, limit);
   syncRun.disabled = true;
   try {
@@ -468,6 +470,7 @@ syncRun?.addEventListener("click", async () => {
 });
 
 start().catch((error) => fail("démarrage", error));
+
 
 
 
