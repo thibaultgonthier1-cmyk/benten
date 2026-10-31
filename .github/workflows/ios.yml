@@ -50,6 +50,18 @@ jobs:
           if [ ! -d ios/App ]; then npx cap add ios; fi
           npx cap sync ios
 
+      - name: Autoriser le réseau local dans Info.plist
+        run: |
+          # Deux blocages iOS sans ça, et la synchronisation serait morte dans l'app :
+          #  - ATS refuse le HTTP en clair vers le PC (http://192.168.x.x) ;
+          #  - iOS 14+ exige une autorisation explicite « réseau local ».
+          # On autorise UNIQUEMENT le réseau local, pas tout le trafic non chiffré.
+          PLIST=ios/ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Benten se connecte a votre ordinateur sur le reseau local pour recuperer vos morceaux.'" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
+
       - name: Compiler (sans signature)
         working-directory: ios/ios/App
         run: |
@@ -84,3 +96,4 @@ jobs:
           path: out/benten-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+
