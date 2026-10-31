@@ -252,6 +252,33 @@ final class Library: ObservableObject {
         let tracks: [Track]
     }
 
+    /// Un artiste, avec ses albums et sa pochette de référence.
+    struct ArtistGroup: Identifiable {
+        let id: String
+        let name: String
+        let artworkTrack: Track
+        let albums: [AlbumGroup]
+        var trackCount: Int { albums.reduce(0) { $0 + $1.tracks.count } }
+    }
+
+    /// Artistes regroupés, triés par nom (comme la vue Artistes du PC).
+    var artists: [ArtistGroup] {
+        var buckets: [String: [AlbumGroup]] = [:]
+        for album in albums {
+            buckets[album.artist, default: []].append(album)
+        }
+        return buckets.map { name, list in
+            let reference = list.first(where: { $0.artworkTrack.artworkURL != nil })?.artworkTrack ?? list[0].artworkTrack
+            return ArtistGroup(id: name, name: name, artworkTrack: reference, albums: list)
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Morceaux à plat, triés par titre (comme la vue Titres du PC).
+    var tracksByTitle: [Track] {
+        tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
     /// Albums groupés (album + artiste), triés par ajout le plus récent.
     var albums: [AlbumGroup] {
         var buckets: [String: [Track]] = [:]
@@ -273,5 +300,6 @@ final class Library: ObservableObject {
         .sorted { ($0.tracks.last?.addedAt ?? .distantPast) > ($1.tracks.last?.addedAt ?? .distantPast) }
     }
 }
+
 
 

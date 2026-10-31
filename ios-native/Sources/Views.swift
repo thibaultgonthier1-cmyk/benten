@@ -6,8 +6,14 @@ struct LibraryView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var favorites: FavoritesStore
     @State private var showImporter = false
     @State private var openAlbum: Library.AlbumGroup?
+    @State private var openArtist: Library.ArtistGroup?
+    @State private var mode: BrowseMode = .albums
+
+    /// Trois façons de parcourir, comme les vues Albums / Artistes / Titres du PC.
+    enum BrowseMode: String, CaseIterable { case albums = "Albums", artists = "Artistes", tracks = "Titres" }
 
     // Colonnes calculées d'après l'écran réel : 2 sur SE/mini, 3 sur les autres iPhone,
     // 4-5 sur iPad. Les pochettes gardent ainsi des proportions correctes partout.
@@ -25,18 +31,56 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 18) {
                             header
 
-                            // Le PC affiche des POCHETTES D'ALBUM, pas des lignes de titres :
-                            // on regroupe donc par album + artiste, avec une pochette de référence.
-                            LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 6) {
-                                ForEach(library.albums) { album in
-                                    AlbumTileView(
-                                        album: album,
-                                        isPlaying: album.tracks.contains(where: { $0.id == player.current?.id })
-                                    ) {
-                                        player.play(album.tracks, startingAt: 0)
-                                        player.showFullScreen = true
-                                    } onOpen: {
-                                        openAlbum = album
+                            // Les trois vues du PC, dans le même écran.
+                            switch mode {
+                            case .albums:
+                                LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 6) {
+                                    ForEach(library.albums) { album in
+                                        AlbumTileView(
+                                            album: album,
+                                            isPlaying: album.tracks.contains(where: { $0.id == player.current?.id })
+                                        ) {
+                                            player.play(album.tracks, startingAt: 0)
+                                            player.showFullScreen = true
+                                        } onOpen: {
+                                            openAlbum = album
+                                        }
+                                    }
+                                }
+
+                            case .artists:
+                                LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 6) {
+                                    ForEach(library.artists) { artist in
+                                        ArtistTileView(
+                                            artist: artist,
+                                            isPlaying: artist.albums.contains { album in
+                                                album.tracks.contains(where: { $0.id == player.current?.id })
+                                            }
+                                        ) {
+                                            // Appui : on lit tous les morceaux de l'artiste.
+                                            let all = artist.albums.flatMap(\.tracks)
+                                            player.play(all, startingAt: 0)
+                                            player.showFullScreen = true
+                                        } onOpen: {
+                                            openArtist = artist
+                                        }
+                                    }
+                                }
+
+                            case .tracks:
+                                VStack(spacing: 2) {
+                                    ForEach(Array(library.tracksByTitle.enumerated()), id: \.element.id) { offset, track in
+                                        TrackRow(
+                                            track: track,
+                                            isCurrent: player.current?.id == track.id,
+                                            isFavorite: favorites.contains(track.id),
+                                            onPlay: {
+                                                player.play(library.tracksByTitle, startingAt: offset)
+                                                player.showFullScreen = true
+                                            },
+                                            onToggleFavorite: { favorites.toggle(track.id) }
+                                        )
+                                        Divider().overlay(Theme.hairline)
                                     }
                                 }
                             }
@@ -103,6 +147,9 @@ struct LibraryView: View {
             .sheet(item: $openAlbum) { album in
                 AlbumDetailView(album: album)
             }
+            .sheet(item: $openArtist) { artist in
+                ArtistDetailView(artist: artist)
+            }
             .alert("Impossible", isPresented: Binding(
                 get: { library.lastError != nil },
                 set: { if !$0 { library.lastError = nil } }
@@ -122,9 +169,18 @@ struct LibraryView: View {
                 .foregroundStyle(Theme.accent.opacity(0.75))
             Text("Ta bibliothèque,\nen local")
                 .serifTitle(30)
-            Text("\(library.tracks.count) morceau\(library.tracks.count > 1 ? "x" : "") · sur cet iPhone")
+            Text("\(library.tracks.count) morceau\(library.tracks.count > 1 ? "x" : "") · \(library.albums.count) album\(library.albums.count > 1 ? "s" : "") · sur cet iPhone")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.dim)
+
+            // Les trois vues du PC, dans un sélecteur compact.
+            Picker("Parcourir", selection: $mode) {
+                ForEach(BrowseMode.allCases, id: \.self) { value in
+                    Text(value.rawValue).tag(value)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.top, 6)
         }
         .padding(.top, 8)
     }
@@ -653,3 +709,163 @@ enum TimeFormatting {
     }
 }
 
+
+
+
+/// Tuile d'ARTISTE : sa pochette de référence, son nom, son nombre d'albums.
+struct ArtistTileView: View {
+    let artist: Library.ArtistGroup
+    let isPlaying: Bool
+    let onPlay: () -> Void
+    let onOpen: () -> Void
+    @State private var pressed = false
+
+    private var glow: Color { ArtworkCache.shared.tint(for: artist.artworkTrack) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: {
+                Haptics.tap()
+                onPlay()
+            }) {
+                ZStack {
+                    CoverGlow(color: glow, intensity: isPlaying ? 0.95 : 0.6)
+                    ArtworkView(track: artist.artworkTrack)
+                        // Les artistes sont ronds sur Apple Music : même repère visuel ici.
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(Theme.hairline))
+                }
+                .scaleEffect(pressed ? 0.955 : 1)
+                .animation(Motion.quick, value: pressed)
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in pressed = true }
+                    .onEnded { _ in pressed = false }
+            )
+
+            Button(action: {
+                Haptics.choose()
+                onOpen()
+            }) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(artist.name)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.ivory)
+                        .lineLimit(1)
+                    Text("\(artist.albums.count) album\(artist.albums.count > 1 ? "s" : "") · \(artist.trackCount) titre\(artist.trackCount > 1 ? "s" : "")")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.dim)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// Détail d'un artiste : ses albums, puis ses morceaux.
+struct ArtistDetailView: View {
+    let artist: Library.ArtistGroup
+    @EnvironmentObject private var player: Player
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AnimatedBackdrop()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(spacing: 10) {
+                            ArtworkView(track: artist.artworkTrack)
+                                .frame(width: 150, height: 150)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.6), radius: 18, y: 8)
+                            Text(artist.name)
+                                .font(.system(size: 22, design: .serif))
+                                .foregroundStyle(Theme.ivory)
+                                .multilineTextAlignment(.center)
+                            Button {
+                                Haptics.press()
+                                player.play(artist.albums.flatMap(\.tracks), startingAt: 0)
+                                dismiss()
+                            } label: {
+                                Label("Tout lire", systemImage: "play.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.ink)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 9)
+                                    .background(Capsule().fill(Theme.accentGradient))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 10)
+
+                        ForEach(artist.albums) { album in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 10) {
+                                    ArtworkView(track: album.artworkTrack)
+                                        .frame(width: 42, height: 42)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(album.title)
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(Theme.ivory)
+                                        Text("\(album.tracks.count) titre\(album.tracks.count > 1 ? "s" : "")")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Theme.dim)
+                                    }
+                                    Spacer()
+                                    Button {
+                                        Haptics.tap()
+                                        player.play(album.tracks, startingAt: 0)
+                                        dismiss()
+                                    } label: {
+                                        Image(systemName: "play.circle.fill")
+                                            .font(.system(size: 24))
+                                            .foregroundStyle(Theme.accent)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                ForEach(Array(album.tracks.enumerated()), id: \.element.id) { offset, track in
+                                    Button {
+                                        Haptics.tap()
+                                        player.play(album.tracks, startingAt: offset)
+                                        dismiss()
+                                    } label: {
+                                        HStack(spacing: 8) {
+                                            Text(track.title)
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(player.current?.id == track.id ? Theme.accent : Theme.ivory)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Text(TimeFormatting.short(track.duration))
+                                                .font(.system(size: 10.5, design: .monospaced))
+                                                .foregroundStyle(Theme.dim)
+                                        }
+                                        .contentShape(Rectangle())
+                                        .padding(.leading, 52)
+                                        .padding(.vertical, 5)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.bottom, 8)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 30)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }.foregroundStyle(Theme.accent)
+                }
+            }
+        }
+    }
+}
