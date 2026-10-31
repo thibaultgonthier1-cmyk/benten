@@ -321,6 +321,9 @@ final class Player: NSObject, ObservableObject {
 
     func next() {
         guard !queue.isEmpty else { return }
+        fading = false // une action manuelle annule un fondu en cours
+        pitchA.rate = 1
+        pitchB.rate = 1
         if repeatMode == .one {
             load(track: queue[queuePosition], at: 0)
             return
@@ -419,8 +422,11 @@ final class Player: NSObject, ObservableObject {
         activeFile = file
         current = incomingTrack
         queuePosition = nextIndex
-        startedAt = Date().addingTimeInterval(tempoRatio == 1 ? 0 : 0)
+        startedAt = Date()
         currentBPM = incomingBPM
+        // La DURÉE doit suivre : sans ça la barre de progression gardait la longueur du morceau
+        // précédent après un fondu, et le curseur se bloquait au mauvais endroit.
+        syncClock(0)
         updateNowPlaying()
 
         // --- Rampes : cos sur la sortante, sin sur l'entrante (somme des carrés = 1)
@@ -475,5 +481,7 @@ final class Player: NSObject, ObservableObject {
 
     var progress: Double { clock.progress }
 }
+
+
 
 
