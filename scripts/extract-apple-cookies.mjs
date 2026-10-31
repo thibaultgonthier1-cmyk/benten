@@ -29,8 +29,20 @@ const BROWSERS = {
   chrome: join(process.env.LOCALAPPDATA ?? "", "Google", "Chrome", "User Data"),
   edge: join(process.env.LOCALAPPDATA ?? "", "Microsoft", "Edge", "User Data"),
 };
-const DOMAINS = ["%.apple.com"];
-const OUT = join(process.env.APPDATA ?? "", "benten", "cookies.txt");
+/**
+ * Cibles prises en charge : Apple (import de playlist) et YouTube (téléchargements).
+ * L'app lit deux fichiers distincts, aux formats identiques.
+ */
+const TARGETS = {
+  apple: { pattern: "%.apple.com", out: "cookies.txt" },
+  youtube: { pattern: "%.youtube.com", out: "youtube-cookies.txt" },
+};
+const targetName = (() => {
+  const arg = process.argv.find((a) => a.startsWith("--target="));
+  return arg ? arg.slice("--target=".length) : "apple";
+})();
+const target = TARGETS[targetName] ?? TARGETS.apple;
+const OUT = join(process.env.APPDATA ?? "", "benten", target.out);
 
 /** Déchiffre une clé DPAPI via PowerShell (même compte utilisateur). */
 function unprotectDpapi(base64) {
@@ -90,9 +102,9 @@ function tryBrowser(name) {
   const rows = db
     .prepare(
       `select host_key, name, path, expires_utc, is_secure, is_httponly, encrypted_value, value
-         from cookies where host_key like ? or host_key like ?`,
+         from cookies where host_key like ?`,
     )
-    .all(...DOMAINS);
+    .all(target.pattern);
   db.close();
   rmSync(work, { recursive: true, force: true });
 
@@ -147,11 +159,13 @@ for (const name of wanted) {
     continue;
   }
   if (result.empty) {
-    console.log(`[${name}] aucun cookie Apple Music (connecte-toi à music.apple.com)`);
+    console.log(`[${name}] aucun cookie ${targetName} (connecte-toi d'abord)`);
     continue;
   }
-  console.log(`[${name}] ${result.kept} cookies Apple écrits dans ${result.out}`);
+  console.log(`[${name}] ${result.kept} cookies ${targetName} écrits dans ${result.out}`);
   process.exit(0);
 }
 console.log("aucun cookie extrait");
 process.exit(1);
+
+
