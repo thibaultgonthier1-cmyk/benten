@@ -5,7 +5,9 @@ options:
   # que le Xcode du runner ne sait pas ouvrir (« project file format (77) »).
   xcodeVersion: "15.4"
   deploymentTarget:
-    iOS: "15.0"
+    # iOS 16 : NavigationStack, LabeledContent et .topBarTrailing en dependent. Les iPhone
+    # concernes par AltStore tournent tous sous iOS 16 ou plus.
+    iOS: "16.0"
   createIntermediateGroups: true
 
 targets:
@@ -36,4 +38,5 @@ targets:
         # La synchronisation passe par http:// sur le réseau local : iOS exige cette exception.
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
         CODE_SIGNING_ALLOWED: NO
+
 
