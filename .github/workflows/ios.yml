@@ -63,6 +63,11 @@ jobs:
           # une IP privee dans une WebView Capacitor (erreur « Load failed »). On autorise donc
           # le HTTP en clair pour CETTE app seulement : elle ne parle qu au PC de l utilisateur.
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || true
+          # iOS n'affiche « Réseau local » dans Réglages QUE si l'app a déclenché une demande.
+          # Déclarer un service Bonjour force cette demande au premier lancement — c'est le
+          # seul moyen d'obtenir l'interrupteur quand la requête HTTP seule ne le déclenche pas.
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string _benten._tcp" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Benten se connecte a votre ordinateur sur le reseau local pour recuperer vos morceaux.'" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
 

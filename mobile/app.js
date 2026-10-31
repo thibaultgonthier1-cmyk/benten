@@ -14,7 +14,7 @@
 const DB_NAME = "benten-mobile";
 const DB_STORE = "tracks";
 const DB_VERSION = 1;
-const VERSION = "1.5.0"; // affichée dans les réglages : permet de vérifier la version installée
+const VERSION = "1.6.0"; // affichée dans les réglages : permet de vérifier la version installée
 
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -521,6 +521,15 @@ async function start() {
   // n'y apporte rien et peut servir une ANCIENNE version — c'est exactement le piège qui a
   // rendu l'app muette après une mise à jour.
   const isNativeShell = location.protocol === "capacitor:" || typeof window.Capacitor !== "undefined";
+  // iOS n'affiche l'interrupteur « Réseau local » qu'après une TENTATIVE d'accès local. On en fait
+  // une, silencieuse, dès le démarrage si une adresse est déjà enregistrée : la demande apparaît
+  // alors au premier lancement, au lieu d'attendre que l'utilisateur découvre le problème.
+  if (isNativeShell && saved.host) {
+    fetch(`${saved.host}/api/library?token=${encodeURIComponent(saved.token ?? "")}`, { method: "HEAD" }).catch(
+      () => undefined,
+    );
+  }
+
   if ("serviceWorker" in navigator && !isNativeShell) {
     navigator.serviceWorker.register("./sw.js").catch((error) => {
       console.warn("[benten] service worker non enregistré", error);
@@ -529,6 +538,7 @@ async function start() {
 }
 
 start().catch((error) => fail("démarrage", error));
+
 
 
 
