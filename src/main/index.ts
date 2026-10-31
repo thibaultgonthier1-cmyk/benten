@@ -398,16 +398,27 @@ app.whenReady().then(() => {
   bindMobileLibrary({
     list: () =>
       db
-        .prepare("select id, title, artist, album, duration_sec as durationSec, path from tracks where playable = 1 order by artist, album, title")
+        .prepare("select id, title, artist, album, duration_sec as durationSec, size_bytes as sizeBytes, added_at_ms as addedAt, path from tracks where playable = 1 order by added_at_ms desc")
         .all()
         .map((raw) => {
-          const row = raw as { id: number; title: string; artist: string; album: string; durationSec: number; path: string };
+          const row = raw as {
+            id: number;
+            title: string;
+            artist: string;
+            album: string;
+            durationSec: number;
+            sizeBytes: number | null;
+            addedAt: number | null;
+            path: string;
+          };
           return {
             id: row.id,
             title: row.title,
             artist: row.artist,
             album: row.album,
             durationSec: row.durationSec,
+            sizeBytes: row.sizeBytes ?? null,
+            addedAt: row.addedAt ?? null,
             path: row.path,
           };
         }),
@@ -541,6 +552,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
 
 
 

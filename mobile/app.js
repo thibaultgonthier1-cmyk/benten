@@ -398,18 +398,20 @@ function syncSettings() {
   }
 }
 
-function saveSyncSettings(host, token) {
-  localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token }));
+function saveSyncSettings(host, token, limit) {
+  localStorage.setItem(SYNC_KEY, JSON.stringify({ host, token, limit }));
 }
 
 const syncHost = $("syncHost");
 const syncToken = $("syncToken");
 const syncRun = $("syncRun");
+const syncLimit = $("syncLimit");
 
 if (syncHost && syncToken) {
   const saved = syncSettings();
   if (saved.host) syncHost.value = saved.host;
   if (saved.token) syncToken.value = saved.token;
+  if (saved.limit && syncLimit) syncLimit.value = String(saved.limit);
 }
 
 syncRun?.addEventListener("click", async () => {
@@ -419,7 +421,8 @@ syncRun?.addEventListener("click", async () => {
     say("renseigne l'adresse et le jeton du PC", "error");
     return;
   }
-  saveSyncSettings(host, token);
+  const limit = Math.max(1, Math.min(500, Number(syncLimit?.value) || 25));
+  saveSyncSettings(host, token, limit);
   syncRun.disabled = true;
   try {
     say("connexion au PC…");
@@ -428,8 +431,10 @@ syncRun?.addEventListener("click", async () => {
     const payload = await response.json();
     const remote = Array.isArray(payload.tracks) ? payload.tracks : [];
     const known = new Set(tracks.map((track) => track.id));
-    const missing = remote.filter((item) => !known.has(`pc:${item.id}`));
-    say(`${missing.length} nouveau(x) sur ${remote.length} — récupération…`);
+    const all = remote.filter((item) => !known.has(`pc:${item.id}`));
+    const missing = all.slice(0, limit);
+    const planned = missing.reduce((sum, item) => sum + (item.sizeBytes ?? 0), 0);
+    say(`${missing.length} morceau(x) à récupérer (~${(planned / 1048576).toFixed(0)} Mo), ${all.length} disponible(s)`);
     let added = 0;
     for (const item of missing) {
       const audioResponse = await fetch(`${host}${item.audio}`);
@@ -463,6 +468,8 @@ syncRun?.addEventListener("click", async () => {
 });
 
 start().catch((error) => fail("démarrage", error));
+
+
 
 
 

@@ -39,7 +39,16 @@ let server: Server | null = null;
  * connaît pas SQLite, il ne fait que transporter.
  */
 export interface MobileLibraryApi {
-  list(): { id: number; title: string; artist: string; album: string; durationSec: number; path: string }[];
+  list(): {
+    id: number;
+    title: string;
+    artist: string;
+    album: string;
+    durationSec: number;
+    sizeBytes: number | null;
+    addedAt: number | null;
+    path: string;
+  }[];
 }
 
 let libraryApi: MobileLibraryApi | null = null;
@@ -153,6 +162,7 @@ export function stopMobileServer(): void {
   server?.close();
   server = null;
 }
+
 
 
 
