@@ -1,6 +1,7 @@
 {
   "name": "benten",
   "version": "0.1.0",
+  "author": "Benten",
   "description": "Benten - desktop music player",
   "private": true,
   "main": "./out/main/index.js",
@@ -47,4 +48,5 @@
     "vitest": "5.0.5"
   }
 }
+
 
