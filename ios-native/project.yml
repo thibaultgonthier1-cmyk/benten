@@ -1,6 +1,9 @@
 name: Benten
 options:
   bundleIdPrefix: com.benten
+  # Format de projet compatible Xcode 15 : XcodeGen ecrit du format 77 (Xcode 16) par defaut,
+  # que le Xcode du runner ne sait pas ouvrir (« project file format (77) »).
+  xcodeVersion: "15.4"
   deploymentTarget:
     iOS: "15.0"
   createIntermediateGroups: true
@@ -33,3 +36,4 @@ targets:
         # La synchronisation passe par http:// sur le réseau local : iOS exige cette exception.
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
         CODE_SIGNING_ALLOWED: NO
+

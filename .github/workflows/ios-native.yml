@@ -23,7 +23,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 40
 
     steps:
@@ -74,4 +74,5 @@ jobs:
           path: out/benten-native-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+
 
