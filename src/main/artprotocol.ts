@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { app, nativeImage, protocol } from "electron";
 import { configureArtCache, DEFAULT_ART_SIZE, serveArt, type Resizer } from "./library/artcache";
+import { findContentBox } from "./library/artcrop";
 
 export const ART_SCHEME = "benten-art";
 
@@ -24,14 +25,23 @@ export function registerArtScheme(): void {
 
 /** Vignette JPEG via `nativeImage` ; `null` si l'image est illisible ou deja assez petite. */
 export const nativeImageResizer: Resizer = (data, size) => {
-  const img = nativeImage.createFromBuffer(data);
+  let img = nativeImage.createFromBuffer(data);
   if (img.isEmpty()) return null;
   const { width, height } = img.getSize();
-  if (Math.max(width, height) <= size) return null; // garder l'original tel quel
-  const scale = size / Math.max(width, height);
+
+  // Recadrage des pochettes à BANDES (visuels de clips, vignettes letterboxées) : sans ça la
+  // grille affiche deux bandes claires autour du visuel. Le calcul se fait sur les pixels déjà en
+  // mémoire — aucun outil externe, aucune requête.
+  const bitmap = img.toBitmap(); // Buffer BGRA : c'est la forme documentée pour lire les pixels
+  const box = bitmap && bitmap.length >= width * height * 4 ? findContentBox(bitmap, width, height) : null;
+  if (box) img = img.crop(box);
+
+  const cropped = img.getSize();
+  if (Math.max(cropped.width, cropped.height) <= size) return null; // garder l'original tel quel
+  const scale = size / Math.max(cropped.width, cropped.height);
   const out = img.resize({
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
+    width: Math.max(1, Math.round(cropped.width * scale)),
+    height: Math.max(1, Math.round(cropped.height * scale)),
     quality: "best",
   });
   return out.toJPEG(85);
@@ -58,5 +68,7 @@ export function registerArtProtocol(): void {
     serveArt(request.url, cacheDir, (artKey) => resolveArtSource?.(artKey) ?? null),
   );
 }
+
+
 
 
