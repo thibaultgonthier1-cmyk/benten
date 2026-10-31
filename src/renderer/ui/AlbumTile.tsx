@@ -66,10 +66,16 @@ function AlbumTileImpl({ album, playing, onPlay, onContextMenu, enterIndex = nul
     if (art) e.dataTransfer.setDragImage(art, art.offsetWidth / 2, art.offsetHeight / 2);
   };
 
-  const style =
-    enterIndex !== null && m.enabled
-      ? ({ "--enter-delay": `${Math.min(enterIndex, 24) * 28}ms` } as React.CSSProperties)
-      : undefined;
+  // Teinte propre à la pochette, exposée au CSS : elle sert de lueur derrière la tuile. C'est ce
+  // qui fait « fondre » la pochette dans le fond — le halo reprend sa couleur dominante, donc sa
+  // place dans la grille n'a plus l'air d'un rectangle posé sur du noir.
+  const style = {
+    "--cover-tint": known?.dominant ?? colors.dominant,
+    "--cover-glow": known?.vibrant ?? colors.vibrant,
+    ...(enterIndex !== null && m.enabled
+      ? { "--enter-delay": `${Math.min(enterIndex, 24) * 28}ms` }
+      : null),
+  } as React.CSSProperties;
 
   return (
     <div
@@ -100,7 +106,10 @@ function AlbumTileImpl({ album, playing, onPlay, onContextMenu, enterIndex = nul
       <div className="album-tile__lift">
         <span
           className="album-tile__glow"
-          style={{ background: known?.vibrant ?? "transparent" }}
+          // Le fond de la tuile sert de repli pendant le chargement de l'image : il doit être la
+          // teinte DOMINANTE assombrie, pas la teinte vive (qui peut être blanche et produire une
+          // bande claire autour de la pochette).
+          style={{ background: `color-mix(in srgb, ${known?.dominant ?? colors.dominant} 45%, #0a0908)` }}
           aria-hidden="true"
         />
         <motion.div
@@ -193,6 +202,9 @@ function TilePlayButton({
 }
 
 export const AlbumTile = memo(AlbumTileImpl);
+
+
+
 
 
 

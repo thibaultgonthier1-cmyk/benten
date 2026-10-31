@@ -581,3 +581,35 @@
     transform: none;
   }
 }
+
+/* Halo coloré derrière chaque pochette.
+   La teinte vient de l'image elle-même (`--cover-tint`), donc chaque tuile éclaire son propre bout
+   de grille : la pochette se fond dans le fond au lieu d'être un rectangle sur du noir.
+   Pas de `filter: blur()` — un dégradé radial est déjà doux et ne coûte rien en peinture. */
+.album-tile::before {
+  content: "";
+  position: absolute;
+  inset: -12% -10% -18%;
+  z-index: -1;
+  border-radius: 22px;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--cover-glow, var(--cover-tint, #000)) 42%, transparent) 0%,
+    color-mix(in srgb, var(--cover-tint, #000) 18%, transparent) 45%,
+    transparent 78%
+  );
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 260ms ease;
+}
+
+.album-tile:hover::before,
+.album-tile.is-playing::before {
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .album-tile::before {
+    transition: none;
+  }
+}
