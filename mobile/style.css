@@ -506,3 +506,11 @@ body {
     animation: none;
   }
 }
+
+/* PIÈGE CSS corrigé : `display: grid` sur .sheet écrasait l'attribut `hidden` du HTML — la feuille
+   de réglages s'affichait donc PAR-DESSUS l'app dès l'ouverture. En CSS, une règle `display` de
+   l'auteur l'emporte toujours sur le `display: none` que le navigateur applique à [hidden].
+   Cette règle globale remet l'attribut au-dessus de tout. */
+[hidden] {
+  display: none !important;
+}

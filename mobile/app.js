@@ -14,7 +14,7 @@
 const DB_NAME = "benten-mobile";
 const DB_STORE = "tracks";
 const DB_VERSION = 1;
-const VERSION = "1.4.0"; // affichée dans les réglages : permet de vérifier la version installée
+const VERSION = "1.5.0"; // affichée dans les réglages : permet de vérifier la version installée
 
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -529,6 +529,7 @@ async function start() {
 }
 
 start().catch((error) => fail("démarrage", error));
+
 
 
 
