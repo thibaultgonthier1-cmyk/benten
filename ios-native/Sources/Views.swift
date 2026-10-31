@@ -7,6 +7,7 @@ struct LibraryView: View {
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var router: AppRouter
     @State private var showImporter = false
+    @State private var openAlbum: Library.AlbumGroup?
 
     // Colonnes calculées d'après l'écran réel : 2 sur SE/mini, 3 sur les autres iPhone,
     // 4-5 sur iPad. Les pochettes gardent ainsi des proportions correctes partout.
@@ -24,18 +25,18 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 18) {
                             header
 
+                            // Le PC affiche des POCHETTES D'ALBUM, pas des lignes de titres :
+                            // on regroupe donc par album + artiste, avec une pochette de référence.
                             LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 6) {
-                                ForEach(Array(library.tracks.enumerated()), id: \.element.id) { offset, track in
-                                    AlbumTile(track: track, playing: player.current?.id == track.id) {
-                                        player.play(library.tracks, startingAt: offset)
+                                ForEach(library.albums) { album in
+                                    AlbumTileView(
+                                        album: album,
+                                        isPlaying: album.tracks.contains(where: { $0.id == player.current?.id })
+                                    ) {
+                                        player.play(album.tracks, startingAt: 0)
                                         player.showFullScreen = true
-                                    }
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            library.delete(track)
-                                        } label: {
-                                            Label("Supprimer", systemImage: "trash")
-                                        }
+                                    } onOpen: {
+                                        openAlbum = album
                                     }
                                 }
                             }
@@ -50,9 +51,9 @@ struct LibraryView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 8) {
                         Circle()
-                            .fill(Theme.goldGradient)
+                            .fill(Theme.accentGradient)
                             .frame(width: 26, height: 26)
-                            .shadow(color: Theme.gold.opacity(0.5), radius: 8)
+                            .shadow(color: Theme.accent.opacity(0.5), radius: 8)
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Benten")
                                 .font(.system(size: 18, design: .serif))
@@ -81,7 +82,7 @@ struct LibraryView: View {
                         } label: {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 22))
-                                .foregroundStyle(Theme.gold)
+                                .foregroundStyle(Theme.accent)
                         }
                     }
                 }
@@ -99,6 +100,9 @@ struct LibraryView: View {
                     library.lastError = error.localizedDescription
                 }
             }
+            .sheet(item: $openAlbum) { album in
+                AlbumDetailView(album: album)
+            }
             .alert("Impossible", isPresented: Binding(
                 get: { library.lastError != nil },
                 set: { if !$0 { library.lastError = nil } }
@@ -115,7 +119,7 @@ struct LibraryView: View {
             Text("今宵 · ce soir")
                 .font(.system(size: 11, weight: .medium))
                 .tracking(2.2)
-                .foregroundStyle(Theme.gold.opacity(0.75))
+                .foregroundStyle(Theme.accent.opacity(0.75))
             Text("Ta bibliothèque,\nen local")
                 .serifTitle(30)
             Text("\(library.tracks.count) morceau\(library.tracks.count > 1 ? "x" : "") · sur cet iPhone")
@@ -129,9 +133,9 @@ struct LibraryView: View {
         VStack(spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(Theme.goldGradient)
+                    .fill(Theme.accentGradient)
                     .frame(width: 78, height: 78)
-                    .shadow(color: Theme.gold.opacity(0.35), radius: 22)
+                    .shadow(color: Theme.accent.opacity(0.35), radius: 22)
                 Image(systemName: "music.note")
                     .font(.system(size: 30, weight: .light))
                     .foregroundStyle(Theme.ink)
@@ -175,7 +179,7 @@ struct AlbumTile: View {
                         .overlay(alignment: .bottomTrailing) {
                             if playing {
                                 Circle()
-                                    .fill(Theme.goldGradient)
+                                    .fill(Theme.accentGradient)
                                     .frame(width: 26, height: 26)
                                     .overlay(
                                         Image(systemName: "waveform")
@@ -220,7 +224,7 @@ struct ArtworkView: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                Theme.goldGradient
+                Theme.accentGradient
                     .overlay(
                         Image(systemName: "music.note")
                             .font(.system(size: 24, weight: .light))
@@ -261,13 +265,13 @@ struct MiniPlayer: View {
                     player.toggle()
                 } label: {
                     ZStack {
-                        Circle().fill(Theme.goldGradient)
+                        Circle().fill(Theme.accentGradient)
                         Image(systemName: player.playing ? "pause.fill" : "play.fill")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(Theme.ink)
                     }
                     .frame(width: 38, height: 38)
-                    .shadow(color: Theme.gold.opacity(0.45), radius: 10, y: 3)
+                    .shadow(color: Theme.accent.opacity(0.45), radius: 10, y: 3)
                 }
                 Button {
                     Haptics.tap()
@@ -345,7 +349,7 @@ struct NowPlayingView: View {
                             value: Binding(get: { clock.position }, set: { player.seek(to: $0) }),
                             in: 0...max(1, clock.duration)
                         )
-                        .tint(Theme.gold)
+                        .tint(Theme.accent)
 
                         HStack {
                             Text(clock.formatted(clock.position))
@@ -369,13 +373,13 @@ struct NowPlayingView: View {
                             player.toggle()
                         } label: {
                             ZStack {
-                                Circle().fill(Theme.goldGradient)
+                                Circle().fill(Theme.accentGradient)
                                 Image(systemName: player.playing ? "pause.fill" : "play.fill")
                                     .font(.system(size: 24, weight: .bold))
                                     .foregroundStyle(Theme.ink)
                             }
                             .frame(width: 68, height: 68)
-                            .shadow(color: Theme.gold.opacity(0.45), radius: 18, y: 6)
+                            .shadow(color: Theme.accent.opacity(0.45), radius: 18, y: 6)
                             .scaleEffect(player.playing && !reduceMotion ? 1.03 : 1)
                             .animation(reduceMotion ? nil : Motion.spring, value: player.playing)
                         }
@@ -396,7 +400,7 @@ struct NowPlayingView: View {
                         } label: {
                             Image(systemName: "shuffle")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(player.shuffle ? Theme.gold : Theme.dim)
+                                .foregroundStyle(player.shuffle ? Theme.accent : Theme.dim)
                         }
                         Button {
                             Haptics.choose()
@@ -408,7 +412,7 @@ struct NowPlayingView: View {
                         } label: {
                             Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(player.repeatMode == .off ? Theme.dim : Theme.gold)
+                                .foregroundStyle(player.repeatMode == .off ? Theme.dim : Theme.accent)
                         }
                     }
                     .padding(.top, 12)
@@ -443,5 +447,181 @@ struct NowPlayingView: View {
                     }
             )
         }
+    }
+}
+
+
+
+/// Tuile d'ALBUM : une pochette, un titre, un artiste, le nombre de morceaux.
+///
+/// Le PC présente la musique par album ; c'est aussi ce qui rend une bibliothèque lisible d'un coup
+/// d'œil, au lieu d'une liste de titres répétés par leur pochette.
+struct AlbumTileView: View {
+    let album: Library.AlbumGroup
+    let isPlaying: Bool
+    let onPlay: () -> Void
+    let onOpen: () -> Void
+    @State private var pressed = false
+
+    private var glow: Color { ArtworkCache.shared.tint(for: album.artworkTrack) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: {
+                Haptics.tap()
+                onPlay()
+            }) {
+                ZStack {
+                    CoverGlow(color: glow, intensity: isPlaying ? 0.95 : 0.6)
+                    ArtworkView(track: album.artworkTrack)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+                                .strokeBorder(Theme.hairline)
+                        )
+                        .overlay(alignment: .bottomTrailing) {
+                            if isPlaying {
+                                Circle()
+                                    .fill(Theme.accentGradient)
+                                    .frame(width: 26, height: 26)
+                                    .overlay(
+                                        Image(systemName: "waveform")
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(Theme.ink)
+                                    )
+                                    .padding(8)
+                            }
+                        }
+                }
+                .scaleEffect(pressed ? 0.955 : 1)
+                .animation(Motion.quick, value: pressed)
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in pressed = true }
+                    .onEnded { _ in pressed = false }
+            )
+
+            // Le titre ouvre l'album : appui court = lecture, appui sur le texte = liste des
+            // morceaux. Deux intentions distinctes, deux zones distinctes.
+            Button(action: {
+                Haptics.choose()
+                onOpen()
+            }) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(album.title)
+                        .font(.system(size: 13.5, weight: .medium))
+                        .foregroundStyle(Theme.ivory)
+                        .lineLimit(1)
+                    Text("\(album.artist) · \(album.tracks.count) titre\(album.tracks.count > 1 ? "s" : "")")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.dim)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// Liste des morceaux d'un album.
+struct AlbumDetailView: View {
+    let album: Library.AlbumGroup
+    @EnvironmentObject private var player: Player
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AnimatedBackdrop()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ArtworkView(track: album.artworkTrack)
+                            .frame(width: 180, height: 180)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: .black.opacity(0.6), radius: 20, y: 10)
+                            .padding(.top, 12)
+
+                        VStack(spacing: 3) {
+                            Text(album.title)
+                                .font(.system(size: 21, design: .serif))
+                                .foregroundStyle(Theme.ivory)
+                                .multilineTextAlignment(.center)
+                            Text(album.artist)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Theme.dim)
+                        }
+
+                        Button {
+                            Haptics.press()
+                            player.play(album.tracks, startingAt: 0)
+                            dismiss()
+                        } label: {
+                            Label("Lire l'album", systemImage: "play.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.ink)
+                                .padding(.horizontal, 22)
+                                .padding(.vertical, 11)
+                                .background(Capsule().fill(Theme.accentGradient))
+                        }
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(album.tracks.enumerated()), id: \.element.id) { offset, track in
+                                Button {
+                                    Haptics.tap()
+                                    player.play(album.tracks, startingAt: offset)
+                                    dismiss()
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text("\(offset + 1)")
+                                            .font(.system(size: 12, design: .monospaced))
+                                            .foregroundStyle(Theme.dim)
+                                            .frame(width: 22, alignment: .trailing)
+                                        Text(track.title)
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(player.current?.id == track.id ? Theme.accent : Theme.ivory)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 6)
+                                        Text(TimeFormatting.short(track.duration))
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundStyle(Theme.dim)
+                                    }
+                                    .padding(.vertical, 11)
+                                    .padding(.horizontal, 14)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Divider().overlay(Theme.hairline)
+                            }
+                        }
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Theme.ink2.opacity(0.6))
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 30)
+                    }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        }
+    }
+}
+
+/// Formatage des durées, partagé.
+enum TimeFormatting {
+    static func short(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

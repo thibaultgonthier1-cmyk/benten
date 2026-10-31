@@ -10,16 +10,22 @@ struct BentenApp: App {
     @StateObject private var library = Library()
     @StateObject private var player = Player()
     @StateObject private var router = AppRouter()
+    // La palette est persistée ; changer sa valeur force la reconstruction de la coquille
+    // (Theme utilise une variable statique, sans objet observable).
+    @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                .id(paletteRaw)
+                .onAppear { Theme.apply(Palette(rawValue: paletteRaw) ?? .or) }
+                .onChange(of: paletteRaw) { value in Theme.apply(Palette(rawValue: value) ?? .or) }
                 .environmentObject(library)
                 .environmentObject(player)
                 .environmentObject(router)
                 .environmentObject(player.clock)
                 .preferredColorScheme(.dark)
-                .tint(Theme.gold)
+                .tint(Theme.accent)
         }
     }
 }
@@ -49,7 +55,7 @@ struct RootView: View {
                     .tabItem { Label("Réglages", systemImage: "gearshape") }
                     .tag(AppRouter.Tab.settings)
             }
-            .tint(Theme.gold)
+            .tint(Theme.accent)
 
             if player.current != nil && player.showFullScreen {
                 NowPlayingView()
@@ -66,3 +72,5 @@ struct RootView: View {
         }
     }
 }
+
+

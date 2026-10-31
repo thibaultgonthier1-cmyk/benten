@@ -5,26 +5,36 @@ import SwiftUI
 /// Rien n'est approximé : les teintes sont les mêmes valeurs que les variables CSS du bureau
 /// (`--ink`, `--gold`, `--gold-light`, `--ivory`), la typographie reprend la sérif des titres,
 /// les rayons et les halos suivent la grille du bureau.
-
+///
+/// L'ACCENT est variable : il suit la palette choisie dans les Réglages (six thèmes, comme sur le
+/// PC). Le laque, l'encre et l'ivoire, eux, ne changent jamais.
 enum Theme {
     static let ink = Color(red: 0.039, green: 0.035, blue: 0.031)        // #0A0908
-    static let ink2 = Color(red: 0.078, green: 0.067, blue: 0.063)       // surfaces
+    static let ink2 = Color(red: 0.078, green: 0.067, blue: 0.063)
     static let ink3 = Color(red: 0.110, green: 0.098, blue: 0.090)
-    static let gold = Color(red: 0.831, green: 0.667, blue: 0.314)       // #D4AA50
-    static let goldLight = Color(red: 0.941, green: 0.827, blue: 0.541)  // #F0D38A
-    static let goldDeep = Color(red: 0.541, green: 0.392, blue: 0.125)
     static let ivory = Color(red: 0.953, green: 0.937, blue: 0.910)      // #F3EFE8
     static let dim = Color(red: 0.953, green: 0.937, blue: 0.910).opacity(0.62)
     static let hairline = Color.white.opacity(0.10)
 
-    /// Dégradé du médaillon doré et de la pastille de lecture.
-    static let goldGradient = LinearGradient(
-        colors: [goldLight, gold, goldDeep],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    /// Palette active, choisie dans les Réglages. La valeur est aussi persistée par `@AppStorage`.
+    nonisolated(unsafe) static var active: Palette = .or
+
+    static var accent: Color { active.accent }
+    static var accentLight: Color { active.accentLight }
+    static var accentDeep: Color { active.accentDeep }
+
+    /// Dégradé du médaillon et de la pastille de lecture.
+    static var accentGradient: LinearGradient { active.gradient }
 
     static let tileRadius: CGFloat = 14
+
+    /// Applique une palette et prévient l'interface.
+    ///
+    /// Sans `objectWillChange` d'un objet observable, un simple changement de variable statique ne
+    /// redessinerait rien : la racine porte donc un `.id(palette)` qui force la reconstruction.
+    static func apply(_ palette: Palette) {
+        active = palette
+    }
 }
 
 /// Titre en sérif, comme les en-têtes du bureau (« Ta bibliothèque, en local »).
@@ -41,7 +51,7 @@ extension View {
     func serifTitle(_ size: CGFloat = 28) -> some View { modifier(SerifTitle(size: size)) }
 }
 
-/// Fond animé : laque noir + deux halos dorés qui respirent lentement.
+/// Fond animé : laque noir + deux halos de l'accent qui respirent lentement.
 ///
 /// C'est l'équivalent des scènes de fond du bureau, en version légère : aucun décodage vidéo, juste
 /// deux dégradés dont l'opacité et l'échelle bougent en boucle — donc aucun coût GPU notable et
@@ -54,13 +64,13 @@ struct AnimatedBackdrop: View {
         ZStack {
             Theme.ink
             RadialGradient(
-                colors: [Theme.gold.opacity(0.22 * (1 + 0.35 * sin(phase))), .clear],
+                colors: [Theme.accent.opacity(0.22 * (1 + 0.35 * sin(phase))), .clear],
                 center: UnitPoint(x: 0.5 + 0.08 * sin(phase * 0.7), y: 0.02),
                 startRadius: 0,
                 endRadius: 420
             )
             RadialGradient(
-                colors: [Theme.goldLight.opacity(0.10 * (1 + 0.4 * cos(phase * 0.8))), .clear],
+                colors: [Theme.accentLight.opacity(0.10 * (1 + 0.4 * cos(phase * 0.8))), .clear],
                 center: UnitPoint(x: 0.9 + 0.05 * cos(phase), y: 0.95),
                 startRadius: 0,
                 endRadius: 380
@@ -113,14 +123,13 @@ struct LacquerDisc: View {
                             endRadius: 220
                         )
                     )
-                // Sillons : de fines lignes concentriques, comme un vinyle.
                 ForEach(0..<14, id: \.self) { ring in
                     Circle()
                         .stroke(Color.white.opacity(0.028), lineWidth: 1)
                         .padding(CGFloat(ring) * 7)
                 }
                 Circle()
-                    .strokeBorder(Theme.gold.opacity(0.22), lineWidth: 1)
+                    .strokeBorder(Theme.accent.opacity(0.22), lineWidth: 1)
             }
             .rotationEffect(.degrees(angle))
         }

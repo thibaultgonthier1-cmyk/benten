@@ -23,8 +23,8 @@ targets:
         PRODUCT_NAME: Benten
         # 2.x : l'app native remplace la coquille Capacitor (meme bundle id). Un numero plus eleve
         # evite qu'iOS refuse l'installation en la prenant pour la meme version.
-        MARKETING_VERSION: "2.6.0"
-        CURRENT_PROJECT_VERSION: "9"
+        MARKETING_VERSION: "2.7.0"
+        CURRENT_PROJECT_VERSION: "10"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         # Info.plist fourni a la main : les INFOPLIST_KEY_* ne savent pas ecrire les tableaux
@@ -33,6 +33,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Sources/Info.plist
         CODE_SIGNING_ALLOWED: NO
+
 
 
 

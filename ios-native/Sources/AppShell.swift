@@ -32,10 +32,10 @@ final class ArtworkCache {
     private var tints: [String: UIColor] = [:]
 
     func tint(for track: Track) -> Color {
-        guard let url = track.artworkURL else { return Theme.gold }
+        guard let url = track.artworkURL else { return Theme.accent }
         let key = url.lastPathComponent
         if let known = tints[key] { return Color(uiColor: known) }
-        guard let image = image(for: track) else { return Theme.gold }
+        guard let image = image(for: track) else { return Theme.accent }
         let color = image.dominantColor
         tints[key] = color
         return Color(uiColor: color)
@@ -58,3 +58,4 @@ final class AppRouter: ObservableObject {
     enum Tab: Int { case library = 0, search = 1, settings = 2 }
     @Published var tab: Tab = .library
 }
+

@@ -67,12 +67,14 @@ struct SettingsView: View {
     @AppStorage("sync.token") private var syncToken = ""
     @AppStorage("sync.limit") private var syncLimit = 100
     @State private var sleepMinutes = 0
+    @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
 
     var body: some View {
         NavigationStack {
             ZStack {
                 AnimatedBackdrop()
                 Form {
+                    paletteSection
                     syncSection
                     playbackSection
                     equalizerSection
@@ -87,6 +89,43 @@ struct SettingsView: View {
                 Button("Tout supprimer", role: .destructive) { library.deleteAll() }
                 Button("Annuler", role: .cancel) {}
             }
+        }
+    }
+
+    /// Les six palettes du bureau : seule la teinte d'accent change, jamais le laque ni l'ivoire.
+    private var paletteSection: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
+                ForEach(Palette.allCases) { palette in
+                    Button {
+                        Haptics.choose()
+                        paletteRaw = palette.rawValue
+                        Theme.apply(palette)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle().fill(palette.swatch).frame(width: 14, height: 14)
+                            Text(palette.label)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(paletteRaw == palette.rawValue ? Theme.ivory : Theme.dim)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(paletteRaw == palette.rawValue ? palette.accent.opacity(0.16) : Color.clear)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(paletteRaw == palette.rawValue ? palette.accent : Theme.hairline)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("Couleur d'accent").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
@@ -105,12 +144,12 @@ struct SettingsView: View {
                 Task { await sync.run(base: syncBase, token: syncToken, limit: syncLimit, library: library) }
             } label: {
                 Label(sync.running ? "Récupération…" : "Récupérer depuis le PC", systemImage: "arrow.down.circle")
-                    .foregroundStyle(Theme.gold)
+                    .foregroundStyle(Theme.accent)
             }
             .disabled(sync.running)
 
             if sync.running {
-                ProgressView(value: sync.progress).tint(Theme.gold)
+                ProgressView(value: sync.progress).tint(Theme.accent)
             }
             if !sync.status.isEmpty {
                 Text(sync.status)
@@ -118,14 +157,14 @@ struct SettingsView: View {
                     .foregroundStyle(sync.status.localizedCaseInsensitiveContains("récupéré") ? .green : Theme.dim)
             }
         } header: {
-            Text("Synchroniser avec le PC").foregroundStyle(Theme.gold.opacity(0.8))
+            Text("Synchroniser avec le PC").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
     private var playbackSection: some View {
         Section {
             Toggle("Lecture aléatoire", isOn: $player.shuffle)
-                .tint(Theme.gold)
+                .tint(Theme.accent)
 
             Picker("Répéter", selection: $player.repeatMode) {
                 Text("Non").tag(Player.RepeatMode.off)
@@ -137,9 +176,9 @@ struct SettingsView: View {
                 Text("Fondu enchaîné : \(player.crossfade == 0 ? "désactivé" : "\(Int(player.crossfade)) s")")
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.ivory)
-                Slider(value: $player.crossfade, in: 0...12, step: 1).tint(Theme.gold)
+                Slider(value: $player.crossfade, in: 0...12, step: 1).tint(Theme.accent)
                 Toggle("Caler sur le tempo", isOn: $player.beatMatched)
-                    .tint(Theme.gold)
+                    .tint(Theme.accent)
                     .disabled(player.crossfade == 0)
                 Text(player.crossfade == 0
                      ? "Enchaînement sans trou (gapless)."
@@ -163,17 +202,17 @@ struct SettingsView: View {
                 if let remaining = player.sleepRemaining {
                     Text("Arrêt dans \(remaining / 60) min \(remaining % 60) s")
                         .font(.caption2)
-                        .foregroundStyle(Theme.gold)
+                        .foregroundStyle(Theme.accent)
                 }
             }
         } header: {
-            Text("Lecture").foregroundStyle(Theme.gold.opacity(0.8))
+            Text("Lecture").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
     private var equalizerSection: some View {
         Section {
-            Toggle("Égaliseur", isOn: $player.eqEnabled).tint(Theme.gold)
+            Toggle("Égaliseur", isOn: $player.eqEnabled).tint(Theme.accent)
 
             if player.eqEnabled {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -183,8 +222,8 @@ struct SettingsView: View {
                                 .font(.system(size: 12))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 7)
-                                .background(Capsule().strokeBorder(Theme.gold.opacity(0.6), lineWidth: 1))
-                                .foregroundStyle(Theme.gold)
+                                .background(Capsule().strokeBorder(Theme.accent.opacity(0.6), lineWidth: 1))
+                                .foregroundStyle(Theme.accent)
                         }
                     }
                     .padding(.vertical, 4)
@@ -213,12 +252,12 @@ struct SettingsView: View {
                             in: -12...12,
                             step: 0.5
                         )
-                        .tint(Theme.gold)
+                        .tint(Theme.accent)
                     }
                 }
             }
         } header: {
-            Text("Égaliseur").foregroundStyle(Theme.gold.opacity(0.8))
+            Text("Égaliseur").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
@@ -235,7 +274,7 @@ struct SettingsView: View {
                 Text("Vider la bibliothèque")
             }
         } header: {
-            Text("Bibliothèque").foregroundStyle(Theme.gold.opacity(0.8))
+            Text("Bibliothèque").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
@@ -249,7 +288,7 @@ struct SettingsView: View {
                 .font(.caption2)
                 .foregroundStyle(Theme.dim)
         } header: {
-            Text("À propos").foregroundStyle(Theme.gold.opacity(0.8))
+            Text("À propos").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
@@ -268,5 +307,7 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
+
 
 

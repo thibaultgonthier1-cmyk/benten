@@ -240,5 +240,38 @@ final class Library: ObservableObject {
     }
 
     func track(withID id: UUID) -> Track? { tracks.first { $0.id == id } }
+
+    // MARK: - Regroupement par album
+
+    /// Un album de la bibliothèque, avec sa pochette de référence et ses morceaux.
+    struct AlbumGroup: Identifiable {
+        let id: String
+        let title: String
+        let artist: String
+        let artworkTrack: Track
+        let tracks: [Track]
+    }
+
+    /// Albums groupés (album + artiste), triés par ajout le plus récent.
+    var albums: [AlbumGroup] {
+        var buckets: [String: [Track]] = [:]
+        for track in tracks {
+            let key = "\(track.album)||\(track.artist)"
+            buckets[key, default: []].append(track)
+        }
+        return buckets.map { key, list in
+            let sorted = list.sorted { $0.addedAt < $1.addedAt }
+            let reference = sorted.first(where: { $0.artworkURL != nil }) ?? sorted[0]
+            return AlbumGroup(
+                id: key,
+                title: sorted[0].album,
+                artist: sorted[0].artist,
+                artworkTrack: reference,
+                tracks: sorted
+            )
+        }
+        .sorted { ($0.tracks.last?.addedAt ?? .distantPast) > ($1.tracks.last?.addedAt ?? .distantPast) }
+    }
 }
+
 
