@@ -2,18 +2,15 @@ import AVFoundation
 import Foundation
 import MediaPlayer
 
-/// Lecteur audio natif, sur `AVAudioEngine`.
+/// Lecteur audio natif, sur `AVAudioEngine` — même architecture que le moteur du bureau.
 ///
-/// POURQUOI CE MOTEUR ET PAS `AVAudioPlayer`
-/// `AVAudioPlayer` ne permet pas d'insérer un traitement : impossible d'y brancher un égaliseur.
-/// `AVAudioEngine` donne la chaîne complète — deux platines (pour le fondu), l'égaliseur 10 bandes,
-/// puis la sortie — exactement comme le graphe du bureau :
+///     platine A ─► timePitch A ─┐
+///                                ├─► mixeur de fondu ─► EQ 10 bandes ─► sortie
+///     platine B ─► timePitch B ─┘
 ///
-///     platine A ─┐
-///                ├─► EQ 10 bandes ─► mixeur ─► sortie
-///     platine B ─┘
-///
-/// Deux platines servent au fondu enchaîné : la suivante démarre pendant que l'ancienne s'efface.
+/// Deux platines permettent le fondu enchaîné ; les `timePitch` permettent d'ACCORDER le tempo de
+/// la piste entrante **sans changer la hauteur** (le PC, lui, devait se limiter à ±6 % avec
+/// `playbackRate`, qui déforme le pitch).
 @MainActor
 final class Player: NSObject, ObservableObject {
     // MARK: - État observé par l'interface
@@ -21,24 +18,19 @@ final class Player: NSObject, ObservableObject {
     @Published private(set) var current: Track?
     @Published private(set) var playing = false
     @Published private(set) var position: Double = 0
+    @Published private(set) var currentBPM: Double?
     @Published var showFullScreen = false
-    @Published var repeatMode: RepeatMode = .all {
-        didSet { rebuildOrder() }
-    }
-    @Published var shuffle = false {
-        didSet { rebuildOrder() }
-    }
+    @Published var repeatMode: RepeatMode = .all { didSet { rebuildOrder() } }
+    @Published var shuffle = false { didSet { rebuildOrder() } }
+    /// Durée de fondu demandée (0 = enchaînement sec).
     @Published var crossfade: Double = 0
+    /// Cale la durée du fondu sur une mesure et accorde le tempo (comme le PC).
+    @Published var beatMatched = true
 
-    /// Gains de l'égaliseur, en dB, pour 31 / 62 / 125 / 250 / 500 / 1k / 2k / 4k / 8k / 16k Hz.
     @Published var eqGains: [Double] = Array(repeating: 0, count: Player.equalizerFrequencies.count) {
         didSet { applyEqualizer() }
     }
-    @Published var eqEnabled = false {
-        didSet { applyEqualizer() }
-    }
-
-    /// Minuteur de sommeil : minutes restantes, `nil` si désactivé.
+    @Published var eqEnabled = false { didSet { applyEqualizer() } }
     @Published private(set) var sleepRemaining: Int?
 
     enum RepeatMode: String, Codable, CaseIterable { case off, all, one }
@@ -56,18 +48,23 @@ final class Player: NSObject, ObservableObject {
 
     private let engine = AVAudioEngine()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
+    private let crossMixer = AVAudioMixerNode()
     private let deckA = AVAudioPlayerNode()
     private let deckB = AVAudioPlayerNode()
+    private let pitchA = AVAudioUnitTimePitch()
+    private let pitchB = AVAudioUnitTimePitch()
 
+    private let analyzer = TrackAnalyzer()
     private var fileA: AVAudioFile?
     private var fileB: AVAudioFile?
     private var activeDeck: AVAudioPlayerNode?
     private var activeFile: AVAudioFile?
-    private var startFrame: AVAudioFramePosition = 0
     private var startedAt: Date?
     private var timer: Timer?
     private var fading = false
     private var order: [Int] = []
+    private var queue: [Track] = []
+    private var queuePosition = 0
 
     override init() {
         super.init()
@@ -80,9 +77,9 @@ final class Player: NSObject, ObservableObject {
     }
 
     private func configureEngine() {
-        engine.attach(deckA)
-        engine.attach(deckB)
-        engine.attach(equalizer)
+        for node in [deckA, deckB, pitchA, pitchB, crossMixer, equalizer] as [AVAudioNode] {
+            engine.attach(node)
+        }
 
         for (index, frequency) in Self.equalizerFrequencies.enumerated() {
             let band = equalizer.bands[index]
@@ -93,15 +90,22 @@ final class Player: NSObject, ObservableObject {
             band.bypass = true
         }
 
-        engine.connect(deckA, to: equalizer, format: nil)
-        engine.connect(deckB, to: equalizer, format: nil)
+        // Deux entrées dans le mixeur de fondu (bus 0 et 1), puis l'égaliseur commun.
+        engine.connect(deckA, to: pitchA, format: nil)
+        engine.connect(deckB, to: pitchB, format: nil)
+        engine.connect(pitchA, to: crossMixer, fromBus: 0, toBus: 0, format: nil)
+        engine.connect(pitchB, to: crossMixer, fromBus: 0, toBus: 1, format: nil)
+        engine.connect(crossMixer, to: equalizer, format: nil)
         engine.connect(equalizer, to: engine.mainMixerNode, format: nil)
-        engine.mainMixerNode.outputVolume = 1
+
+        deckA.volume = 1
+        deckB.volume = 0
+        deckA.rate = 1
+        deckB.rate = 1
 
         do {
             try engine.start()
         } catch {
-            // Pas de moteur = pas de son : on garde l'app utilisable mais on le signale.
             print("[benten] moteur audio indisponible : \(error.localizedDescription)")
         }
     }
@@ -164,17 +168,11 @@ final class Player: NSObject, ObservableObject {
 
     // MARK: - File de lecture
 
-    private var queue: [Track] = []
-    private var queuePosition = 0
-
-    /// Reconstruit l'ordre de lecture (mélangé si demandé), en gardant le morceau courant en tête.
     private func rebuildOrder() {
         var indices = Array(queue.indices)
         if shuffle {
             indices.shuffle()
-            if let at = indices.firstIndex(of: queuePosition), at != 0 {
-                indices.swapAt(0, at)
-            }
+            if let at = indices.firstIndex(of: queuePosition), at != 0 { indices.swapAt(0, at) }
         }
         order = indices
     }
@@ -194,19 +192,29 @@ final class Player: NSObject, ObservableObject {
         }
         deckA.stop()
         deckB.stop()
+        pitchA.rate = 1
+        pitchB.rate = 1
         deckA.volume = 1
         deckB.volume = 0
         activeDeck = deckA
         activeFile = file
         fileA = file
         current = track
-        startFrame = AVAudioFramePosition(max(0, seconds) * file.processingFormat.sampleRate)
         startedAt = Date().addingTimeInterval(-seconds)
-        schedule(on: deckA, file: file, from: startFrame)
+        schedule(on: deckA, file: file, from: AVAudioFramePosition(max(0, seconds) * file.processingFormat.sampleRate))
         deckA.play()
         playing = true
         fading = false
         updateNowPlaying()
+        refreshTempo(for: track)
+    }
+
+    private func refreshTempo(for track: Track) {
+        Task { [weak self] in
+            guard let self else { return }
+            let bpm = await self.analyzer.bpm(of: track)
+            self.currentBPM = bpm
+        }
     }
 
     private func schedule(on deck: AVAudioPlayerNode, file: AVAudioFile, from frame: AVAudioFramePosition) {
@@ -221,7 +229,7 @@ final class Player: NSObject, ObservableObject {
     }
 
     private func handleFinished() {
-        if fading { return } // le fondu a déjà enchaîné
+        if fading { return }
         next()
     }
 
@@ -230,7 +238,6 @@ final class Player: NSObject, ObservableObject {
     func resume() {
         if !engine.isRunning { try? engine.start() }
         activeDeck?.play()
-        if startedAt == nil { startedAt = Date() }
         playing = true
         updateNowPlaying()
     }
@@ -247,11 +254,11 @@ final class Player: NSObject, ObservableObject {
         guard let file = activeFile else { return }
         let wasPlaying = playing
         activeDeck?.stop()
-        startFrame = AVAudioFramePosition(max(0, min(seconds, duration)) * file.processingFormat.sampleRate)
-        startedAt = Date().addingTimeInterval(-seconds)
-        position = seconds
+        let clamped = max(0, min(seconds, duration))
+        position = clamped
+        startedAt = Date().addingTimeInterval(-clamped)
         if let deck = activeDeck {
-            schedule(on: deck, file: file, from: startFrame)
+            schedule(on: deck, file: file, from: AVAudioFramePosition(clamped * file.processingFormat.sampleRate))
             if wasPlaying { deck.play() }
         }
         updateNowPlaying()
@@ -288,16 +295,20 @@ final class Player: NSObject, ObservableObject {
         load(track: queue[queuePosition], at: 0)
     }
 
-    // MARK: - Horloge
+    // MARK: - Horloge et fondu
 
     private func tick() {
         guard playing, let startedAt else { return }
         position = min(duration, max(0, Date().timeIntervalSince(startedAt)))
 
-        // Fondu : on démarre la suivante avant la fin, en égalité de puissance.
-        if crossfade > 0, !fading, duration - position <= crossfade, duration > 0, repeatMode != .one {
-            fading = true
-            Task { await crossfadeNext(duration: crossfade) }
+        if crossfade > 0, !fading, duration > 0, repeatMode != .one {
+            // La durée est ARRONDIE À UNE MESURE de la piste sortante, comme sur le PC : le fondu
+            // tombe sur un temps, pas au hasard.
+            let planned = beatMatched ? AudioMath.quantizeFadeToBeats(crossfade, bpm: currentBPM) : crossfade
+            if duration - position <= planned {
+                fading = true
+                Task { await crossfadeNext(plannedSeconds: planned) }
+            }
         }
 
         if let remaining = sleepRemaining {
@@ -313,52 +324,82 @@ final class Player: NSObject, ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    /// Fondu en égalité de puissance : `cos` sur la sortante, `sin` sur l'entrante.
-    private func crossfadeNext(duration fade: Double) async {
+    /// Fondu enchaîné : égalité de puissance, accord de tempo et égalisation de niveau.
+    ///
+    /// - durée : déjà quantifiée sur une mesure ;
+    /// - tempo : l'entrante est accordée sur la sortante via `timePitch` (hauteur préservée) ;
+    /// - niveau : l'entrante est corrigée pour ne pas éclipser la sortante, puis revient à son
+    ///   niveau propre une fois le fondu passé.
+    private func crossfadeNext(plannedSeconds: Double) async {
         guard let positionInOrder = order.firstIndex(of: queuePosition) else { return }
         let nextPosition = positionInOrder + 1
         guard nextPosition < order.count || repeatMode == .all else { return }
         let nextIndex = nextPosition < order.count ? order[nextPosition] : (order.first ?? 0)
-        let track = queue[nextIndex]
-        guard let file = try? AVAudioFile(forReading: track.fileURL) else { return }
+        let outgoingTrack = queue[queuePosition]
+        let incomingTrack = queue[nextIndex]
+        guard let file = try? AVAudioFile(forReading: incomingTrack.fileURL) else { return }
 
         let outgoing = activeDeck
+        let outgoingPitch: AVAudioUnitTimePitch = (outgoing === deckA) ? pitchA : pitchB
         let incoming: AVAudioPlayerNode = (outgoing === deckA) ? deckB : deckA
+        let incomingPitch: AVAudioUnitTimePitch = (outgoing === deckA) ? pitchB : pitchA
+
+        // --- Tempo et niveau, calculés avant de démarrer (les deux analyses sont mémorisées)
+        let outgoingBPM = await analyzer.bpm(of: outgoingTrack)
+        let incomingBPM = await analyzer.bpm(of: incomingTrack)
+        let tempoRatio = beatMatched ? AudioMath.tempoMatchRatio(outgoing: outgoingBPM, incoming: incomingBPM) : 1
+        let outgoingLevel = await analyzer.level(of: outgoingTrack)
+        let incomingLevel = await analyzer.level(of: incomingTrack)
+        let levelGain = AudioMath.loudnessGain(outgoing: outgoingLevel, incoming: incomingLevel)
+
         incoming.stop()
         incoming.volume = 0
+        incomingPitch.rate = Float(tempoRatio)
         fileB = file
         schedule(on: incoming, file: file, from: 0)
         incoming.play()
 
         activeDeck = incoming
         activeFile = file
-        current = track
+        current = incomingTrack
         queuePosition = nextIndex
-        startFrame = 0
-        startedAt = Date()
+        startedAt = Date().addingTimeInterval(tempoRatio == 1 ? 0 : 0)
+        currentBPM = incomingBPM
         updateNowPlaying()
 
-        let steps = 24
-        let interval = fade / Double(steps)
+        // --- Rampes : cos sur la sortante, sin sur l'entrante (somme des carrés = 1)
+        let steps = 30
+        let interval = plannedSeconds / Double(steps)
         for step in 1...steps {
             let t = Double(step) / Double(steps)
-            outgoing?.volume = Float(cos(t * .pi / 2))
-            incoming.volume = Float(sin(t * .pi / 2))
-            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            let fadeOut = Float(cos(t * .pi / 2))
+            let fadeIn = Float(sin(t * .pi / 2))
+            outgoing?.volume = fadeOut
+            incoming.volume = fadeIn * Float(levelGain)
+            try? await Task.sleep(nanoseconds: UInt64(max(0, interval) * 1_000_000_000))
         }
+
         outgoing?.stop()
         outgoing?.volume = 1
+        outgoingPitch.rate = 1
+
+        // Retour au niveau propre de l'entrante, en 2 s : sinon le morceau resterait atténué.
+        let settleSteps = 10
+        for step in 1...settleSteps {
+            let t = Double(step) / Double(settleSteps)
+            incoming.volume = Float(levelGain + (1 - levelGain) * t)
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
         incoming.volume = 1
+        incomingPitch.rate = 1
         fading = false
     }
 
-    // MARK: - Minuteur de sommeil
+    // MARK: - Minuteur et égaliseur
 
     func setSleepTimer(minutes: Int?) {
         sleepRemaining = (minutes ?? 0) > 0 ? (minutes! * 60) : nil
     }
-
-    // MARK: - Égaliseur
 
     func applyPreset(_ name: String) {
         guard let preset = Self.presets[name] else { return }

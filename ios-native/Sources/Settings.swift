@@ -138,7 +138,14 @@ struct SettingsView: View {
                     .font(.system(size: 14))
                     .foregroundStyle(Theme.ivory)
                 Slider(value: $player.crossfade, in: 0...12, step: 1).tint(Theme.gold)
-                Text("Les morceaux se chevauchent en égalité de puissance, sans variation de volume perçue.")
+                Toggle("Caler sur le tempo", isOn: $player.beatMatched)
+                    .tint(Theme.gold)
+                    .disabled(player.crossfade == 0)
+                Text(player.crossfade == 0
+                     ? "Enchaînement sans trou (gapless)."
+                     : player.beatMatched
+                       ? "Durée arrondie à une mesure, tempo accordé sans changer la hauteur.\(player.currentBPM.map { " Tempo détecté : \(Int($0)) BPM." } ?? "")"
+                       : "Durée fixe, sans calage rythmique.")
                     .font(.caption2)
                     .foregroundStyle(Theme.dim)
             }
@@ -258,3 +265,4 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
