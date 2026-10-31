@@ -1,0 +1,86 @@
+# Compilation du .ipa Benten — sans Mac, sur les machines macOS de GitHub.
+#
+# POURQUOI CE FICHIER
+# Une app iOS se compile avec Xcode, qui n'existe que sur macOS. GitHub Actions met à disposition
+# des runners macOS gratuits : ce workflow y construit un .ipa NON SIGNÉ, que tu installes ensuite
+# avec le même outil que tes autres apps (AltStore, Sideloadly, ESign…).
+#
+# UTILISATION
+#   1. pousser ce dépôt sur GitHub (compte gratuit suffit) ;
+#   2. onglet « Actions » ▸ « iOS — ipa non signé » ▸ « Run workflow » ;
+#   3. télécharger l'artefact `benten-ios-ipa` quand il est vert ;
+#   4. signer/installer le .ipa avec ton outil habituel.
+#
+# RIEN N'EST SIGNÉ ICI : aucune clé, aucun certificat, aucun identifiant Apple ne transite.
+
+name: iOS — ipa non signé
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "mobile/**"
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Installer CocoaPods
+        run: |
+          brew install cocoapods
+          pod --version
+
+      - name: Dépendances de l'enveloppe
+        working-directory: ios
+        run: npm install --no-audit --no-fund
+
+      - name: Créer le projet Xcode (première fois)
+        working-directory: ios
+        run: |
+          if [ ! -d ios/App ]; then npx cap add ios; fi
+          npx cap sync ios
+
+      - name: Compiler (sans signature)
+        working-directory: ios/ios/App
+        run: |
+          # `CODE_SIGNING_ALLOWED=NO` : on veut un binaire brut, la signature sera faite
+          # par l'outil d'installation. `-derivedDataPath` garde l'artefact à un endroit connu.
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Empaqueter le .ipa
+        run: |
+          APP_PATH=$(find ios/ios/App/build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 2 | head -n 1)
+          echo "App : $APP_PATH"
+          mkdir -p out/Payload
+          cp -R "$APP_PATH" out/Payload/
+          cd out
+          # Un .ipa n'est qu'un zip dont la racine contient Payload/<App>.app
+          zip -qry benten-unsigned.ipa Payload
+          ls -lh benten-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benten-ios-ipa
+          path: out/benten-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

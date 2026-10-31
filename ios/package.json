@@ -1,0 +1,17 @@
+{
+  "name": "benten-ios",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Enveloppe iOS de Benten Mobile (Capacitor). Ne sert qu'à produire un .ipa non signé.",
+  "scripts": {
+    "sync": "cap sync ios",
+    "add:ios": "cap add ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/ios": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
