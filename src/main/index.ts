@@ -34,6 +34,7 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 // App mobile : un petit serveur local sert la page installable sur l'iPhone.
 import { bindMobileLibrary, mobileUrl, startMobileServer, stopMobileServer } from "./mobileServer";
 import { ensureMobileToken, mobileToken, setMobileToken } from "./library/mobileToken";
+import { resolveArtFile } from "./library/artcache";
 
 // Identité Windows : sans ça, la barre des tâches regroupe l'app sous « Electron » et
 // certaines fonctions (notifications, épinglage) l'attribuent au mauvais programme.
@@ -398,7 +399,7 @@ app.whenReady().then(() => {
   bindMobileLibrary({
     list: () =>
       db
-        .prepare("select id, title, artist, album, duration_sec as durationSec, size_bytes as sizeBytes, added_at_ms as addedAt, path from tracks where playable = 1 order by added_at_ms desc")
+        .prepare("select id, title, artist, album, duration_sec as durationSec, size_bytes as sizeBytes, added_at_ms as addedAt, path, art_key as artKey from tracks where playable = 1 order by added_at_ms desc")
         .all()
         .map((raw) => {
           const row = raw as {
@@ -410,6 +411,7 @@ app.whenReady().then(() => {
             sizeBytes: number | null;
             addedAt: number | null;
             path: string;
+            artKey: string | null;
           };
           return {
             id: row.id,
@@ -420,8 +422,20 @@ app.whenReady().then(() => {
             sizeBytes: row.sizeBytes ?? null,
             addedAt: row.addedAt ?? null,
             path: row.path,
+            artKey: row.artKey ?? null,
           };
         }),
+
+    // Le téléphone reçoit AUSSI la pochette : sur le PC elle vit dans `art-cache`, pas dans le
+    // fichier audio. Sans cette route, l'iPhone affichait des tuiles vides pour les MP3 sans
+    // pochette embarquée (la majorité des morceaux venus de YouTube).
+    artworkPath: (trackId: number) => {
+      const row = db.prepare("select art_key as artKey from tracks where id = ?").get(trackId) as
+        | { artKey: string | null }
+        | undefined;
+      if (!row?.artKey) return null;
+      return resolveArtFile(row.artKey, join(app.getPath("userData"), "art-cache"));
+    },
   });
 
   registerIpc(db, {
@@ -552,6 +566,8 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+
 
 
 

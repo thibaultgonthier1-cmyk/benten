@@ -110,15 +110,16 @@ final class Library: ObservableObject {
     ///
     /// Le flux ne porte pas de nom : on écrit un fichier temporaire, on laisse AVFoundation
     /// identifier le format réel, puis on renomme avec la bonne extension.
-    func adopt(data: Data, remote: Int, fallbackTitle: String, fallbackArtist: String) async {
-        guard !tracks.contains(where: { $0.remoteID == remote }) else { return }
+    @discardableResult
+    func adopt(data: Data, remote: Int, fallbackTitle: String, fallbackArtist: String) async -> UUID? {
+        guard !tracks.contains(where: { $0.remoteID == remote }) else { return nil }
         let identifier = UUID()
         let temporary = Self.audioDirectory.appendingPathComponent("\(identifier.uuidString).incoming")
         do {
             try data.write(to: temporary, options: .atomic)
         } catch {
             lastError = "écriture impossible : \(error.localizedDescription)"
-            return
+            return nil
         }
 
         let ext = await Self.detectExtension(at: temporary)
@@ -133,6 +134,28 @@ final class Library: ObservableObject {
             fallbackTitle: fallbackTitle,
             fallbackArtist: fallbackArtist
         )
+        return identifier
+    }
+
+    /// Pose la pochette venue du PC sur un morceau déjà importé.
+    ///
+    /// Le PC garde ses pochettes dans un cache séparé (`art-cache`), pas dans les fichiers audio :
+    /// sans cette étape, un morceau synchronisé affichait une tuile vide alors que le PC montre une
+    /// pochette. On écrit le PNG à côté, sous le même identifiant que le morceau.
+    func attachArtwork(trackID: UUID, data: Data) {
+        guard let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
+        guard let image = UIImage(data: data), let png = image.pngData() else { return }
+        let name = "\(trackID.uuidString).png"
+        let url = Self.artworkDirectory.appendingPathComponent(name)
+        do {
+            try png.write(to: url, options: .atomic)
+        } catch {
+            lastError = "pochette non enregistrée : \(error.localizedDescription)"
+            return
+        }
+        tracks[index].artworkName = name
+        ArtworkCache.shared.invalidate()
+        save()
     }
 
     /// Devine l'extension à partir du type réel du flux (mp3, m4a, flac…).
@@ -300,6 +323,7 @@ final class Library: ObservableObject {
         .sorted { ($0.tracks.last?.addedAt ?? .distantPast) > ($1.tracks.last?.addedAt ?? .distantPast) }
     }
 }
+
 
 
 

@@ -24,6 +24,8 @@ final class SyncService: ObservableObject {
         let durationSec: Double
         let sizeBytes: Int?
         let audio: String
+        /// URL de la pochette servie par le PC (`null` s'il n'y en a pas).
+        let art: String?
     }
 
     private struct RemoteLibrary: Decodable {
@@ -80,7 +82,18 @@ final class SyncService: ObservableObject {
                 progress = Double(offset) / Double(selection.count)
                 do {
                     let data = try await fetchAudio(base: base, token: cleanToken, path: item.audio)
-                    await library.adopt(data: data, remote: item.id, fallbackTitle: item.title, fallbackArtist: item.artist)
+                    let trackID = await library.adopt(
+                        data: data,
+                        remote: item.id,
+                        fallbackTitle: item.title,
+                        fallbackArtist: item.artist
+                    )
+                    // La pochette vient du PC : elle n'est pas dans le fichier audio pour la
+                    // plupart des morceaux (MP3 venus de YouTube). On la récupère juste après.
+                    if let trackID, let artPath = item.art,
+                       let art = try? await fetchAudio(base: base, token: cleanToken, path: artPath) {
+                        await library.attachArtwork(trackID: trackID, data: art)
+                    }
                     added += 1
                 } catch {
                     // Un morceau en échec ne doit pas arrêter les suivants.
@@ -137,3 +150,4 @@ final class SyncService: ObservableObject {
         return error.localizedDescription
     }
 }
+

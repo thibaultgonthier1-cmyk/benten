@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { closeSync, createReadStream, existsSync, openSync, readSync, statSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { createReadStream as openAudio } from "node:fs";
@@ -48,7 +48,18 @@ export interface MobileLibraryApi {
     sizeBytes: number | null;
     addedAt: number | null;
     path: string;
+    /** Clé du cache de pochettes du PC (les fichiers `.img` de `art-cache`). */
+    artKey?: string | null;
   }[];
+  /**
+   * Chemin local de la pochette d'un morceau, ou `null` s'il n'y en a pas.
+   *
+   * POURQUOI ÇA PASSE PAR LE SERVEUR
+   * Sur le PC, les pochettes vivent dans un cache séparé (`art-cache`), pas dans les fichiers
+   * audio. Sans cette route, l'iPhone recevait les morceaux SANS leur pochette : il ne pouvait
+   * lire que ce qui est embarqué dans le fichier, souvent absent (MP3 venus de YouTube).
+   */
+  artworkPath?(trackId: number): string | null;
 }
 
 let libraryApi: MobileLibraryApi | null = null;
@@ -92,7 +103,7 @@ export function startMobileServer(): void {
     // --- API de synchronisation (jeton obligatoire) -------------------------------------------
     // Sans jeton, n'importe qui sur le Wi-Fi pourrait aspirer la bibliothèque : il est exigé sur
     // chaque requête et comparé à temps constant.
-    if (rawPath === "/api/library" || rawPath.startsWith("/api/audio/")) {
+    if (rawPath === "/api/library" || rawPath.startsWith("/api/audio/") || rawPath.startsWith("/api/art/")) {
       if (!isValidToken(url.searchParams.get("token"))) {
         response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ error: "jeton invalide" }));
@@ -110,6 +121,8 @@ export function startMobileServer(): void {
         }
         const items = source.map(({ path, ...rest }) => ({
           ...rest,
+          // La pochette est servie par le PC : elle vit dans son cache, pas dans le fichier audio.
+          art: rest.artKey ? `/api/art/${rest.id}?token=${url.searchParams.get("token")}` : null,
           // L'URL de téléchargement est fournie prête à l'emploi : le téléphone n'a rien à deviner.
           audio: `/api/audio/${rest.id}?token=${url.searchParams.get("token")}`,
         }));
@@ -117,6 +130,30 @@ export function startMobileServer(): void {
         response.end(JSON.stringify({ tracks: items }));
         return;
       }
+      if (rawPath.startsWith("/api/art/")) {
+        const artId = Number(rawPath.slice("/api/art/".length));
+        const file = libraryApi?.artworkPath?.(artId) ?? null;
+        if (!file || !existsSync(file)) {
+          response.writeHead(404, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON.stringify({ error: "pochette introuvable" }));
+          return;
+        }
+        // Le cache du PC stocke des images brutes (PNG ou JPEG) : on renifle l'en-tête plutôt que
+        // de se fier à l'extension, qui est toujours `.img`.
+        const header = Buffer.alloc(4);
+        const handle = openSync(file, "r");
+        readSync(handle, header, 0, 4, 0);
+        closeSync(handle);
+        const type = header[0] === 0xff && header[1] === 0xd8 ? "image/jpeg" : "image/png";
+        response.writeHead(200, {
+          "content-type": type,
+          "content-length": String(statSync(file).size),
+          "cache-control": "no-store",
+        });
+        createReadStream(file).pipe(response);
+        return;
+      }
+
       const id = Number(rawPath.slice("/api/audio/".length));
       const track = (libraryApi?.list() ?? []).find((item) => item.id === id);
       if (!track || !existsSync(track.path)) {
@@ -162,6 +199,7 @@ export function stopMobileServer(): void {
   server?.close();
   server = null;
 }
+
 
 
 
