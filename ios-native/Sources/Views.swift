@@ -396,7 +396,13 @@ struct NowPlayingView: View {
 
     var body: some View {
         ZStack {
-            AnimatedBackdrop()
+            // Style Apple Music : l'arrière-plan EST la pochette, floutée et animée au tempo.
+            // Style Benten : le fond laqué avec ses halos dorés.
+            if Theme.appleStyle {
+                CoverBackdrop(track: player.current, playing: player.playing, bpm: player.currentBPM)
+            } else {
+                AnimatedBackdrop()
+            }
 
             VStack(spacing: 18) {
                 Capsule()
@@ -425,6 +431,9 @@ struct NowPlayingView: View {
                                 radius: Theme.appleStyle ? 12 : 26,
                                 y: Theme.appleStyle ? 6 : 14
                             )
+                            // La pochette respire très légèrement : c'est le « Motion Artwork ».
+                            .scaleEffect(player.playing && Theme.appleStyle ? 1.012 : 1)
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: player.playing)
                     }
 
                     VStack(spacing: 5) {
@@ -925,6 +934,8 @@ struct ArtistDetailView: View {
         }
     }
 }
+
+
 
 
 

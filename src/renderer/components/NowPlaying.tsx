@@ -3,10 +3,12 @@ import { useRef, useState } from "react";
 import { usePlayer, playerStore } from "../state/player";
 import { describeQuality, formatTime } from "../lib/library";
 import { useFocusTrap } from "../lib/focusTrap";
+import { artUrl } from "../lib/library";
 import { coverAccent, Cover } from "./Cover";
 import { LacquerDisc } from "../ui/LacquerDisc";
 import { QualityBadge } from "./QualityBadge";
 import { QualitySheet } from "./QualitySheet";
+import type { AudioEngine } from "../audio/engine";
 import type { PlayerControls } from "./controls";
 
 /** Pas de deplacement clavier du scrubber, en secondes. */
@@ -19,7 +21,15 @@ const SEEK_STEP_SEC = 5;
  * en `visibility:hidden` (apres l'animation) : invisible ET non focusable — pas de piege de focus
  * ni de boutons tabbables dans un panneau hors-ecran.
  */
-export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Element | null {
+export function NowPlaying({
+  controls,
+  engine,
+}: {
+  controls: PlayerControls;
+  /// Moteur audio : sert uniquement à récupérer le TEMPO détecté, pour que le fond respire au
+  /// rythme réel du morceau et pas à un rythme arbitraire.
+  engine: AudioEngine | null;
+}): JSX.Element | null {
   const open = usePlayer((s) => s.nowPlayingOpen);
   const track = usePlayer((s) => s.currentTrack);
   const status = usePlayer((s) => s.status);
@@ -63,6 +73,9 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
   const pct = `${frac * 100}%`;
   const seed = `${track.albumId}:${track.album}`;
   const accent = coverAccent(seed);
+  // Pochette réelle pour le fond, et tempo détecté pour la pulsation.
+  const cover = artUrl(track.artKey ?? null, 512);
+  const bpm = engine && playing ? engine.getCurrentBpm() : null;
   const q = describeQuality(track);
 
   const fracFromEvent = (clientX: number): number => {
@@ -96,12 +109,21 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
       aria-label={`En lecture — ${track.title}`}
       aria-hidden={!open}
     >
+      {/* Fond « Motion Artwork » : la pochette elle-même, floutée, qui dérive lentement et
+          pulse au TEMPO détecté. La couleur d'accent reste dessous en repli, pour les rares
+          morceaux sans pochette. */}
       <div
         className="np-bg"
         style={{
           background: `radial-gradient(circle at 30% 30%, ${accent}, transparent 60%), radial-gradient(circle at 70% 70%, #1b1823, #0b0b11)`,
+          // `--beat` = durée d'un temps. La pulsation CSS s'y cale, donc elle suit le morceau.
+          ["--beat" as string]: `${(60 / Math.max(60, Math.min(180, bpm ?? 100))).toFixed(3)}s`,
         }}
-      />
+      >
+        {cover !== null && (
+          <img className={"np-bg-art" + (playing ? " playing" : "")} src={cover} alt="" aria-hidden="true" />
+        )}
+      </div>
       <div className="np-scrim" />
 
       <div className="np-top">
@@ -275,4 +297,8 @@ export function NowPlaying({ controls }: { controls: PlayerControls }): JSX.Elem
     </div>
   );
 }
+
+
+
+
 

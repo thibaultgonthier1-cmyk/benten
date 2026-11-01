@@ -693,9 +693,55 @@ body {
   position: absolute;
   inset: 0;
   z-index: 0;
-  opacity: 0.5;
+  opacity: 0.55;
   filter: blur(60px) saturate(1.2);
   transition: background 0.8s;
+  overflow: hidden;
+}
+/*
+ * « Motion Artwork » : la pochette du morceau, floutée, en fond.
+ * Deux mouvements superposés :
+ *  - une DÉRIVE lente de 22 s, pour que l'image ne paraisse pas figée ;
+ *  - une PULSATION dont la durée est `--beat` (un temps du morceau, calculé dans le composant).
+ * Résultat : l'arrière-plan respire avec la musique, comme dans Apple Music en plein écran.
+ */
+#now .np-bg-art {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  opacity: 0.85;
+  will-change: transform, opacity;
+  animation: np-drift 22s ease-in-out infinite alternate;
+}
+#now .np-bg-art.playing {
+  animation:
+    np-drift 22s ease-in-out infinite alternate,
+    np-pulse var(--beat, 0.5s) ease-in-out infinite;
+}
+@keyframes np-drift {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1.02);
+  }
+  to {
+    transform: translate3d(1.5%, 1%, 0) scale(1.08);
+  }
+}
+@keyframes np-pulse {
+  0%,
+  100% {
+    opacity: 0.78;
+  }
+  12% {
+    opacity: 0.92;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #now .np-bg-art,
+  #now .np-bg-art.playing {
+    animation: none;
+  }
 }
 #now .np-scrim {
   position: absolute;
@@ -1571,3 +1617,4 @@ button.qopt:focus-visible {
     width: clamp(200px, min(46vh, 74vw), 340px);
   }
 }
+

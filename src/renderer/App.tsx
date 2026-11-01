@@ -187,7 +187,7 @@ export function App(): JSX.Element {
       <Intro onDone={() => undefined} />
       <Shell views={views} controls={controls} player={<MiniPlayer controls={controls} engine={engine} />} />
 
-      <NowPlaying controls={controls} />
+      <NowPlaying controls={controls} engine={engine} />
       <QueuePanel />
       {SignatureShowcase && (
         <Suspense fallback={null}>
@@ -197,6 +197,7 @@ export function App(): JSX.Element {
     </>
   );
 }
+
 
 
 

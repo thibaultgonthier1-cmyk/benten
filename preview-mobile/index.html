@@ -201,6 +201,29 @@
   input[type=range] { width: 100%; accent-color: var(--accent); }
 
   .empty { padding: 60px 40px; text-align: center; color: var(--dim); font-size: 12px; }
+
+  /* ---- Style Apple Music ----
+     Conventions reprises de l'app Apple Music : SF (ici la police système) en gras pour
+     les titres, aucune halo derrière les pochettes, coins à 7 px, pas de sélecteur
+     segmenté, grande pochette et curseur de volume dans la vue lecture. */
+  body.apple .title,
+  body.apple .np-title { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 700; letter-spacing: -0.4px; }
+  body.apple .glow { display: none; }
+  body.apple .cover { border-radius: 7px; }
+  body.apple .cover.round { border-radius: 50%; }
+  body.apple .segmented { display: none; }
+  body.apple .disc { display: none; }
+  body.apple #np .cover { width: min(86vw, 360px); height: min(86vw, 360px); border-radius: 10px;
+                          box-shadow: 0 10px 24px rgba(0,0,0,0.4); }
+  body.apple .disc-wrap { width: min(86vw, 360px); height: min(86vw, 360px); margin-top: 14px; }
+  body.apple .volume-row { display: flex; }
+  .volume-row { display: none; align-items: center; gap: 12px; width: min(84vw, 340px);
+                margin-top: 16px; color: rgba(243,239,232,0.6); font-size: 12px; }
+  .volume-row input { flex: 1; }
+  /* Menu « Bibliothèque ⌄ » à la place du segmenté */
+  .filter-menu { display: none; }
+  body.apple .filter-menu { display: inline-flex; align-items: center; gap: 4px; color: var(--accent);
+                            font-size: 13px; background: none; border: 0; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -211,6 +234,7 @@
     <div class="dot"></div>
     <div class="brand">Benten<small>LECTURE LOCALE</small></div>
     <div class="spacer"></div>
+    <button class="filter-menu" id="btnFilter" title="Parcourir">☰</button>
     <button id="btnSearch" title="Recherche">&#9906;</button>
     <button id="btnImport" class="plus" title="Importer">+</button>
   </div>
@@ -255,6 +279,9 @@
       <button class="big" id="npPlay">▶</button>
       <button class="side" id="npNext">⏭</button>
     </div>
+    <div class="volume-row">
+      <span>⤴</span><span>🔈</span><input type="range" min="0" max="1" step="0.01" value="1" id="volumeRange"><span>🔊</span>
+    </div>
     <div class="extras">
       <button id="npShuffle">⤨</button>
       <button id="npRepeat">↻</button>
@@ -287,12 +314,15 @@ const state = {
   favorites: new Set(),
   playlists: [],
   palette: "or",
+  style: "apple",   // même défaut que l'app : style Apple Music
   crossfade: 6,
   beatMatch: true,
 };
 
 const PALETTES = {
   or: ["#d4aa50", "#f0d38a", "#8a6420", "Or"],
+  // La teinte d'Apple Music, ajoutée avec le style du même nom.
+  rose: ["#fa2b56", "#ff6d8b", "#bd1436", "Rosé (Apple Music)"],
   argent: ["#c9cfd6", "#eef2f6", "#6f757c", "Argent"],
   indigo: ["#6f86d6", "#a8b8f0", "#3c4d94", "Indigo"],
   jade: ["#63c9a0", "#9ce8c8", "#2f7d5e", "Jade"],
@@ -464,6 +494,17 @@ function renderSettings() {
     <div class="group"><h4>Couleur d'accent</h4>
       <div class="card"><div class="swatches">${paletteButtons}</div></div></div>
 
+    <div class="group"><h4>Interface</h4>
+      <div class="card">
+        <div class="line" style="display:block">
+          <div style="margin-bottom:8px">Style</div>
+          <div class="segmented" style="display:flex;margin:0">
+            <button data-style="benten" class="${state.style === "benten" ? "on" : ""}">Benten</button>
+            <button data-style="apple" class="${state.style === "apple" ? "on" : ""}">Apple Music</button>
+          </div>
+        </div>
+      </div></div>
+
     <div class="group"><h4>Lecture</h4>
       <div class="card">
         <div class="line"><span>Lecture aléatoire</span>
@@ -542,6 +583,14 @@ function bind() {
     element.onclick = (event) => {
       event.stopPropagation();
       toggleFavorite(Number(element.dataset.fav));
+    };
+  });
+
+  document.querySelectorAll("[data-style]").forEach((element) => {
+    element.onclick = () => {
+      state.style = element.dataset.style;
+      document.body.classList.toggle("apple", state.style === "apple");
+      render();
     };
   });
 
@@ -717,6 +766,9 @@ function switchTab(tab) {
 }
 
 function applyPalette(key) {
+  // Une palette inconnue ne doit jamais interrompre le démarrage : sans ce garde-fou, une
+  // clé absente plantait `boot()` et la bibliothèque restait sur « Chargement… ».
+  if (!PALETTES[key]) key = "or";
   state.palette = key;
   const [accent, light, deep] = PALETTES[key];
   document.documentElement.style.setProperty("--accent", accent);
@@ -755,7 +807,8 @@ function escapeAttr(text) { return escapeHtml(text).replace(/`/g, "&#96;"); }
 
 async function boot() {
   // On repart toujours de la palette d'origine : un aperçu ne doit pas hériter du test précédent.
-  applyPalette("or");
+  applyPalette("rose");
+  document.body.classList.toggle("apple", state.style === "apple");
   render();
   try {
     const response = await fetch(`${HOST}/api/library?token=${encodeURIComponent(TOKEN)}`);
@@ -774,6 +827,9 @@ boot();
 </script>
 </body>
 </html>
+
+
+
 
 
 
