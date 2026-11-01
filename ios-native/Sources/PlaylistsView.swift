@@ -22,17 +22,13 @@ struct PlaylistsView: View {
                                 PlaylistDetailView(playlist: playlist)
                             } label: {
                                 HStack(spacing: 12) {
-                                    // Vignette : la pochette du premier morceau de la liste.
-                                    if let first = playlists.tracks(of: playlist, in: library).first {
-                                        ArtworkView(track: first)
-                                            .frame(width: 46, height: 46)
-                                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                                    } else {
-                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                            .fill(Theme.ink3)
-                                            .frame(width: 46, height: 46)
-                                            .overlay(Image(systemName: "music.note.list").foregroundStyle(Theme.dim))
-                                    }
+                                    // Mosaïque de 4 albums, comme Apple Music : une playlist se
+                                    // reconnaît à son mélange, pas à son premier titre.
+                                    PlaylistMosaicView(
+                                        tracks: playlists.tracks(of: playlist, in: library),
+                                        cornerRadius: 9
+                                    )
+                                    .frame(width: 46, height: 46)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(playlist.name)
                                             .font(.system(size: 14, weight: .medium))
@@ -182,3 +178,4 @@ struct PlaylistDetailView: View {
         }
     }
 }
+
