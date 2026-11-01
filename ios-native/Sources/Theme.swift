@@ -29,6 +29,8 @@ enum Theme {
     /// Rayon des pochettes : 14 (Benten) ou 7 (Apple Music, qui reste très serré).
     static var coverRadius: CGFloat { appleStyle ? 7 : tileRadius }
 
+    /// En style Apple Music, l'accent suit la palette choisie ; si l'utilisateur n'a jamais
+    /// touché aux palettes, le rose d'Apple est le bon défaut visuel.
     static var accent: Color { active.accent }
     static var accentLight: Color { active.accentLight }
     static var accentDeep: Color { active.accentDeep }
@@ -148,4 +150,5 @@ struct LacquerDisc: View {
         }
     }
 }
+
 

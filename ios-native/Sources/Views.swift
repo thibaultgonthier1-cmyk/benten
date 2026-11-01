@@ -29,7 +29,7 @@ struct LibraryView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
-                            header
+                            if !Theme.appleStyle { header }
 
                             // Les trois vues du PC, dans le même écran.
                             switch mode {
@@ -90,7 +90,10 @@ struct LibraryView: View {
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
+            // Apple Music affiche un grand titre système « Bibliothèque ». Benten garde son
+            // en-tête éditorial (eyebrow, sérif) : deux grammaires, un seul code.
+            .navigationTitle(Theme.appleStyle ? "Bibliothèque" : "")
+            .navigationBarTitleDisplayMode(Theme.appleStyle ? .large : .inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     HStack(spacing: 8) {
@@ -922,5 +925,6 @@ struct ArtistDetailView: View {
         }
     }
 }
+
 
 

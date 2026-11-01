@@ -15,7 +15,7 @@ struct BentenApp: App {
     // La palette est persistée ; changer sa valeur force la reconstruction de la coquille
     // (Theme utilise une variable statique, sans objet observable).
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
-    @AppStorage("design") private var designRaw = "benten"
+    @AppStorage("design") private var designRaw = "apple"
 
     var body: some Scene {
         WindowGroup {
@@ -88,6 +88,7 @@ struct RootView: View {
         }
     }
 }
+
 
 
 

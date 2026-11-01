@@ -68,7 +68,7 @@ struct SettingsView: View {
     @AppStorage("sync.limit") private var syncLimit = 100
     @State private var sleepMinutes = 0
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
-    @AppStorage("design") private var designRaw = "benten"
+    @AppStorage("design") private var designRaw = "apple"
 
     var body: some View {
         NavigationStack {
@@ -136,8 +136,8 @@ struct SettingsView: View {
     private var designSection: some View {
         Section {
             Picker("Style", selection: $designRaw) {
-                Text("Benten").tag("benten")
                 Text("Apple Music").tag("apple")
+                Text("Benten").tag("benten")
             }
             .pickerStyle(.segmented)
             .onChange(of: designRaw) { value in
@@ -332,6 +332,7 @@ private extension Bundle {
         return "\(version) (\(build))"
     }
 }
+
 
 
 
