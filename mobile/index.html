@@ -2,7 +2,7 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#0a0908" />
@@ -11,102 +11,93 @@
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <link rel="stylesheet" href="./style.css" />
   </head>
-  <body>
-    <header class="top">
-      <div class="brand">
-        <span class="brand__mark" aria-hidden="true"></span>
-        <div class="brand__txt">
-          <strong>Benten</strong>
-          <small>lecture locale · <span id="version">v?</span></small>
-        </div>
-      </div>
-      <div class="top__actions">
-        <button id="settingsOpen" type="button" class="icon-btn" aria-label="Réglages">⚙</button>
-        <label class="import">
-          importer
+  <body class="apple">
+    <div id="app">
+      <!-- Fond vivant : respire lentement, teinté par la pochette en lecture. -->
+      <div class="backdrop" id="backdrop"></div>
+
+      <!-- En-tête -->
+      <header class="nav">
+        <span class="dot" aria-hidden="true"></span>
+        <div class="brand">Benten<small>lecture locale · <span id="version">v?</span></small></div>
+        <span class="spacer"></span>
+        <button class="icon-btn" id="btnSearch" type="button" aria-label="Recherche">&#9906;</button>
+        <label class="icon-btn plus" aria-label="Importer">
+          +
           <input id="files" type="file" accept="audio/*" multiple hidden />
         </label>
+      </header>
+
+      <!-- Bandeau d'installation : seulement dans Safari, avant l'ajout à l'écran d'accueil. -->
+      <div id="install" class="install-banner" hidden>
+        <span>Pour l'avoir sur l'écran d'accueil : <b>Partager</b> ▸ <b>Sur l'écran d'accueil</b></span>
+        <button id="installClose" type="button" aria-label="Masquer">✕</button>
       </div>
-    </header>
 
-    <!-- Bandeau d'installation : visible uniquement dans Safari, avant l'ajout à l'écran d'accueil. -->
-    <div id="install" class="install-banner" hidden>
-      <span>Pour avoir l'app sur l'écran d'accueil : <b>Partager</b> ▸ <b>Sur l'écran d'accueil</b></span>
-      <button id="installClose" type="button" aria-label="Masquer">✕</button>
-    </div>
+      <p id="status" class="status" role="status" hidden></p>
 
-    <p id="status" class="status" role="status">chargement…</p>
+      <!-- Corps : rendu par app.js selon l'onglet actif. -->
+      <main class="scroll" id="view" aria-live="polite"></main>
 
-    <nav class="tabs" aria-label="Sections">
-      <button type="button" data-tab="library" aria-pressed="true">Bibliothèque</button>
-      <button type="button" data-tab="playing" aria-pressed="false">En lecture</button>
-    </nav>
-
-    <main id="library" class="library" aria-live="polite"></main>
-
-    <!-- Vue « En lecture » : grande pochette, disque, transport — comme la vue du PC. -->
-    <section id="stage" class="stage" hidden>
-      <div class="stage__art">
-        <div class="disc" aria-hidden="true"></div>
-        <div class="cover" id="cover"><span id="coverText">♪</span></div>
+      <!-- Mini-lecteur : barre persistante en bas, tap pour agrandir. -->
+      <div class="mini" id="mini" hidden>
+        <div class="thumb" id="miniThumb"><span class="glyph">♪</span></div>
+        <div class="meta">
+          <div class="n" id="miniTitle">—</div>
+          <div class="s" id="miniArtist">—</div>
+        </div>
+        <button class="medallion" id="miniPlay" type="button" aria-label="Lecture">▶</button>
+        <button class="icon-btn" id="miniNext" type="button" aria-label="Suivant">⏭</button>
+        <div class="bar"><i id="miniBar"></i></div>
       </div>
-      <h1 id="title">—</h1>
-      <p id="artist" class="artist"></p>
-      <input id="seek" class="seek" type="range" min="0" max="1000" value="0" aria-label="Progression" />
-      <div class="times">
-        <span id="t-cur">0:00</span>
-        <span id="t-dur">0:00</span>
-      </div>
-      <div class="transport">
-        <button id="prev" type="button" aria-label="Précédent">◀◀</button>
-        <button id="toggle" type="button" class="play" aria-label="Lecture">▶</button>
-        <button id="next" type="button" aria-label="Suivant">▶▶</button>
-      </div>
-    </section>
 
-    <div id="sheet" class="sheet" hidden>
-      <div class="sheet__panel" role="dialog" aria-label="Réglages">
-        <h2>Réglages</h2>
+      <!-- Barre d'onglets -->
+      <nav class="tabs" id="tabs" aria-label="Sections">
+        <button data-tab="library" class="on" type="button"><span class="g">♫</span>Bibliothèque</button>
+        <button data-tab="favorites" type="button"><span class="g">♥</span>Favoris</button>
+        <button data-tab="playlists" type="button"><span class="g">≣</span>Playlists</button>
+        <button data-tab="search" type="button"><span class="g">⌕</span>Recherche</button>
+        <button data-tab="settings" type="button"><span class="g">⚙</span>Réglages</button>
+      </nav>
 
-        <div class="sheet__row sheet__col">
-          <span class="sheet__label">Synchroniser avec le PC</span>
-          <input id="syncHost" type="url" inputmode="url" placeholder="http://192.168.31.111:4321" autocomplete="off" />
-          <input id="syncToken" type="text" inputmode="text" placeholder="jeton (affiché dans Réglages sur le PC)" autocomplete="off" />
-          <input id="syncLimit" type="number" min="1" max="5000" value="100" inputmode="numeric" placeholder="nombre de morceaux (vide = tout)" />
-          <div class="sheet__buttons">
-            <button id="syncTest" type="button" class="ghost">Tester</button>
-            <button id="syncRun" type="button" class="sync">Récupérer</button>
+      <!-- Vue « En lecture » : plein écran, glisse depuis le bas. -->
+      <section id="np" aria-label="En lecture">
+        <div class="np-glow" id="npGlow" aria-hidden="true"></div>
+        <button class="grabber" id="grabber" type="button" aria-label="Réduire"></button>
+        <button class="chevron" id="npClose" type="button" aria-label="Réduire">⌄</button>
+
+        <div class="disc-wrap">
+          <div class="disc" id="disc" aria-hidden="true">
+            <span class="groove" style="inset:14px"></span><span class="groove" style="inset:28px"></span>
+            <span class="groove" style="inset:42px"></span><span class="groove" style="inset:56px"></span>
+            <span class="groove" style="inset:70px"></span><span class="ring"></span>
           </div>
-          <p class="sheet__hint" id="syncInfo">—</p>
+          <div class="cover np-cover" id="npCover"><span class="glyph">♪</span></div>
         </div>
 
-        <div class="sheet__row">
-          <span class="sheet__label">Répéter</span>
-          <div class="seg" role="group" aria-label="Répétition">
-            <button type="button" data-repeat="off" aria-pressed="false">non</button>
-            <button type="button" data-repeat="all" aria-pressed="true">liste</button>
-            <button type="button" data-repeat="one" aria-pressed="false">titre</button>
-          </div>
+        <h1 class="np-title" id="npTitle">—</h1>
+        <p class="np-artist" id="npArtist">—</p>
+
+        <div class="slider">
+          <div class="track-bar" id="npBar"><div class="fill" id="npFill"></div><div class="knob" id="npKnob"></div></div>
+          <div class="times"><span id="npPos">0:00</span><span id="npDur">0:00</span></div>
         </div>
 
-        <div class="sheet__row">
-          <span class="sheet__label">Aléatoire</span>
-          <div class="seg"><button id="shuffle" type="button" aria-pressed="false">non</button></div>
+        <div class="transport">
+          <button class="side" id="npPrev" type="button" aria-label="Précédent">⏮</button>
+          <button class="big" id="npPlay" type="button" aria-label="Lecture">▶</button>
+          <button class="side" id="npNext" type="button" aria-label="Suivant">⏭</button>
         </div>
 
-        <div class="sheet__row">
-          <span class="sheet__label">Bibliothèque</span>
-          <button id="clear" type="button" class="danger">vider</button>
+        <div class="extras">
+          <button id="npShuffle" type="button" aria-label="Aléatoire">⤨</button>
+          <button id="npRepeat" type="button" aria-label="Répéter">↻</button>
+          <button id="npHeart" type="button" aria-label="Favori">♡</button>
         </div>
-
-        <p class="sheet__hint" id="sheetInfo">—</p>
-        <button id="sheetClose" type="button" class="sheet__close">Fermer</button>
-      </div>
+      </section>
     </div>
 
     <audio id="audio" preload="metadata"></audio>
     <script src="./app.js"></script>
   </body>
 </html>
-
-
