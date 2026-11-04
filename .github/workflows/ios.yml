@@ -112,6 +112,20 @@ jobs:
               sys.exit("ERREUR: declencheur reseau local non injecte (AppDelegate inattendu)")
           PY
 
+      - name: Icone d'application (logo Benten)
+        run: |
+          # Remplace l'icone generee par defaut par le logo Benten (sceau dore + B serif).
+          # Capacitor 6 range l'icone dans AppIcon.appiconset ; on ecrase tous ses PNG.
+          ICONSET=$(find ios/ios/App -type d -name "AppIcon.appiconset" | head -n 1)
+          echo "appiconset: $ICONSET"
+          if [ -n "$ICONSET" ] && [ -f ios/appicon-1024.png ]; then
+            count=0
+            for f in "$ICONSET"/*.png; do cp ios/appicon-1024.png "$f"; count=$((count+1)); done
+            echo "icones remplacees: $count"
+          else
+            echo "ATTENTION: appiconset ou logo introuvable, icone par defaut conservee"
+          fi
+
       - name: Compiler (sans signature)
         working-directory: ios/ios/App
         run: |
