@@ -342,6 +342,31 @@ function openAddSheet(trackIds) {
   requestAnimationFrame(() => sheet.classList.add("show"));
 }
 
+// Playlists par genre : une liste préparée (mobile/smart-playlists.json) associe un genre
+// à des identifiants de morceaux. On crée/complète une playlist par genre avec ceux que
+// l'utilisateur a RÉELLEMENT téléchargés (les autres sont ignorés).
+async function buildSmartPlaylists() {
+  try {
+    say("classement par genre…");
+    const res = await fetch("./smart-playlists.json", { cache: "no-store" });
+    if (!res.ok) throw new Error("liste des genres introuvable");
+    const map = await res.json();
+    const have = new Set(state.tracks.map((t) => t.id));
+    let added = 0;
+    for (const [name, ids] of Object.entries(map)) {
+      const wanted = ids.map((id) => `pc:${id}`).filter((id) => have.has(id));
+      if (!wanted.length) continue;
+      let pl = state.playlists.find((p) => p.name === name);
+      if (!pl) pl = newPlaylist(name);
+      added += addToPlaylist(pl.id, wanted);
+    }
+    render();
+    say(added ? `Playlists par genre créées · ${added} morceau${added > 1 ? "x" : ""} classé${added > 1 ? "s" : ""}` : "aucun morceau de ces genres n'est encore téléchargé sur l'appareil", added ? "info" : "error");
+  } catch (e) {
+    fail("classement par genre", e);
+  }
+}
+
 /** Migration douce depuis l'ancien magasin « tout-en-un » : un morceau à la fois, pour ne
  *  jamais charger les 1000 fichiers d'un coup. Ne tourne que si l'ancien magasin existe. */
 async function migrateLegacy(db) {
@@ -551,7 +576,10 @@ function renderPlaylists() {
   const head = `<div class="eyebrow">≣ · TES LISTES</div>
     <div class="title">Playlists</div>
     <div class="sub">${state.playlists.length} playlist${state.playlists.length > 1 ? "s" : ""}</div>
-    <button class="pill" data-new-playlist type="button" style="margin:16px 0 4px">${ICON.plus} Nouvelle playlist</button>`;
+    <div class="pl-actions">
+      <button class="pill" data-new-playlist type="button">${ICON.plus} Nouvelle playlist</button>
+      <button class="pill ghost" data-smart-build type="button">${ICON.playlists} Créer ma playlist Phonk / Funk</button>
+    </div>`;
   if (!state.playlists.length) {
     return head + `<div class="empty">Aucune playlist.<br>Crée-en une, puis ajoute des morceaux avec le <b>+</b> sur un titre, un album ou une recherche.</div>`;
   }
@@ -773,6 +801,7 @@ function setupDelegation() {
       return;
     }
     if (t.closest("[data-new-playlist]")) { const name = prompt("Nom de la playlist :", ""); if (name !== null) { newPlaylist(name); render(); } return; }
+    if (t.closest("[data-smart-build]")) { void buildSmartPlaylists(); return; }
     const openPl = t.closest("[data-open-playlist]");
     if (openPl) { openDetail("playlist", openPl.dataset.openPlaylist); return; }
     if (t.closest("[data-add-all]")) { openAddSheet(detailTracks().map((x) => x.id)); return; }
