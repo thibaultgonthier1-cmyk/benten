@@ -68,7 +68,10 @@ struct LibraryView: View {
                                 }
 
                             case .tracks:
-                                VStack(spacing: 2) {
+                                // LazyVStack : seules les lignes visibles sont construites. Un
+                                // VStack construisait les ~1000 lignes d'un coup (et décodait
+                                // autant de pochettes) → l'onglet Titres était injouable.
+                                LazyVStack(spacing: 2) {
                                     ForEach(Array(library.tracksByTitle.enumerated()), id: \.element.id) { offset, track in
                                         TrackRow(
                                             track: track,
@@ -237,8 +240,11 @@ struct AlbumTile: View {
     let action: () -> Void
     @State private var pressed = false
 
-    // Teinte mémorisée : la moyenne de l'image n'est calculée qu'une fois par pochette.
-    private var glow: Color { ArtworkCache.shared.tint(for: track) }
+    // Teinte du halo : lue SEULEMENT si elle est déjà en cache (jamais de décodage sur le fil
+    // principal) et seulement en style Benten — en style Apple le halo est masqué, donc inutile.
+    private var glow: Color {
+        Theme.appleStyle ? .clear : (ArtworkCache.shared.cachedTint(for: track) ?? Theme.accent)
+    }
 
     var body: some View {
         Button(action: {
@@ -292,14 +298,19 @@ struct AlbumTile: View {
 }
 
 /// Pochette : image extraite du fichier, ou repli dessiné (dégradé or).
+///
+/// Le décodage + redimensionnement se fait HORS du fil principal (via `ArtworkCache.load`), puis
+/// l'image s'affiche. Le fil principal ne décode jamais d'image, donc le défilement reste lisse —
+/// c'était LA cause des saccades. `maxPixel` adapte la finesse : petit pour une vignette, grand
+/// pour la pochette plein écran.
 struct ArtworkView: View {
     let track: Track
+    var maxPixel: CGFloat = 420
+    @State private var loaded: UIImage?
 
     var body: some View {
         ZStack {
-            // Cache : l'image est décodée UNE fois puis gardée en mémoire. Sans ça, chaque passage
-            // dans la grille redécodait la pochette et faisait saccader le défilement.
-            if let image = ArtworkCache.shared.image(for: track) {
+            if let image = loaded ?? ArtworkCache.shared.cached(for: track, maxPixel: maxPixel) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -307,12 +318,21 @@ struct ArtworkView: View {
                 Theme.accentGradient
                     .overlay(
                         Image(systemName: "music.note")
-                            .font(.system(size: 24, weight: .light))
-                            .foregroundStyle(Theme.ink.opacity(0.6))
+                            .font(.system(size: 22, weight: .light))
+                            .foregroundStyle(Theme.ink.opacity(0.55))
                     )
             }
         }
         .clipped()
+        .task(id: "\(track.id)@\(Int(maxPixel))") {
+            if let hit = ArtworkCache.shared.cached(for: track, maxPixel: maxPixel) {
+                loaded = hit
+                return
+            }
+            loaded = nil
+            let image = await ArtworkCache.shared.load(for: track, maxPixel: maxPixel)
+            if !Task.isCancelled { loaded = image }
+        }
     }
 }
 
@@ -420,7 +440,7 @@ struct NowPlayingView: View {
                             LacquerDisc(playing: player.playing)
                                 .frame(width: min(UIScreen.main.bounds.width * 0.84, 340))
                         }
-                        ArtworkView(track: track)
+                        ArtworkView(track: track, maxPixel: 1000)
                             .frame(width: min(
                                 UIScreen.main.bounds.width * (Theme.appleStyle ? 0.86 : 0.56),
                                 Theme.appleStyle ? 360 : 232
@@ -611,7 +631,9 @@ struct AlbumTileView: View {
     let onOpen: () -> Void
     @State private var pressed = false
 
-    private var glow: Color { ArtworkCache.shared.tint(for: album.artworkTrack) }
+    private var glow: Color {
+        Theme.appleStyle ? .clear : (ArtworkCache.shared.cachedTint(for: album.artworkTrack) ?? Theme.accent)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -785,7 +807,9 @@ struct ArtistTileView: View {
     let onOpen: () -> Void
     @State private var pressed = false
 
-    private var glow: Color { ArtworkCache.shared.tint(for: artist.artworkTrack) }
+    private var glow: Color {
+        Theme.appleStyle ? .clear : (ArtworkCache.shared.cachedTint(for: artist.artworkTrack) ?? Theme.accent)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

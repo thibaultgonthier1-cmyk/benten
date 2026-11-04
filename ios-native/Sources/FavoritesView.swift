@@ -19,7 +19,7 @@ struct FavoritesView: View {
                     empty
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: 14) {
                             header
                             ForEach(Array(tracks.enumerated()), id: \.element.id) { offset, track in
                                 TrackRow(

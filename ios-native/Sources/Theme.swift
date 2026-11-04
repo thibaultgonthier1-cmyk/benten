@@ -66,38 +66,31 @@ extension View {
     func serifTitle(_ size: CGFloat = 28) -> some View { modifier(SerifTitle(size: size)) }
 }
 
-/// Fond animé : laque noir + deux halos de l'accent qui respirent lentement.
+/// Fond de Benten : laque noir + deux halos dorés, FIXES.
 ///
-/// C'est l'équivalent des scènes de fond du bureau, en version légère : aucun décodage vidéo, juste
-/// deux dégradés dont l'opacité et l'échelle bougent en boucle — donc aucun coût GPU notable et
-/// aucun fichier à embarquer.
+/// Avant, les deux halos « respiraient » via une animation en boucle infinie (`repeatForever`) :
+/// SwiftUI re-rastérisait deux dégradés radiaux plein écran à chaque image, DERRIÈRE chaque onglet,
+/// en permanence — même app à l'arrêt. C'était un gouffre à fluidité pour un mouvement qu'on ne
+/// remarque même pas. Le fond est maintenant statique : rendu une fois, zéro coût ensuite, et visuel
+/// identique au repos.
 struct AnimatedBackdrop: View {
-    @State private var phase: Double = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         ZStack {
             Theme.ink
             RadialGradient(
-                colors: [Theme.accent.opacity(0.22 * (1 + 0.35 * sin(phase))), .clear],
-                center: UnitPoint(x: 0.5 + 0.08 * sin(phase * 0.7), y: 0.02),
+                colors: [Theme.accent.opacity(0.20), .clear],
+                center: UnitPoint(x: 0.5, y: 0.02),
                 startRadius: 0,
                 endRadius: 420
             )
             RadialGradient(
-                colors: [Theme.accentLight.opacity(0.10 * (1 + 0.4 * cos(phase * 0.8))), .clear],
-                center: UnitPoint(x: 0.9 + 0.05 * cos(phase), y: 0.95),
+                colors: [Theme.accentLight.opacity(0.10), .clear],
+                center: UnitPoint(x: 0.9, y: 0.95),
                 startRadius: 0,
                 endRadius: 380
             )
         }
         .ignoresSafeArea()
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) {
-                phase = .pi
-            }
-        }
     }
 }
 

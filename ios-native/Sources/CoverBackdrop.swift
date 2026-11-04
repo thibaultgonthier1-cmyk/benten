@@ -20,11 +20,9 @@ struct CoverBackdrop: View {
     let bpm: Double?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var image: UIImage? {
-        guard let track else { return nil }
-        return ArtworkCache.shared.image(for: track)
-    }
+    /// Pochette chargée hors du fil principal. Petite (260 px) : elle est floutée à 55 px, une image
+    /// fine ne servirait à rien et coûterait à décoder.
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
@@ -61,6 +59,15 @@ struct CoverBackdrop: View {
             )
         }
         .ignoresSafeArea()
+        .task(id: track?.id) {
+            guard let track else { image = nil; return }
+            if let hit = ArtworkCache.shared.cached(for: track, maxPixel: 260) {
+                image = hit
+                return
+            }
+            let loaded = await ArtworkCache.shared.load(for: track, maxPixel: 260)
+            if !Task.isCancelled { image = loaded }
+        }
     }
 
     private func blurred(_ image: UIImage, scale: CGFloat, opacity: Double) -> some View {
