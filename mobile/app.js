@@ -32,6 +32,8 @@ const state = {
   current: null,
   queue: [],
   index: 0,
+  order: [],
+  pos: 0,
   playing: false,
   shuffle: false,
   repeat: "all",
@@ -344,7 +346,7 @@ function renderRow(track, index) {
   const fav = state.favorites.has(track.id);
   const current = state.current && state.current.id === track.id;
   return `
-    <div class="row ${current ? "current" : ""}" data-play-index="${index}">
+    <div class="row ${current ? "current" : ""}" data-play-index="${index}" data-id="${escapeAttr(track.id)}">
       <div class="thumb" style="${coverGradient(track.album)}">${coverInner(track)}</div>
       <div class="meta">
         <div class="n">${escapeHtml(track.title)}</div>
@@ -443,54 +445,11 @@ function renderSettings() {
 
 /* ------------------------------- Liaisons ------------------------------- */
 
+// Après chaque rendu, on ne recâble QUE les champs (saisie/sélection) : les clics passent
+// par la délégation unique sur #view (setupDelegation), posée une seule fois au démarrage.
 function bind() {
-  document.querySelectorAll("[data-mode]").forEach((el) => {
-    el.onclick = () => { state.mode = el.dataset.mode; render(); };
-  });
-  const filter = $("filterMenu");
-  if (filter) filter.onclick = () => {
-    state.mode = state.mode === "albums" ? "artists" : state.mode === "artists" ? "tracks" : "albums";
-    render();
-  };
-
-  document.querySelectorAll("[data-play-album]").forEach((el) => {
-    el.onclick = () => {
-      const group = albums().find((g) => g.key === el.dataset.playAlbum);
-      if (group) playQueue(group.tracks, 0);
-    };
-  });
-  document.querySelectorAll("[data-play-artist]").forEach((el) => {
-    el.onclick = () => {
-      const artist = artists().find((a) => a.name === el.dataset.playArtist);
-      if (artist) playQueue(artist.albums.flatMap((a) => a.tracks), 0);
-    };
-  });
-  document.querySelectorAll("[data-play-index]").forEach((el) => {
-    el.onclick = (event) => {
-      if (event.target.dataset.fav) return;
-      const index = Number(el.dataset.playIndex);
-      const list = state.tab === "favorites"
-        ? state.tracks.filter((t) => state.favorites.has(t.id))
-        : state.tab === "search" ? lastSearchResults
-        : [...state.tracks].sort((a, b) => a.title.localeCompare(b.title));
-      playQueue(list, index);
-    };
-  });
-  document.querySelectorAll("[data-fav]").forEach((el) => {
-    el.onclick = (event) => { event.stopPropagation(); toggleFavorite(Number(el.dataset.fav)); };
-  });
-
-  document.querySelectorAll("[data-style]").forEach((el) => {
-    el.onclick = () => { state.style = el.dataset.style; applyStyle(); savePrefs(); render(); };
-  });
-  document.querySelectorAll("[data-palette]").forEach((el) => {
-    el.onclick = () => { applyPalette(el.dataset.palette); savePrefs(); };
-  });
-  document.querySelectorAll("[data-toggle]").forEach((el) => {
-    el.onclick = () => { if (el.dataset.toggle === "shuffle") { state.shuffle = !state.shuffle; savePrefs(); render(); } };
-  });
   const repeat = $("repeatSelect");
-  if (repeat) repeat.onchange = () => { state.repeat = repeat.value; savePrefs(); };
+  if (repeat) repeat.onchange = () => { state.repeat = repeat.value; savePrefs(); updateTransport(); };
 
   const search = $("searchInput");
   if (search) {
@@ -501,25 +460,56 @@ function bind() {
       $("searchResults").innerHTML = lastSearchResults.length
         ? lastSearchResults.map((t, i) => renderRow(t, i)).join("")
         : (q ? `<div class="empty">Aucun résultat</div>` : "");
-      bindRowsOnly();
     };
     search.focus();
   }
-
-  if ($("syncTest")) $("syncTest").onclick = runSyncTest;
-  if ($("syncRun")) $("syncRun").onclick = runSync;
-  if ($("clear")) $("clear").onclick = runClear;
 }
 
-function bindRowsOnly() {
-  document.querySelectorAll("[data-play-index]").forEach((el) => {
-    el.onclick = (event) => {
-      if (event.target.dataset.fav) return;
-      playQueue(lastSearchResults, Number(el.dataset.playIndex));
-    };
-  });
-  document.querySelectorAll("[data-fav]").forEach((el) => {
-    el.onclick = (event) => { event.stopPropagation(); toggleFavorite(Number(el.dataset.fav)); };
+// Un seul écouteur sur le conteneur de liste : zéro écouteur recréé par ligne, même à 1000 titres.
+function setupDelegation() {
+  const view = $("view");
+  if (!view || view.dataset.wired) return;
+  view.dataset.wired = "1";
+  view.addEventListener("click", (event) => {
+    const t = event.target;
+    const fav = t.closest("[data-fav]");
+    if (fav) { event.stopPropagation(); toggleFavorite(Number(fav.dataset.fav)); return; }
+    const mode = t.closest("[data-mode]");
+    if (mode) { state.mode = mode.dataset.mode; render(); return; }
+    if (t.closest("#filterMenu")) {
+      state.mode = state.mode === "albums" ? "artists" : state.mode === "artists" ? "tracks" : "albums";
+      render(); return;
+    }
+    const style = t.closest("[data-style]");
+    if (style) { state.style = style.dataset.style; applyStyle(); savePrefs(); render(); return; }
+    const pal = t.closest("[data-palette]");
+    if (pal) { applyPalette(pal.dataset.palette); savePrefs(); return; }
+    const tog = t.closest("[data-toggle]");
+    if (tog) {
+      if (tog.dataset.toggle === "shuffle") {
+        state.shuffle = !state.shuffle;
+        if (state.queue.length) buildOrder(state.index);
+        savePrefs(); render();
+      }
+      return;
+    }
+    const alb = t.closest("[data-play-album]");
+    if (alb) { const g = albums().find((x) => x.key === alb.dataset.playAlbum); if (g) playQueue(g.tracks, 0); return; }
+    const art = t.closest("[data-play-artist]");
+    if (art) { const a = artists().find((x) => x.name === art.dataset.playArtist); if (a) playQueue(a.albums.flatMap((z) => z.tracks), 0); return; }
+    const row = t.closest("[data-play-index]");
+    if (row) {
+      const index = Number(row.dataset.playIndex);
+      const list = state.tab === "favorites"
+        ? state.tracks.filter((x) => state.favorites.has(x.id))
+        : state.tab === "search" ? lastSearchResults
+        : [...state.tracks].sort((a, b) => a.title.localeCompare(b.title));
+      playQueue(list, index);
+      return;
+    }
+    if (t.closest("#syncTest")) { runSyncTest(); return; }
+    if (t.closest("#syncRun")) { runSync(); return; }
+    if (t.closest("#clear")) { runClear(); return; }
   });
 }
 
@@ -531,9 +521,30 @@ let loadToken = 0; // invalide un chargement audio si l'utilisateur change de mo
 function playQueue(list, index) {
   if (!list.length) return;
   state.queue = list;
-  state.index = Math.max(0, Math.min(index, list.length - 1));
+  const start = Math.max(0, Math.min(index, list.length - 1));
+  buildOrder(start);
+  state.index = state.order[state.pos];
   load(state.queue[state.index]);
   openNowPlaying();
+}
+
+// Ordre de lecture : identité en normal, permutation Fisher–Yates en aléatoire.
+// placeFirst garde le morceau choisi en tête (démarrage) ; sans lui, simple reshuffle (boucle).
+function buildOrder(startIndex, placeFirst = true) {
+  const n = state.queue.length;
+  const idx = Array.from({ length: n }, (_, i) => i);
+  if (state.shuffle) {
+    for (let i = n - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    if (placeFirst) {
+      const p = idx.indexOf(startIndex);
+      if (p > 0) [idx[0], idx[p]] = [idx[p], idx[0]];
+    }
+  }
+  state.order = idx;
+  state.pos = placeFirst ? Math.max(0, idx.indexOf(startIndex)) : 0;
 }
 
 function load(track) {
@@ -544,9 +555,11 @@ function load(track) {
   $("npArtist").textContent = track.artist;
   paintCover($("npCover"), track);
   applyCoverColor(track);
+  paintBackdrop(track);
   updateMediaSession(track);
   updateMini();
-  render();
+  // Pas de reconstruction de la liste (coûteux à 1000 titres) : on met juste à jour la surbrillance.
+  markCurrent();
 
   if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
   if (DEMO) {
@@ -574,6 +587,31 @@ function paintCover(el, track) {
   el.innerHTML = coverInner(track);
 }
 
+// Surbrillance du titre en cours SANS reconstruire la liste : on ne touche qu'à la classe.
+function markCurrent() {
+  const id = state.current ? state.current.id : null;
+  document.querySelectorAll("#view .row").forEach((row) => {
+    row.classList.toggle("current", row.dataset.id === id);
+  });
+}
+
+// Fond « en lecture » façon Apple Music : la vraie pochette, floutée et agrandie, qui dérive.
+// Deux calques en fondu croisé pour un changement de morceau sans à-coup.
+let artFront = null;
+function paintBackdrop(track) {
+  const a = $("npArtA");
+  const b = $("npArtB");
+  if (!a || !b) return;
+  const url = coverUrl(track);
+  if (!url) { a.classList.remove("show"); b.classList.remove("show"); artFront = null; return; }
+  const next = artFront === a ? b : a;
+  const prev = artFront === a ? a : b;
+  next.style.backgroundImage = `url("${url}")`;
+  next.classList.add("show");
+  if (prev !== next) prev.classList.remove("show");
+  artFront = next;
+}
+
 function updateMediaSession(track) {
   if (!("mediaSession" in navigator)) return;
   try {
@@ -598,17 +636,22 @@ function togglePlay() {
   else audio.pause();
 }
 
-function step(delta) {
+function step(delta, auto = false) {
   if (!state.queue.length) return;
-  if (state.repeat === "one" && delta > 0) { audio.currentTime = 0; audio.play(); return; }
-  let index = state.index + delta;
-  if (index >= state.queue.length) {
+  if (!state.order.length) buildOrder(state.index);
+  // Répéter ce titre : uniquement en enchaînement automatique, pas sur un appui « suivant ».
+  if (state.repeat === "one" && delta > 0 && auto) { audio.currentTime = 0; audio.play().catch(() => {}); return; }
+  let pos = state.pos + delta;
+  if (pos >= state.order.length) {
     if (state.repeat === "off") { audio.pause(); return; }
-    index = state.shuffle ? Math.floor(Math.random() * state.queue.length) : 0;
+    if (state.shuffle) buildOrder(0, false); // nouvel ordre aléatoire pour varier la boucle
+    pos = 0;
+  } else if (pos < 0) {
+    pos = state.repeat === "off" ? 0 : state.order.length - 1;
   }
-  if (index < 0) index = 0;
-  state.index = index;
-  load(state.queue[index]);
+  state.pos = pos;
+  state.index = state.order[pos];
+  load(state.queue[state.index]);
 }
 
 function updateTransport() {
@@ -841,7 +884,7 @@ $("grabber").onclick = closeNowPlaying;
 $("npPlay").onclick = togglePlay;
 $("npNext").onclick = () => step(1);
 $("npPrev").onclick = () => { if (audio.currentTime > 3) { audio.currentTime = 0; return; } step(-1); };
-$("npShuffle").onclick = () => { state.shuffle = !state.shuffle; savePrefs(); updateTransport(); };
+$("npShuffle").onclick = () => { state.shuffle = !state.shuffle; if (state.queue.length) buildOrder(state.index); savePrefs(); updateTransport(); };
 $("npRepeat").onclick = () => {
   state.repeat = state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off";
   savePrefs();
@@ -864,7 +907,7 @@ function switchTab(tab) {
 
 audio.addEventListener("play", () => { state.playing = true; updateTransport(); });
 audio.addEventListener("pause", () => { state.playing = false; updateTransport(); });
-audio.addEventListener("ended", () => step(1));
+audio.addEventListener("ended", () => step(1, true));
 audio.addEventListener("error", () => { if (audio.src) fail("audio", audio.error ?? new Error("format illisible")); });
 audio.addEventListener("loadedmetadata", () => { $("npDur").textContent = fmt(audio.duration); });
 audio.addEventListener("timeupdate", () => {
@@ -943,6 +986,7 @@ async function start() {
   loadPrefs();
   applyPalette(state.palette);
   applyStyle();
+  setupDelegation();
   render();
 
   if (DEMO) {

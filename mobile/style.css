@@ -53,18 +53,20 @@ body {
 /* ---------- Fond vivant ---------- */
 .backdrop {
   position: fixed;
-  inset: 0;
+  inset: -6%;
   z-index: 0;
   background:
     radial-gradient(520px 380px at 50% -4%, color-mix(in srgb, var(--cover) 70%, transparent), transparent 72%),
     radial-gradient(420px 320px at 100% 102%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
     var(--ink);
   transition: background 1.1s ease;
-  animation: breathe 16s ease-in-out infinite alternate;
+  /* Respiration sur transform uniquement : composée par le GPU, aucun repaint par image = zéro saccade. */
+  animation: breathe 18s ease-in-out infinite alternate;
+  will-change: transform;
 }
 @keyframes breathe {
-  from { filter: brightness(0.95); background-position: 0 0, 0 0, 0 0; }
-  to   { filter: brightness(1.07); background-position: 10px 8px, -8px -6px, 0 0; }
+  from { transform: scale(1) translate3d(0, 0, 0); }
+  to   { transform: scale(1.06) translate3d(1.2%, 0.8%, 0); }
 }
 
 /* ---------- En-tête ---------- */
@@ -460,17 +462,51 @@ body {
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes slideDown { from { transform: translateY(0); } to { transform: translateY(100%); } }
 
-/* Halo coloré derrière la pochette, dérivé de --cover : c'est lui qui rend l'écran « vivant ». */
+/* Fond « en lecture » façon Apple Music : la pochette floutée, agrandie, qui dérive lentement.
+   Deux calques pour le fondu croisé entre morceaux ; seul transform est animé (GPU, pas de repaint). */
+.np-art {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+.np-art-layer {
+  position: absolute;
+  inset: -14%;
+  background-size: cover;
+  background-position: center;
+  filter: blur(46px) saturate(1.45) brightness(0.6);
+  opacity: 0;
+  transform: scale(1.2);
+  transition: opacity 0.9s ease;
+  will-change: transform, opacity;
+  animation: drift 34s ease-in-out infinite alternate;
+}
+.np-art-layer.show { opacity: 1; }
+@keyframes drift {
+  from { transform: scale(1.2) translate3d(-2%, -1.5%, 0); }
+  to   { transform: scale(1.42) translate3d(2%, 2%, 0); }
+}
+/* Voile sombre pour garder le texte et les boutons lisibles par-dessus la pochette. */
+.np-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 9, 8, 0.4) 0%, rgba(10, 9, 8, 0.12) 38%, rgba(10, 9, 8, 0.62) 100%);
+}
+
+/* Halo coloré derrière la pochette, dérivé de --cover : ajoute de la profondeur par-dessus le fondu. */
 .np-glow {
   position: absolute;
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(60% 42% at 50% 34%, color-mix(in srgb, var(--cover) 85%, transparent), transparent 70%),
-    radial-gradient(80% 50% at 50% 108%, color-mix(in srgb, var(--cover) 55%, transparent), transparent 72%);
+    radial-gradient(60% 42% at 50% 34%, color-mix(in srgb, var(--cover) 70%, transparent), transparent 72%),
+    radial-gradient(80% 50% at 50% 108%, color-mix(in srgb, var(--cover) 45%, transparent), transparent 74%);
   transition: background 1.1s ease;
+  mix-blend-mode: screen;
 }
-#np > :not(.np-glow) { position: relative; z-index: 1; }
+#np > :not(.np-glow):not(.np-art) { position: relative; z-index: 1; }
 
 .grabber {
   width: 44px;
@@ -820,8 +856,9 @@ body.apple .filter-menu {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .backdrop, .disc, .cell, .row, .mini, #np.open { animation: none; }
-  .np-cover, .cover, .big, .backdrop, .np-glow { transition: none; }
+  .backdrop, .disc, .cell, .row, .mini, #np.open, .np-art-layer { animation: none; }
+  .np-cover, .cover, .big, .backdrop, .np-glow, .np-art-layer { transition: none; }
+  .np-art-layer { transform: scale(1.25); }
 }
 
 /* Règle de sûreté : `display:flex/grid` d'auteur l'emporterait sinon sur [hidden]. */
