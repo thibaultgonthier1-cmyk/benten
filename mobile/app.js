@@ -56,6 +56,38 @@ const PALETTES = {
 
 let lastSearchResults = [];
 
+/* ------------------------------- Icônes ------------------------------- */
+// Icônes vectorielles façon Apple Music (SF Symbols) : nettes, couleur héritée du bouton,
+// à la place des emojis/symboles. Un seul endroit, réutilisé partout.
+const ICON = {
+  library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7.5" width="12.5" height="13" rx="3"/><path d="M8 7.5V6A2.5 2.5 0 0 1 10.5 3.5H18.5A2.5 2.5 0 0 1 21 6V14A2.5 2.5 0 0 1 18.5 16.5H15.5"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 6.6a5 5 0 0 0-7.1 0L12 8.3l-1.7-1.7a5 5 0 1 0-7.1 7.1L12 21l8.8-8.8a5 5 0 0 0 0-7.1z"/></svg>',
+  heartFill: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.8 6.6a5 5 0 0 0-7.1 0L12 8.3l-1.7-1.7a5 5 0 1 0-7.1 7.1L12 21l8.8-8.8a5 5 0 0 0 0-7.1z"/></svg>',
+  playlists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7h11M9 12h11M9 17h7"/><circle cx="4.5" cy="7" r="1.1"/><circle cx="4.5" cy="12" r="1.1"/><circle cx="4.5" cy="17" r="1.1"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.74-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="3.8" height="14" rx="1.4"/><rect x="13.7" y="5" width="3.8" height="14" rx="1.4"/></svg>',
+  prev: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5.5" width="2.1" height="13" rx="1.05"/><path d="M20 6.5v11a.8.8 0 0 1-1.23.67l-8.5-5.5a.8.8 0 0 1 0-1.34l8.5-5.5A.8.8 0 0 1 20 6.5z"/></svg>',
+  next: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6.5v11a.8.8 0 0 0 1.23.67l8.5-5.5a.8.8 0 0 0 0-1.34l-8.5-5.5A.8.8 0 0 0 4 6.5z"/><rect x="16.9" y="5.5" width="2.1" height="13" rx="1.05"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3.5 20.5 3.5 20.5 8"/><path d="M3.5 20.5 20.5 3.5"/><polyline points="20.5 16 20.5 20.5 16 20.5"/><path d="M3.5 3.5l6 6"/><path d="M14.5 14.5l6 6"/></svg>',
+  repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 2 21 6 17 10"/><path d="M3 12V9.5A3.5 3.5 0 0 1 6.5 6H21"/><polyline points="7 22 3 18 7 14"/><path d="M21 12v2.5A3.5 3.5 0 0 1 17.5 18H3"/></svg>',
+  repeatOne: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 2 21 6 17 10"/><path d="M3 12V9.5A3.5 3.5 0 0 1 6.5 6H21"/><polyline points="7 22 3 18 7 14"/><path d="M21 12v2.5A3.5 3.5 0 0 1 17.5 18H3"/><text x="12" y="14.6" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle">1</text></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+};
+
+// Pose les icônes fixes (onglets, précédent/suivant, aléatoire, chevron) une fois au démarrage.
+function paintIcons() {
+  const tabIcons = [ICON.library, ICON.heart, ICON.playlists, ICON.search, ICON.settings];
+  document.querySelectorAll("#tabs .g").forEach((el, i) => { if (tabIcons[i]) el.innerHTML = tabIcons[i]; });
+  const set = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+  set("npPrev", ICON.prev);
+  set("npNext", ICON.next);
+  set("npShuffle", ICON.shuffle);
+  set("miniNext", ICON.next);
+  set("npClose", ICON.chevron);
+}
+
 /* ------------------------------- Messages ------------------------------- */
 
 function say(message, kind = "info") {
@@ -354,7 +386,7 @@ function renderRow(track, index) {
         <div class="n">${escapeHtml(track.title)}</div>
         <div class="s">${escapeHtml(track.artist)} · ${fmt(track.durationSec)}</div>
       </div>
-      <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? "♥" : "♡"}</button>
+      <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? ICON.heartFill : ICON.heart}</button>
     </div>`;
 }
 
@@ -413,8 +445,8 @@ function renderDetail() {
         <h1 class="detail-title">${escapeHtml(title)}</h1>
         <p class="detail-sub">${sub}</p>
         <div class="detail-actions">
-          <button class="pill" data-play-detail type="button"><span>▶</span> Lecture</button>
-          <button class="pill ghost" data-shuffle-detail type="button"><span>⤨</span> Aléatoire</button>
+          <button class="pill" data-play-detail type="button">${ICON.play} Lecture</button>
+          <button class="pill ghost" data-shuffle-detail type="button">${ICON.shuffle} Aléatoire</button>
         </div>
       </div>
       <div class="rows">${tracks.map((t, i) => renderDetailRow(t, i)).join("")}</div>
@@ -431,7 +463,7 @@ function renderDetailRow(track, index) {
         <div class="n">${escapeHtml(track.title)}</div>
         <div class="s">${escapeHtml(track.artist)} · ${fmt(track.durationSec)}</div>
       </div>
-      <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? "♥" : "♡"}</button>
+      <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? ICON.heartFill : ICON.heart}</button>
     </div>`;
 }
 
@@ -489,10 +521,6 @@ function renderSettings() {
         <div class="line"><span>Tout effacer</span>
           <button id="clear" class="btn danger" type="button">vider</button></div>
       </div>
-    </div>
-
-    <div class="group"><h4>À propos</h4>
-      <div class="card"><div class="line"><span>Version</span><span class="val">v${VERSION}</span></div></div>
     </div>`;
 }
 
@@ -710,16 +738,17 @@ function step(delta, auto = false) {
 }
 
 function updateTransport() {
-  const play = state.playing ? "❙❙" : "▶";
-  $("npPlay").textContent = play;
+  const playIcon = state.playing ? ICON.pause : ICON.play;
+  $("npPlay").innerHTML = playIcon;
   $("npPlay").classList.toggle("playing", state.playing);
   $("npCover").classList.toggle("playing", state.playing);
   $("disc").classList.toggle("playing", state.playing);
-  $("miniPlay").textContent = play;
+  $("miniPlay").innerHTML = playIcon;
   $("npShuffle").classList.toggle("on", state.shuffle);
+  $("npRepeat").innerHTML = state.repeat === "one" ? ICON.repeatOne : ICON.repeat;
   $("npRepeat").classList.toggle("on", state.repeat !== "off");
   const fav = state.current && state.favorites.has(state.current.id);
-  $("npHeart").textContent = fav ? "♥" : "♡";
+  $("npHeart").innerHTML = fav ? ICON.heartFill : ICON.heart;
   $("npHeart").classList.toggle("on", Boolean(fav));
 }
 
@@ -1056,6 +1085,7 @@ async function start() {
   applyPalette(state.palette);
   applyStyle();
   setupDelegation();
+  paintIcons();
   render();
   void requestPersistentStorage();
 

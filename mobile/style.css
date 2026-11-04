@@ -472,20 +472,21 @@ body {
 }
 .np-art-layer {
   position: absolute;
-  inset: -14%;
+  inset: -20%;
   background-size: cover;
   background-position: center;
-  filter: blur(46px) saturate(1.45) brightness(0.6);
+  filter: blur(52px) saturate(1.6) brightness(0.62);
   opacity: 0;
-  transform: scale(1.2);
-  transition: opacity 0.9s ease;
+  transform: scale(1.25);
+  transition: opacity 1.1s ease;
   will-change: transform, opacity;
-  animation: drift 34s ease-in-out infinite alternate;
+  animation: drift 42s ease-in-out infinite alternate;
 }
 .np-art-layer.show { opacity: 1; }
+/* Dérive lente avec une légère rotation : le fond « respire » comme sur Apple Music. GPU only. */
 @keyframes drift {
-  from { transform: scale(1.2) translate3d(-2%, -1.5%, 0); }
-  to   { transform: scale(1.42) translate3d(2%, 2%, 0); }
+  from { transform: scale(1.25) translate3d(-2.5%, -2%, 0) rotate(-1.6deg); }
+  to   { transform: scale(1.5) translate3d(2.5%, 2.5%, 0) rotate(1.6deg); }
 }
 /* Voile sombre pour garder le texte et les boutons lisibles par-dessus la pochette. */
 .np-art::after {
@@ -675,6 +676,18 @@ body {
 }
 .extras button:active { transform: scale(0.88); }
 .extras button.on { color: var(--accent); }
+
+/* ---------- Icônes SVG (façon Apple Music) : taille et couleur héritée ---------- */
+.tabs .g { font-size: 0; }
+.tabs .g svg { width: 25px; height: 25px; display: block; }
+.transport .side svg { width: 29px; height: 29px; display: block; }
+.big svg { width: 30px; height: 30px; display: block; }
+.extras button svg { width: 23px; height: 23px; display: block; }
+.medallion svg { width: 19px; height: 19px; display: block; }
+.mini .icon-btn svg { width: 25px; height: 25px; display: block; }
+#np .chevron svg { width: 24px; height: 24px; display: block; }
+.row .heart svg { width: 19px; height: 19px; display: block; }
+.pill svg { width: 19px; height: 19px; }
 
 /* ---------- Réglages ---------- */
 .group { margin: 12px 14px 0; }
