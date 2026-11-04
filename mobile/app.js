@@ -1034,6 +1034,20 @@ async function loadDemo() {
 
 /* ------------------------------- Démarrage ------------------------------- */
 
+// Demande au système de CONSERVER durablement les données (la musique téléchargée).
+// Sans ça, iOS peut vider IndexedDB sous pression de stockage : la musique disparaîtrait.
+// Silencieux si non supporté ou refusé.
+async function requestPersistentStorage() {
+  try {
+    if (navigator.storage && typeof navigator.storage.persist === "function") {
+      const already = navigator.storage.persisted ? await navigator.storage.persisted() : false;
+      if (!already) await navigator.storage.persist();
+    }
+  } catch {
+    /* non supporté : sans gravité */
+  }
+}
+
 async function start() {
   const badge = $("version");
   if (badge) badge.textContent = `v${VERSION}`;
@@ -1043,6 +1057,7 @@ async function start() {
   applyStyle();
   setupDelegation();
   render();
+  void requestPersistentStorage();
 
   if (DEMO) {
     state.tracks = await loadDemo();
