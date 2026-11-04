@@ -101,10 +101,11 @@ jobs:
           anchor = "// Override point for customization after application launch."
           if "browser.start" not in s and anchor in s:
               trigger = (anchor
-                  + "\n        // Lecture en arriere-plan / ecran verrouille : categorie lecture, SANS"
-                  + "\n        // activer la session en continu (sinon souffle casque au repos). iOS"
-                  + "\n        // l'active tout seul quand un media joue et la coupe au repos."
+                  + "\n        // Lecture en arriere-plan / ecran verrouille (comme Apple Music) :"
+                  + "\n        // categorie lecture + session activee (indispensable pour que le son"
+                  + "\n        // continue quand l'ecran se verrouille)."
                   + "\n        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)"
+                  + "\n        try? AVAudioSession.sharedInstance().setActive(true)"
                   + "\n        let browser = NWBrowser(for: .bonjour(type: \"_benten._tcp\", domain: \"local.\"), using: NWParameters())"
                   + "\n        browser.stateUpdateHandler = { _ in }"
                   + "\n        browser.start(queue: .main)"
