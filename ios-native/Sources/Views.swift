@@ -844,7 +844,7 @@ struct NowPlayingView: View {
                         // Pendant la transition : on montre vers quoi on mixe, ondes animées.
                         Image(systemName: "waveform")
                             .symbolEffect(.variableColor.iterative, isActive: true)
-                        Text("Mix → \(next.title)")
+                        Text(next.id == player.current?.id ? "Mix en boucle" : "Mix → \(next.title)")
                             .lineLimit(1)
                             .frame(maxWidth: 130)
                     } else {

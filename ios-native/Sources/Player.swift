@@ -579,7 +579,10 @@ final class Player: NSObject, ObservableObject {
         refreshPlan()
     }
 
+    /// Prochain morceau que jouera l'automix. En « répéter ce titre », c'est le morceau lui-même :
+    /// il se mixe sur son propre début, calé sur les temps (boucle façon DJ, sans blanc).
     private var nextIndexInOrder: Int? {
+        if repeatMode == .one, queue.indices.contains(queuePosition) { return queuePosition }
         guard let at = order.firstIndex(of: queuePosition) else { return nil }
         if at + 1 < order.count { return order[at + 1] }
         return repeatMode == .all ? order.first : nil
@@ -735,12 +738,15 @@ final class Player: NSObject, ObservableObject {
 
     /// (Re)calcule la transition vers le morceau suivant.
     private func refreshPlan() {
-        guard automixEnabled, let current, let next = upcomingTrack, next.id != current.id else {
+        // Le suivant peut être LE MÊME morceau (répéter ce titre, ou file d'un seul titre) :
+        // il est alors mixé sur lui-même.
+        guard automixEnabled, let current, let next = upcomingTrack else {
             plan = nil
             planTrackID = nil
             return
         }
         let sameAlbum = !shuffle
+            && next.id != current.id
             && current.album == next.album
             && current.artist == next.artist
             && current.album != "Album inconnu"
@@ -908,7 +914,7 @@ final class Player: NSObject, ObservableObject {
         let total = duration
         if clock.duration != total { clock.duration = total }
 
-        guard automixEnabled, !fading, repeatMode != .one,
+        guard automixEnabled, !fading,
               let plan, planTrackID == current?.id else { return }
         // On prépare 1,2 s avant le point de sortie ; si on a déjà dépassé la moitié du
         // chevauchement prévu (seek tardif), on laisse le morceau finir normalement.
