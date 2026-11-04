@@ -1,16 +1,12 @@
-# Benten natif — app iOS en SwiftUI, compilée sans Mac.
+# Compilation du .ipa Benten NATIF (SwiftUI) — sans Mac, sur les runners macOS de GitHub.
 #
-# POURQUOI
-# La version Capacitor (page web emballée) s'est heurtée à la permission « Réseau local » d'iOS et
-# n'apportait pas le comportement d'une vraie app. Cette cible est une app NATIVE :
-#   - SwiftUI (interface iOS authentique) ;
-#   - AVFoundation + AVAudioSession `.playback` : lecture écran verrouillé et en arrière-plan ;
-#   - MPNowPlayingInfoCenter : pochette et titre sur l'écran verrouillé, commandes du casque ;
-#   - pochettes réellement extraites des fichiers audio (AVAsset metadata) ;
-#   - import depuis Fichiers / iCloud (UIDocumentPicker), stockage dans le dossier de l'app.
+# POURQUOI CE FICHIER
+# L'app native (ios-native/) remplace la coquille web Capacitor : audio natif (AVAudioEngine),
+# donc lecture ecran verrouille, fondu enchaine et beatmatch REELS — ce que le web ne peut pas
+# faire sur iPhone. Le projet Xcode est genere a la volee par XcodeGen depuis project.yml.
 #
-# Le projet Xcode est GÉNÉRÉ par XcodeGen à partir de `project.yml` : pas de `.pbxproj` à maintenir.
-# Aucune signature n'est appliquée : le .ipa est signé ensuite par AltStore/AltServer.
+# UTILISATION : onglet Actions > « iOS natif — ipa non signe » > telecharger l'artefact quand vert,
+# puis signer/installer le .ipa avec ton outil habituel (Sideloadly). RIEN N'EST SIGNE ICI.
 
 name: iOS natif — ipa non signé
 
@@ -23,29 +19,24 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: XcodeGen
-        run: |
-          brew install xcodegen
-          xcodegen --version
+      - name: Installer XcodeGen
+        run: brew install xcodegen
 
       - name: Générer le projet Xcode
         working-directory: ios-native
         run: |
           xcodegen generate
-          ls -la
+          ls -la *.xcodeproj
 
       - name: Compiler (sans signature)
         working-directory: ios-native
         run: |
-          # `pipefail` : sans lui, un echec de xcodebuild etait masque par le `tail` qui suit,
-          # et l'etape paraissait verte alors que rien n'avait ete compile.
-          set -o pipefail
           xcodebuild \
             -project Benten.xcodeproj \
             -scheme Benten \
@@ -56,23 +47,22 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            build 2>&1 | tee build.log | tail -n 200
+            build
 
       - name: Empaqueter le .ipa
+        working-directory: ios-native
         run: |
-          APP=$(find ios-native/build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
-          echo "App : $APP"
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 2 | head -n 1)
+          echo "App : $APP_PATH"
           mkdir -p out/Payload
-          cp -R "$APP" out/Payload/
+          cp -R "$APP_PATH" out/Payload/
           cd out
-          zip -qry benten-native-unsigned.ipa Payload
-          ls -lh benten-native-unsigned.ipa
+          zip -qry benten-native.ipa Payload
+          ls -lh benten-native.ipa
 
       - uses: actions/upload-artifact@v4
         with:
           name: benten-native-ipa
-          path: out/benten-native-unsigned.ipa
+          path: ios-native/out/benten-native.ipa
           if-no-files-found: error
           retention-days: 14
-
-
