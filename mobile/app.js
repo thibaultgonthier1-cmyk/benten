@@ -86,6 +86,7 @@ const state = {
   style: "apple",
   crossfade: 0, // fondu enchaîné en secondes (0 = désactivé). OFF par défaut : le moteur
                 // Web Audio du fondu est suspendu par iOS en arrière-plan et couperait la musique.
+  beatmatch: false, // « AutoMix maison » : cale le tempo du morceau suivant sur l'actuel au fondu.
   persistent: false,
 };
 
@@ -751,6 +752,11 @@ function renderSettings() {
           </div>
           <p class="hint" style="margin-top:8px">Fond les morceaux (comme Apple). ⚠️ Peut couper la musique quand l'écran est verrouillé — laisse sur Off pour la lecture en arrière-plan.</p>
         </div>
+        <div class="line" style="margin-top:14px">
+          <span>Beatmatch (AutoMix maison)</span>
+          <button class="toggle ${state.beatmatch ? "on" : ""}" data-beatmatch type="button" aria-label="Beatmatch"></button>
+        </div>
+        <p class="hint">Cale le tempo du morceau suivant sur l'actuel au changement, façon DJ (écran allumé). Expérimental — idéal pour la phonk. Nécessite le fondu.</p>
       </div>
     </div>
 
@@ -822,6 +828,7 @@ function setupDelegation() {
     if (style) { state.style = style.dataset.style; applyStyle(); savePrefs(); render(); return; }
     const xfade = t.closest("[data-xfade]");
     if (xfade) { state.crossfade = Number(xfade.dataset.xfade); savePrefs(); render(); return; }
+    if (t.closest("[data-beatmatch]")) { state.beatmatch = !state.beatmatch; savePrefs(); render(); return; }
     const pal = t.closest("[data-palette]");
     if (pal) { applyPalette(pal.dataset.palette); savePrefs(); return; }
     if (t.closest("[data-back]")) { state.detail = null; render(); const v = $("view"); if (v) v.scrollTop = 0; return; }
@@ -929,7 +936,7 @@ function load(track) {
     return;
   }
   // L'audio est lu à la demande : c'est ce qui évite de charger les 1000 fichiers en mémoire.
-  if (state.crossfade) ensureGraph(); // moteur Web Audio UNIQUEMENT si le fondu est activé
+  if (xfadeDur()) ensureGraph(); // moteur Web Audio si fondu OU beatmatch actif
   const token = ++loadToken;
   loadBlobInto(audio, track).then(() => {
     if (token !== loadToken) return; // l'utilisateur a déjà changé de morceau
@@ -1024,8 +1031,8 @@ function step(delta, auto = false) {
   } else if (pos < 0) {
     pos = state.repeat === "off" ? 0 : state.order.length - 1;
   }
-  // Fondu activé + un morceau joue déjà → on fond vers la cible, y compris sur Suivant/Précédent.
-  if (state.crossfade > 0 && !(DEMO && !DEMO_AUDIO) && state.current && !audio.paused) {
+  // Fondu/beatmatch activé + un morceau joue déjà → on fond vers la cible (Suivant/Précédent inclus).
+  if (xfadeDur() > 0 && !(DEMO && !DEMO_AUDIO) && state.current && !audio.paused) {
     crossfadeTo(pos);
     return;
   }
@@ -1039,13 +1046,14 @@ function step(delta, auto = false) {
    suivant en sourdine et on croise les volumes : l'un descend, l'autre monte.
    state.crossfade = 0 → désactivé, lecture normale enchaînée par `ended`. */
 function maybeCrossfade() {
-  if (crossfading || !state.crossfade) return;
+  const dur = xfadeDur();
+  if (crossfading || !dur) return;
   if (DEMO && !DEMO_AUDIO) return;
   if (state.repeat === "one") return; // répéter le même morceau : pas de fondu
   if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
   if (audio.currentTime < 1) return; // évite un déclenchement immédiat (morceau très court)
   const remaining = audio.duration - audio.currentTime;
-  if (remaining > state.crossfade || remaining <= 0.25) return;
+  if (remaining > dur || remaining <= 0.25) return;
   const np = nextPosition();
   if (np != null) crossfadeTo(np);
 }
@@ -1067,18 +1075,36 @@ function nextPosition() {
 function crossfadeTo(pos) {
   const target = state.queue[state.order[pos]];
   if (!target) return;
+  const fromTrack = state.current; // morceau sortant (pour l'analyse de tempo)
   cancelCrossfade(); // règle proprement un fondu déjà en cours
   ensureGraph();
   const outgoing = audio;
   const incoming = audioEls[1 - ai];
   crossfading = true;
   const token = ++xfadeToken;
-  loadBlobInto(incoming, target).then(() => {
+  const bm = state.beatmatch && !(DEMO && !DEMO_AUDIO);
+  Promise.all([
+    loadBlobInto(incoming, target),
+    bm ? analyzeTempo(fromTrack) : Promise.resolve(null),
+    bm ? analyzeTempo(target) : Promise.resolve(null),
+  ]).then(([, outT, inT]) => {
     if (token !== xfadeToken) return; // fondu annulé entre-temps
     setVol(incoming, 0);
-    try { incoming.currentTime = 0; } catch { /* pas encore prêt : sans gravité */ }
+    incoming.playbackRate = 1;
+    try { if ("preservesPitch" in incoming) incoming.preservesPitch = true; } catch { /* idem */ }
+    try { if ("webkitPreservesPitch" in incoming) incoming.webkitPreservesPitch = true; } catch { /* idem */ }
+    let startAt = 0;
+    if (bm && outT && inT && outT.bpm && inT.bpm) {
+      // Cale le tempo du nouveau sur l'actuel (voix préservée). On évite les ratios extrêmes
+      // en passant à l'octave si l'écart est trop grand (ex. 85 vs 170 BPM = même tempo).
+      let ratio = outT.bpm / inT.bpm;
+      if (ratio > 1.35) ratio /= 2; else if (ratio < 0.74) ratio *= 2;
+      ratio = Math.max(0.6, Math.min(1.6, ratio));
+      incoming.playbackRate = ratio;
+      startAt = inT.firstBeat || 0; // démarrer sur un beat
+    }
+    try { incoming.currentTime = startAt; } catch { /* pas encore prêt : sans gravité */ }
     incoming.play().catch(() => {});
-    // On bascule l'affichage sur le nouveau morceau dès le DÉBUT du fondu.
     ai = 1 - ai;
     audio = incoming;
     loadToken++; // invalide un chargement éventuel visant le lecteur sortant
@@ -1087,9 +1113,14 @@ function crossfadeTo(pos) {
     state.current = target;
     paintTrack(target);
     updateTransport();
-    const durMs = Math.max(400, state.crossfade * 1000);
-    rampVolume(outgoing, 1, 0, durMs, token, () => { outgoing.pause(); try { outgoing.currentTime = 0; } catch {} });
-    rampVolume(incoming, 0, 1, durMs, token, () => { if (token === xfadeToken) crossfading = false; });
+    const durMs = Math.max(400, xfadeDur() * 1000);
+    rampVolume(outgoing, 1, 0, durMs, token, () => { outgoing.pause(); try { outgoing.currentTime = 0; } catch {} outgoing.playbackRate = 1; });
+    rampVolume(incoming, 0, 1, durMs, token, () => {
+      if (token !== xfadeToken) return;
+      crossfading = false;
+      // Après le mix, retour en douceur du nouveau morceau à sa vitesse normale.
+      if (Math.abs(incoming.playbackRate - 1) > 0.01) rampPlaybackRate(incoming, incoming.playbackRate, 1, 1800);
+    });
   }).catch(() => { if (token === xfadeToken) crossfading = false; });
 }
 
@@ -1128,6 +1159,77 @@ function cancelCrossfade() {
   setVol(other, 1);
   if (audio) setVol(audio, 1);
 }
+
+/* ---- Beatmatch « maison » (façon AutoMix) ----
+   Détection du tempo par filtrage du kick (passe-bande ~90–150 Hz) puis regroupement des
+   intervalles entre pics (approche autocorrélation de Joe Sullivan). Sert à caler la vitesse
+   du morceau entrant sur le sortant au moment du fondu. Résultat mis en cache par morceau. */
+const bpmCache = new Map();
+async function analyzeTempo(track) {
+  if (!track) return null;
+  if (bpmCache.has(track.id)) return bpmCache.get(track.id);
+  let result = null;
+  try {
+    const blob = track.blob ?? await getAudio(track.id);
+    if (!blob) return null;
+    const arr = await blob.arrayBuffer();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const dctx = new Ctx();
+    const buf = await dctx.decodeAudioData(arr.slice(0));
+    dctx.close();
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const off = new OAC(1, buf.length, buf.sampleRate);
+    const src = off.createBufferSource();
+    src.buffer = buf;
+    const lp = off.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 150;
+    const hp = off.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 90;
+    src.connect(lp); lp.connect(hp); hp.connect(off.destination);
+    src.start(0);
+    const rendered = await off.startRendering();
+    const data = rendered.getChannelData(0);
+    const sr = rendered.sampleRate;
+    const minGap = Math.floor(sr * 0.25); // ≥ 0,25 s entre pics (≤ 240 BPM)
+    let peaks = [];
+    let threshold = 0.9;
+    while (peaks.length < 40 && threshold > 0.15) {
+      peaks = [];
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] > threshold) { peaks.push(i); i += minGap; }
+      }
+      if (peaks.length < 40) threshold -= 0.05;
+    }
+    const counts = {};
+    for (let i = 0; i < peaks.length; i++) {
+      for (let j = i + 1; j < Math.min(i + 10, peaks.length); j++) {
+        let bpm = (60 * sr) / (peaks[j] - peaks[i]);
+        while (bpm < 90) bpm *= 2;
+        while (bpm > 180) bpm /= 2;
+        bpm = Math.round(bpm);
+        counts[bpm] = (counts[bpm] || 0) + 1;
+      }
+    }
+    let bestBpm = 0, best = 0;
+    for (const b in counts) if (counts[b] > best) { best = counts[b]; bestBpm = Number(b); }
+    if (bestBpm) result = { bpm: bestBpm, firstBeat: peaks.length ? peaks[0] / sr : 0 };
+  } catch (e) {
+    console.warn("[benten] tempo non détecté", e);
+  }
+  bpmCache.set(track.id, result);
+  return result;
+}
+
+// Ramène en douceur la vitesse d'un lecteur vers `to` (après un mix beatmatché).
+function rampPlaybackRate(el, from, to, durMs) {
+  const t0 = performance.now();
+  (function tick(now) {
+    const p = Math.min(1, (now - t0) / durMs);
+    try { el.playbackRate = from + (to - from) * p; } catch { /* sans gravité */ }
+    if (p < 1) requestAnimationFrame(tick);
+  })(performance.now());
+}
+
+// Durée effective du fondu : le réglage, ou 4 s par défaut quand seul le beatmatch est actif.
+function xfadeDur() { return state.crossfade > 0 ? state.crossfade : (state.beatmatch ? 4 : 0); }
 
 function updateTransport() {
   const playIcon = state.playing ? ICON.pause : ICON.play;
@@ -1182,7 +1284,7 @@ function savePrefs() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       palette: state.palette, style: state.style, shuffle: state.shuffle,
       repeat: state.repeat, favorites: [...state.favorites], crossfade: state.crossfade,
-      cfMigrated: true,
+      beatmatch: state.beatmatch, cfMigrated: true,
     }));
   } catch { /* stockage refusé : les préférences restent en session. */ }
 }
@@ -1195,6 +1297,7 @@ function loadPrefs() {
     if (p.repeat) state.repeat = p.repeat;
     if (Array.isArray(p.favorites)) state.favorites = new Set(p.favorites);
     if (typeof p.crossfade === "number") state.crossfade = p.crossfade;
+    if (typeof p.beatmatch === "boolean") state.beatmatch = p.beatmatch;
     // Migration one-shot : le fondu coupait la lecture en arrière-plan → on le remet OFF
     // une fois sur les installations existantes, puis on retient le choix de l'utilisateur.
     if (!p.cfMigrated) { state.crossfade = 0; savePrefs(); }
