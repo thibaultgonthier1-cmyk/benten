@@ -19,9 +19,47 @@ const VERSION = "2.0.0";
 const SYNC_KEY = "benten-sync";
 const PREFS_KEY = "benten-prefs";
 const DEMO = new URLSearchParams(location.search).get("demo") === "1";
+// En démo, ?audio=1 active un vrai son (bip discret) pour tester le fondu enchaîné.
+const DEMO_AUDIO = DEMO && new URLSearchParams(location.search).get("audio") === "1";
 
 const $ = (id) => document.getElementById(id);
-const audio = $("audio");
+// Deux lecteurs pour le fondu enchaîné : l'un s'éteint pendant que l'autre monte.
+// `audio` pointe TOUJOURS sur le lecteur actif (celui qui pilote l'affichage).
+const audioEls = [$("audio"), new Audio()];
+audioEls[1].preload = "auto";
+let ai = 0;
+let audio = audioEls[ai];
+let crossfading = false;
+let xfadeToken = 0;
+
+// iOS IGNORE `audio.volume` (limite WebKit). Pour faire un vrai fondu, on passe
+// chaque lecteur par un nœud de gain Web Audio, qui lui est contrôlable sur iPhone.
+let actx = null;
+const gainNodes = [null, null];
+function ensureGraph() {
+  try {
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return; // pas de Web Audio : on retombera sur .volume (desktop)
+      actx = new AC();
+      audioEls.forEach((el, i) => {
+        const g = actx.createGain();
+        g.gain.value = 1;
+        actx.createMediaElementSource(el).connect(g);
+        g.connect(actx.destination);
+        gainNodes[i] = g;
+      });
+    }
+    if (actx.state === "suspended") actx.resume();
+  } catch { actx = null; }
+}
+// Règle le « volume » d'un lecteur via son nœud de gain (ou .volume en repli desktop).
+function setVol(el, v) {
+  v = Math.max(0, Math.min(1, v));
+  const i = audioEls.indexOf(el);
+  if (gainNodes[i]) gainNodes[i].gain.value = v;
+  else el.volume = v;
+}
 
 /* ------------------------------- État ------------------------------- */
 
@@ -41,6 +79,7 @@ const state = {
   favorites: new Set(),
   palette: "or",
   style: "apple",
+  crossfade: 6, // fondu enchaîné entre morceaux, en secondes (0 = désactivé)
   persistent: false,
 };
 
@@ -510,6 +549,14 @@ function renderSettings() {
             <button data-style="apple" class="${state.style === "apple" ? "on" : ""}">Apple Music</button>
           </div>
         </div>
+        <div class="line col" style="margin-top:14px">
+          <span style="margin-bottom:8px">Fondu enchaîné</span>
+          <div class="segmented" style="display:flex;margin:0">
+            ${[["0", "Off"], ["4", "4 s"], ["6", "6 s"], ["9", "9 s"], ["12", "12 s"]]
+              .map(([v, label]) => `<button data-xfade="${v}" class="${state.crossfade === Number(v) ? "on" : ""}">${label}</button>`)
+              .join("")}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -560,6 +607,8 @@ function setupDelegation() {
     }
     const style = t.closest("[data-style]");
     if (style) { state.style = style.dataset.style; applyStyle(); savePrefs(); render(); return; }
+    const xfade = t.closest("[data-xfade]");
+    if (xfade) { state.crossfade = Number(xfade.dataset.xfade); savePrefs(); render(); return; }
     const pal = t.closest("[data-palette]");
     if (pal) { applyPalette(pal.dataset.palette); savePrefs(); return; }
     if (t.closest("[data-back]")) { state.detail = null; render(); const v = $("view"); if (v) v.scrollTop = 0; return; }
@@ -630,10 +679,9 @@ function buildOrder(startIndex, placeFirst = true) {
   state.pos = placeFirst ? Math.max(0, idx.indexOf(startIndex)) : 0;
 }
 
-function load(track) {
-  if (!track) return;
-  state.current = track;
-  // Peinture immédiate (identité + pochette + couleur) : l'écran réagit sans attendre l'audio.
+// Peinture de l'écran pour un morceau (identité + pochette + couleur + surbrillance),
+// sans toucher à l'audio. Partagée par la lecture normale ET le fondu enchaîné.
+function paintTrack(track) {
   $("npTitle").textContent = track.title;
   $("npArtist").textContent = track.artist;
   paintCover($("npCover"), track);
@@ -641,27 +689,57 @@ function load(track) {
   paintBackdrop(track);
   updateMediaSession(track);
   updateMini();
-  // Pas de reconstruction de la liste (coûteux à 1000 titres) : on met juste à jour la surbrillance.
   markCurrent();
+}
 
-  if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
-  if (DEMO) {
-    // Démo : pas de vrai audio. On simule l'état « en lecture » pour montrer la pochette
-    // vivante (grandit) et le disque qui tourne, sans charger de fichier.
+// Charge le son d'un morceau DANS un lecteur donné (sans toucher à l'affichage).
+function loadBlobInto(el, track) {
+  if (DEMO_AUDIO) { el.src = demoToneUrl(); return Promise.resolve(); }
+  return Promise.resolve(track.blob ?? getAudio(track.id)).then((blob) => {
+    if (!blob) throw new Error("fichier introuvable sur l'appareil");
+    if (el._url) URL.revokeObjectURL(el._url);
+    el._url = URL.createObjectURL(blob);
+    el.src = el._url;
+  });
+}
+
+function load(track) {
+  if (!track) return;
+  cancelCrossfade(); // un changement manuel annule tout fondu en cours
+  state.current = track;
+  // Peinture immédiate : l'écran réagit sans attendre l'audio.
+  paintTrack(track);
+  if (DEMO && !DEMO_AUDIO) {
+    // Démo sans audio : on simule « en lecture » pour montrer la pochette et le disque.
     state.playing = true;
     updateTransport();
     return;
   }
   // L'audio est lu à la demande : c'est ce qui évite de charger les 1000 fichiers en mémoire.
-  // Si le stockage a été refusé, le blob est resté en mémoire sur le morceau : on l'utilise.
+  if (state.crossfade) ensureGraph(); // moteur Web Audio UNIQUEMENT si le fondu est activé
   const token = ++loadToken;
-  Promise.resolve(track.blob ?? getAudio(track.id)).then((blob) => {
+  loadBlobInto(audio, track).then(() => {
     if (token !== loadToken) return; // l'utilisateur a déjà changé de morceau
-    if (!blob) { fail("lecture", new Error("fichier introuvable sur l'appareil")); return; }
-    objectUrl = URL.createObjectURL(blob);
-    audio.src = objectUrl;
+    setVol(audio, 1);
     audio.play().then(() => { state.playing = true; updateTransport(); }).catch((e) => { state.playing = false; updateTransport(); fail("lecture refusée", e); });
-  }).catch((e) => fail("lecture", e));
+  }).catch((e) => { if (token === loadToken) fail("lecture", e); });
+}
+
+// Bip discret (9 s) généré à la volée : sert UNIQUEMENT à tester le fondu en démo (?demo=1&audio=1).
+let _demoToneUrl = null;
+function demoToneUrl() {
+  if (_demoToneUrl) return _demoToneUrl;
+  const sr = 8000, secs = 9, n = sr * secs;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const dv = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, "RIFF"); dv.setUint32(4, 36 + n * 2, true); ws(8, "WAVE"); ws(12, "fmt ");
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  ws(36, "data"); dv.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.sin(2 * Math.PI * 220 * i / sr) * 0.03 * 32767, true);
+  _demoToneUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  return _demoToneUrl;
 }
 
 function paintCover(el, track) {
@@ -714,7 +792,8 @@ function updateMediaSession(track) {
 }
 
 function togglePlay() {
-  if (DEMO) { state.playing = !state.playing; updateTransport(); return; }
+  if (DEMO && !DEMO_AUDIO) { state.playing = !state.playing; updateTransport(); return; }
+  if (crossfading) cancelCrossfade(); // une pause pendant le fondu le fige sur le morceau en cours
   if (audio.paused) audio.play().catch((e) => fail("lecture refusée", e));
   else audio.pause();
 }
@@ -735,6 +814,82 @@ function step(delta, auto = false) {
   state.pos = pos;
   state.index = state.order[pos];
   load(state.queue[state.index]);
+}
+
+/* ---- Fondu enchaîné (crossfade) façon Apple Music ----
+   Quand il reste moins que la durée réglée avant la fin, on démarre le morceau
+   suivant en sourdine et on croise les volumes : l'un descend, l'autre monte.
+   state.crossfade = 0 → désactivé, lecture normale enchaînée par `ended`. */
+function maybeCrossfade() {
+  if (crossfading || !state.crossfade) return;
+  if (DEMO && !DEMO_AUDIO) return;
+  if (state.repeat === "one") return; // répéter le même morceau : pas de fondu
+  if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+  if (audio.currentTime < 1) return; // évite un déclenchement immédiat (morceau très court)
+  const remaining = audio.duration - audio.currentTime;
+  if (remaining > state.crossfade || remaining <= 0.25) return;
+  const np = nextPosition();
+  if (np != null) startCrossfade(np);
+}
+
+function nextPosition() {
+  if (!state.order.length) return null;
+  let pos = state.pos + 1;
+  if (pos >= state.order.length) {
+    if (state.repeat !== "all") return null; // fin de file sans boucle : pas de fondu
+    if (state.shuffle) buildOrder(0, false);  // nouvel ordre aléatoire pour la boucle
+    pos = 0;
+  }
+  return pos;
+}
+
+function startCrossfade(np) {
+  const nextTrack = state.queue[state.order[np]];
+  if (!nextTrack) return;
+  const outgoing = audio;
+  const incoming = audioEls[1 - ai];
+  crossfading = true;
+  ensureGraph();
+  const token = ++xfadeToken;
+  loadBlobInto(incoming, nextTrack).then(() => {
+    if (token !== xfadeToken) return; // fondu annulé entre-temps
+    setVol(incoming, 0);
+    try { incoming.currentTime = 0; } catch { /* pas encore prêt : sans gravité */ }
+    incoming.play().catch(() => {});
+    // On bascule l'affichage sur le nouveau morceau dès le DÉBUT du fondu (comme Apple).
+    ai = 1 - ai;
+    audio = incoming;
+    loadToken++; // invalide un chargement éventuel visant le lecteur sortant
+    state.pos = np;
+    state.index = state.order[np];
+    state.current = nextTrack;
+    paintTrack(nextTrack);
+    updateTransport();
+    const durMs = Math.max(400, state.crossfade * 1000);
+    rampVolume(outgoing, 1, 0, durMs, token, () => { outgoing.pause(); try { outgoing.currentTime = 0; } catch {} });
+    rampVolume(incoming, 0, 1, durMs, token, () => { if (token === xfadeToken) crossfading = false; });
+  }).catch(() => { if (token === xfadeToken) crossfading = false; });
+}
+
+function rampVolume(el, from, to, durMs, token, done) {
+  const t0 = performance.now();
+  function tick(now) {
+    if (token !== xfadeToken) return; // fondu annulé : on stoppe la rampe
+    const p = Math.min(1, (now - t0) / durMs);
+    setVol(el, from + (to - from) * p);
+    if (p < 1) requestAnimationFrame(tick);
+    else if (done) done();
+  }
+  requestAnimationFrame(tick);
+}
+
+function cancelCrossfade() {
+  xfadeToken++;        // stoppe toute rampe de volume en cours
+  crossfading = false;
+  const other = audioEls[1 - ai];
+  try { other.pause(); } catch { /* sans gravité */ }
+  setVol(other, 1);
+  if (audio) setVol(audio, 1);
 }
 
 function updateTransport() {
@@ -789,7 +944,7 @@ function savePrefs() {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       palette: state.palette, style: state.style, shuffle: state.shuffle,
-      repeat: state.repeat, favorites: [...state.favorites],
+      repeat: state.repeat, favorites: [...state.favorites], crossfade: state.crossfade,
     }));
   } catch { /* stockage refusé : les préférences restent en session. */ }
 }
@@ -801,6 +956,7 @@ function loadPrefs() {
     if (typeof p.shuffle === "boolean") state.shuffle = p.shuffle;
     if (p.repeat) state.repeat = p.repeat;
     if (Array.isArray(p.favorites)) state.favorites = new Set(p.favorites);
+    if (typeof p.crossfade === "number") state.crossfade = p.crossfade;
   } catch { /* défauts conservés */ }
 }
 
@@ -989,11 +1145,6 @@ function switchTab(tab) {
   render();
 }
 
-audio.addEventListener("play", () => { state.playing = true; updateTransport(); });
-audio.addEventListener("pause", () => { state.playing = false; updateTransport(); });
-audio.addEventListener("ended", () => step(1, true));
-audio.addEventListener("error", () => { if (audio.src) fail("audio", audio.error ?? new Error("format illisible")); });
-audio.addEventListener("loadedmetadata", () => { $("npDur").textContent = fmt(audio.duration); });
 // `scrubbing` gèle l'affichage pendant qu'on fait glisser le doigt, pour que
 // l'horloge audio ne vienne pas tirer la barre sous le doigt.
 let scrubbing = false;
@@ -1003,12 +1154,24 @@ function paintBar(ratio) {
   $("npKnob").style.left = pct;
   $("miniBar").style.width = pct;
 }
-audio.addEventListener("timeupdate", () => {
-  if (scrubbing) return;
-  const ratio = audio.duration > 0 ? audio.currentTime / audio.duration : 0;
-  paintBar(ratio);
-  $("npPos").textContent = fmt(audio.currentTime);
-});
+function onTimeUpdate() {
+  if (!scrubbing) {
+    const ratio = audio.duration > 0 ? audio.currentTime / audio.duration : 0;
+    paintBar(ratio);
+    $("npPos").textContent = fmt(audio.currentTime);
+  }
+  maybeCrossfade();
+}
+// Les DEUX lecteurs portent les mêmes écouteurs, mais seul le lecteur ACTIF pilote l'UI.
+function wireAudio(el) {
+  el.addEventListener("play", () => { if (el === audio) { state.playing = true; updateTransport(); } });
+  el.addEventListener("pause", () => { if (el === audio && !crossfading) { state.playing = false; updateTransport(); } });
+  el.addEventListener("ended", () => { if (el === audio) step(1, true); });
+  el.addEventListener("error", () => { if (el === audio && el.src) fail("audio", el.error ?? new Error("format illisible")); });
+  el.addEventListener("loadedmetadata", () => { if (el === audio) $("npDur").textContent = fmt(el.duration); });
+  el.addEventListener("timeupdate", () => { if (el === audio) onTimeUpdate(); });
+}
+audioEls.forEach(wireAudio);
 
 // Barre de progression : on peut TAPER un point ou GLISSER le doigt le long
 // (comme Apple Music), pas seulement taper. Pointer Events = tactile + souris.
