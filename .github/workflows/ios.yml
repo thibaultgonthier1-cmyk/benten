@@ -71,6 +71,37 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Benten se connecte a votre ordinateur sur le reseau local pour recuperer vos morceaux.'" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
 
+      - name: Forcer la fenetre "Reseau local" (declencheur natif)
+        run: |
+          # Bug connu : une WebView Capacitor qui appelle une IP privee ne declenche
+          # PAS toujours la demande d'autorisation "Reseau local" d'iOS 14+. Sans cette
+          # demande, aucun interrupteur n'apparait dans Reglages et la requete est bloquee
+          # en silence. On ajoute donc un NWBrowser Bonjour au demarrage : le simple fait
+          # de le lancer force iOS a afficher la fenetre "... souhaite trouver des appareils
+          # sur votre reseau local". L'utilisateur touche Autoriser, et la synchro passe.
+          python3 - <<'PY'
+          import sys
+          p = "ios/ios/App/App/AppDelegate.swift"
+          s = open(p, encoding="utf-8").read()
+          if "import Network" not in s:
+              s = s.replace("import Capacitor", "import Capacitor\nimport Network", 1)
+          if "bentenBrowser" not in s:
+              s = s.replace("var window: UIWindow?",
+                            "var window: UIWindow?\n    var bentenBrowser: NWBrowser?", 1)
+          anchor = "// Override point for customization after application launch."
+          if "browser.start" not in s and anchor in s:
+              trigger = (anchor
+                  + "\n        let browser = NWBrowser(for: .bonjour(type: \"_benten._tcp\", domain: \"local.\"), using: NWParameters())"
+                  + "\n        browser.stateUpdateHandler = { _ in }"
+                  + "\n        browser.start(queue: .main)"
+                  + "\n        self.bentenBrowser = browser")
+              s = s.replace(anchor, trigger, 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print(s)
+          if "browser.start" not in s:
+              sys.exit("ERREUR: declencheur reseau local non injecte (AppDelegate inattendu)")
+          PY
+
       - name: Compiler (sans signature)
         working-directory: ios/ios/App
         run: |
