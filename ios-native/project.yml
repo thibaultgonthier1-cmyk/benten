@@ -32,6 +32,8 @@ targets:
         # du paquet sans erreur.
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Sources/Info.plist
+        # Logo Benten (sceau dore) comme icone d'app, depuis Assets.xcassets/AppIcon.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: NO
 
 
