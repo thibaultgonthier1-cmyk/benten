@@ -855,8 +855,48 @@ body.apple .filter-menu {
   cursor: pointer;
 }
 
+/* ---------- Page détail (album / artiste) façon Apple Music ---------- */
+.detail { position: relative; z-index: 1; animation: detailin 0.3s ease; }
+@keyframes detailin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.detail .back {
+  background: none; border: 0; color: var(--accent);
+  font-size: 16px; padding: 8px 16px 8px; cursor: pointer;
+}
+.detail-hero {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 6px 16px 20px;
+}
+.detail-art {
+  width: min(62vw, 258px); height: min(62vw, 258px);
+  border-radius: 14px; overflow: hidden; position: relative;
+  display: grid; place-items: center;
+  box-shadow: 0 20px 44px color-mix(in srgb, var(--cover) 50%, rgba(0, 0, 0, 0.68));
+}
+.detail-art.round { border-radius: 50%; }
+.detail-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.detail-art .glyph { font-size: 60px; opacity: 0.5; }
+.detail-title { font-family: var(--serif); font-weight: normal; font-size: 24px; margin: 16px 16px 4px; }
+.detail-sub { color: var(--dim); font-size: 14px; margin: 0 0 16px; }
+.detail-actions { display: flex; gap: 10px; width: min(92%, 440px); }
+.pill {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; border: 0; border-radius: 12px; cursor: pointer;
+  font-size: 16px; font-weight: 600; color: #0a0908;
+  background: var(--accent);
+  transition: transform 0.12s ease, filter 0.2s ease;
+}
+.pill.ghost { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.pill span { font-size: 14px; }
+.pill:active { transform: scale(0.97); }
+.row.drow { padding-left: 2px; }
+.row.drow .rownum {
+  flex: 0 0 auto; width: 30px; text-align: center;
+  color: var(--dim); font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.row.drow.current .rownum { color: var(--accent); }
+
 @media (prefers-reduced-motion: reduce) {
-  .backdrop, .disc, .cell, .row, .mini, #np.open, .np-art-layer { animation: none; }
+  .backdrop, .disc, .cell, .row, .mini, #np.open, .np-art-layer, .detail { animation: none; }
   .np-cover, .cover, .big, .backdrop, .np-glow, .np-art-layer { transition: none; }
   .np-art-layer { transform: scale(1.25); }
 }

@@ -34,6 +34,7 @@ const state = {
   index: 0,
   order: [],
   pos: 0,
+  detail: null, // { type: "album" | "artist", key } — page détail façon Apple Music
   playing: false,
   shuffle: false,
   repeat: "all",
@@ -274,6 +275,7 @@ function artists() {
 function render() {
   const view = $("view");
   if (!view) return;
+  if (state.detail) { view.innerHTML = renderDetail(); bind(); updateMini(); return; }
   if (state.tab === "library") view.innerHTML = renderLibrary();
   else if (state.tab === "favorites") view.innerHTML = renderFavorites();
   else if (state.tab === "playlists") view.innerHTML = renderPlaylists();
@@ -367,6 +369,70 @@ function renderFavorites() {
 
 function renderPlaylists() {
   return `<div class="empty">Les playlists arrivent depuis le PC avec la synchro.<br>Pour l'instant : <b>Bibliothèque</b> et <b>Favoris</b>.</div>`;
+}
+
+/* ---- Page détail (album / artiste) façon Apple Music ---- */
+
+function detailTracks() {
+  if (!state.detail) return [];
+  if (state.detail.type === "album") {
+    const g = albums().find((x) => x.key === state.detail.key);
+    return g ? g.tracks : [];
+  }
+  const a = artists().find((x) => x.name === state.detail.key);
+  return a ? a.albums.flatMap((z) => z.tracks) : [];
+}
+
+function openDetail(type, key) {
+  state.detail = { type, key };
+  render();
+  const view = $("view");
+  if (view) view.scrollTop = 0;
+  // Teinte l'écran avec la couleur dominante de la pochette de l'album ouvert (comme Apple Music).
+  const tracks = detailTracks();
+  const art = tracks.find((t) => t.cover) || tracks[0];
+  if (art) applyCoverColor(art);
+}
+
+function renderDetail() {
+  const tracks = detailTracks();
+  if (!tracks.length) { state.detail = null; return renderLibrary(); }
+  const isAlbum = state.detail.type === "album";
+  const group = isAlbum ? albums().find((x) => x.key === state.detail.key) : null;
+  const artist = isAlbum ? null : artists().find((x) => x.name === state.detail.key);
+  const title = isAlbum ? group.album : artist.name;
+  const sub = isAlbum
+    ? `${escapeHtml(group.artist)} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}`
+    : `${artist.albums.length} album${artist.albums.length > 1 ? "s" : ""} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}`;
+  const art = tracks.find((t) => t.cover) || tracks[0];
+  return `
+    <div class="detail">
+      <button class="back" data-back type="button">‹ Retour</button>
+      <div class="detail-hero">
+        <div class="detail-art ${isAlbum ? "" : "round"}" style="${coverGradient(title)}">${coverInner(art)}</div>
+        <h1 class="detail-title">${escapeHtml(title)}</h1>
+        <p class="detail-sub">${sub}</p>
+        <div class="detail-actions">
+          <button class="pill" data-play-detail type="button"><span>▶</span> Lecture</button>
+          <button class="pill ghost" data-shuffle-detail type="button"><span>⤨</span> Aléatoire</button>
+        </div>
+      </div>
+      <div class="rows">${tracks.map((t, i) => renderDetailRow(t, i)).join("")}</div>
+    </div>`;
+}
+
+function renderDetailRow(track, index) {
+  const fav = state.favorites.has(track.id);
+  const current = state.current && state.current.id === track.id;
+  return `
+    <div class="row drow ${current ? "current" : ""}" data-play-index="${index}" data-id="${escapeAttr(track.id)}">
+      <div class="rownum">${current ? "▶" : index + 1}</div>
+      <div class="meta">
+        <div class="n">${escapeHtml(track.title)}</div>
+        <div class="s">${escapeHtml(track.artist)} · ${fmt(track.durationSec)}</div>
+      </div>
+      <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? "♥" : "♡"}</button>
+    </div>`;
 }
 
 function renderSearch() {
@@ -493,17 +559,31 @@ function setupDelegation() {
       }
       return;
     }
+    if (t.closest("[data-back]")) { state.detail = null; render(); const v = $("view"); if (v) v.scrollTop = 0; return; }
+    if (t.closest("[data-play-detail]")) { const list = detailTracks(); if (list.length) playQueue(list, 0); return; }
+    if (t.closest("[data-shuffle-detail]")) {
+      const list = detailTracks();
+      if (list.length) {
+        if (!state.shuffle) { state.shuffle = true; savePrefs(); }
+        playQueue(list, Math.floor(Math.random() * list.length));
+        updateTransport();
+      }
+      return;
+    }
+    // Un album/artiste ouvre sa PAGE DÉTAIL (façon Apple Music), au lieu de lancer direct.
     const alb = t.closest("[data-play-album]");
-    if (alb) { const g = albums().find((x) => x.key === alb.dataset.playAlbum); if (g) playQueue(g.tracks, 0); return; }
+    if (alb) { openDetail("album", alb.dataset.playAlbum); return; }
     const art = t.closest("[data-play-artist]");
-    if (art) { const a = artists().find((x) => x.name === art.dataset.playArtist); if (a) playQueue(a.albums.flatMap((z) => z.tracks), 0); return; }
+    if (art) { openDetail("artist", art.dataset.playArtist); return; }
     const row = t.closest("[data-play-index]");
     if (row) {
       const index = Number(row.dataset.playIndex);
-      const list = state.tab === "favorites"
-        ? state.tracks.filter((x) => state.favorites.has(x.id))
-        : state.tab === "search" ? lastSearchResults
-        : [...state.tracks].sort((a, b) => a.title.localeCompare(b.title));
+      const list = state.detail
+        ? detailTracks()
+        : state.tab === "favorites"
+          ? state.tracks.filter((x) => state.favorites.has(x.id))
+          : state.tab === "search" ? lastSearchResults
+          : [...state.tracks].sort((a, b) => a.title.localeCompare(b.title));
       playQueue(list, index);
       return;
     }
@@ -901,6 +981,7 @@ document.querySelectorAll("#tabs button").forEach((button) => {
 });
 function switchTab(tab) {
   state.tab = tab;
+  state.detail = null; // revenir à la liste en changeant d'onglet
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
   render();
 }
