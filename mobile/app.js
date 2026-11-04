@@ -15,7 +15,7 @@
 
 const DB_NAME = "benten-mobile";
 const DB_VERSION = 4; // v4 : ajout du magasin « playlists » (ajout non destructif).
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 const SYNC_KEY = "benten-sync";
 const PREFS_KEY = "benten-prefs";
 const DEMO = new URLSearchParams(location.search).get("demo") === "1";

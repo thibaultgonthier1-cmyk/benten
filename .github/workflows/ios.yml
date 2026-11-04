@@ -95,12 +95,17 @@ jobs:
               s = s.replace("import Capacitor", "import Capacitor\nimport Network", 1)
           if "import AVFoundation" not in s:
               s = s.replace("import Capacitor", "import Capacitor\nimport AVFoundation", 1)
+          if "import WebKit" not in s:
+              s = s.replace("import Capacitor", "import Capacitor\nimport WebKit", 1)
           if "bentenBrowser" not in s:
               s = s.replace("var window: UIWindow?",
                             "var window: UIWindow?\n    var bentenBrowser: NWBrowser?", 1)
           anchor = "// Override point for customization after application launch."
           if "browser.start" not in s and anchor in s:
               trigger = (anchor
+                  + "\n        // Vide le cache web (PAS IndexedDB/localStorage) pour toujours charger la derniere version."
+                  + "\n        let bentenCache: Set<String> = [WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache, WKWebsiteDataTypeFetchCache]"
+                  + "\n        WKWebsiteDataStore.default().removeData(ofTypes: bentenCache, modifiedSince: Date(timeIntervalSince1970: 0)) { }"
                   + "\n        // Lecture en arriere-plan / ecran verrouille (comme Apple Music) :"
                   + "\n        // categorie lecture + session activee (indispensable pour que le son"
                   + "\n        // continue quand l'ecran se verrouille)."
