@@ -7,6 +7,7 @@ struct PlaylistsView: View {
     @EnvironmentObject private var playlists: PlaylistStore
     @State private var newName = ""
     @State private var creating = false
+    @State private var genreResult: String?
 
     var body: some View {
         NavigationStack {
@@ -54,6 +55,19 @@ struct PlaylistsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Theme.ink, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Haptics.press()
+                        let added = playlists.buildGenrePlaylists(library: library)
+                        genreResult = added > 0
+                            ? "Playlist Phonk / Funk : \(added) morceau\(added > 1 ? "x" : "") classé\(added > 1 ? "s" : "")."
+                            : "Aucun morceau de ces genres n'est encore téléchargé sur l'appareil."
+                    } label: {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 19))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Haptics.press()
@@ -64,6 +78,11 @@ struct PlaylistsView: View {
                             .foregroundStyle(Theme.accent)
                     }
                 }
+            }
+            .alert("Playlists par genre", isPresented: Binding(get: { genreResult != nil }, set: { if !$0 { genreResult = nil } })) {
+                Button("OK", role: .cancel) { genreResult = nil }
+            } message: {
+                Text(genreResult ?? "")
             }
             .alert("Nouvelle playlist", isPresented: $creating) {
                 TextField("Nom", text: $newName)

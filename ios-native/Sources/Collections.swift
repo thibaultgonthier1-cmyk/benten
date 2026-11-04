@@ -118,6 +118,34 @@ final class PlaylistStore: ObservableObject {
         playlist.trackIDs.compactMap { id in library.tracks.first { $0.id == id } }
     }
 
+    /// Crée/complète les playlists par genre depuis la liste préparée `smart-playlists.json`
+    /// (classement phonk / funk / montagem fait en amont). On associe par l'identifiant PC
+    /// (`remoteID`) et on n'ajoute QUE les morceaux réellement présents sur l'appareil.
+    /// Renvoie le nombre de morceaux ajoutés.
+    @discardableResult
+    func buildGenrePlaylists(library: Library) -> Int {
+        guard let url = Bundle.main.url(forResource: "smart-playlists", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let map = try? JSONDecoder().decode([String: [Int]].self, from: data) else { return 0 }
+        var total = 0
+        for (name, remoteIDs) in map {
+            let want = Set(remoteIDs)
+            let ids = library.tracks.filter { $0.remoteID.map(want.contains) ?? false }.map(\.id)
+            guard !ids.isEmpty else { continue }
+            if let index = items.firstIndex(where: { $0.name == name }) {
+                for id in ids where !items[index].trackIDs.contains(id) {
+                    items[index].trackIDs.append(id)
+                    total += 1
+                }
+            } else {
+                items.append(Playlist(name: name, trackIDs: ids))
+                total += ids.count
+            }
+        }
+        if total > 0 { save() }
+        return total
+    }
+
     func prune(keeping tracks: [Track]) {
         let alive = Set(tracks.map(\.id))
         var changed = false
