@@ -34,6 +34,15 @@ jobs:
           xcodegen generate
           ls -la *.xcodeproj
 
+      - name: Sélectionner le Xcode le plus récent
+        run: |
+          # Le projet genere peut etre au format d'un Xcode recent ; on selectionne le plus
+          # recent installe sur le runner pour pouvoir le lire.
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          echo "Xcode choisi : $LATEST"
+          if [ -n "$LATEST" ]; then sudo xcode-select -s "$LATEST"; fi
+          xcodebuild -version
+
       - name: Compiler (sans signature)
         working-directory: ios-native
         run: |
