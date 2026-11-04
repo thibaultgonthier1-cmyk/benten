@@ -63,6 +63,9 @@ final class Player: NSObject, ObservableObject {
     private var activeDeck: AVAudioPlayerNode?
     private var activeFile: AVAudioFile?
     private var startedAt: Date?
+    // Jeton de programmation : incrémenté à CHAQUE programmation. Un `stop()` (ex. pendant un
+    // seek) déclenche le callback de la programmation précédente ; on l'ignore si le jeton a changé.
+    private var scheduleToken = 0
     private var timer: Timer?
     private var fading = false
     private var order: [Int] = []
@@ -275,9 +278,13 @@ final class Player: NSObject, ObservableObject {
     private func schedule(on deck: AVAudioPlayerNode, file: AVAudioFile, from frame: AVAudioFramePosition) {
         let remaining = AVAudioFrameCount(max(0, file.length - frame))
         guard remaining > 0 else { return }
+        scheduleToken += 1
+        let token = scheduleToken
         deck.scheduleSegment(file, startingFrame: frame, frameCount: remaining, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.activeDeck === deck else { return }
+                // Seule une fin NATURELLE enchaîne : si le jeton a changé (stop provoqué par un
+                // seek/un chargement), ce callback est périmé et on l'ignore.
+                guard let self, self.activeDeck === deck, self.scheduleToken == token else { return }
                 self.handleFinished()
             }
         }
