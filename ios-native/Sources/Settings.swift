@@ -220,6 +220,20 @@ struct SettingsView: View {
             }
             .tint(Theme.accent)
 
+            Toggle(isOn: $player.normalizeVolume) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Égaliser le volume")
+                        Text("Tous les morceaux au même volume perçu")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                } icon: {
+                    Image(systemName: "speaker.wave.2.fill")
+                }
+            }
+            .tint(Theme.accent)
+
             Toggle(isOn: $visualizerOn) {
                 Label("Visualiseur audio", systemImage: "waveform")
             }

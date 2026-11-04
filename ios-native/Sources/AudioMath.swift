@@ -13,6 +13,41 @@ enum AudioMath {
         return min(limit, max(1 / limit, outgoing / incoming))
     }
 
+    /// Volume PERÇU, à la manière de la norme de loudness (EBU R128 / LUFS) :
+    /// - filtre passe-haut (~150 Hz) : les grosses basses (808) ne trompent plus la mesure —
+    ///   l'oreille juge le volume surtout dans les médiums ;
+    /// - blocs de 400 ms, et seuil relatif à −10 dB : les passages calmes (intro, break) ne tirent
+    ///   pas la mesure vers le bas.
+    /// Renvoie un niveau efficace (linéaire) comparable d'un morceau à l'autre.
+    static func perceivedLoudness(samples: [Float], sampleRate: Double) -> Double {
+        guard samples.count > 16 else { return 0 }
+        let coefficient = Float(exp(-2 * Double.pi * 150 / sampleRate))
+        var previousInput: Float = 0
+        var previousOutput: Float = 0
+        let block = max(1, Int(sampleRate * 0.4))
+        var energies: [Double] = []
+        var sum: Double = 0
+        var count = 0
+        for sample in samples {
+            let filtered = coefficient * (previousOutput + sample - previousInput)
+            previousInput = sample
+            previousOutput = filtered
+            sum += Double(filtered * filtered)
+            count += 1
+            if count == block {
+                energies.append(sum / Double(block))
+                sum = 0
+                count = 0
+            }
+        }
+        let audible = energies.filter { $0 > 1e-7 }
+        guard !audible.isEmpty else { return 0 }
+        let ungated = audible.reduce(0, +) / Double(audible.count)
+        let kept = audible.filter { $0 >= ungated * 0.1 }
+        let mean = kept.isEmpty ? ungated : kept.reduce(0, +) / Double(kept.count)
+        return mean.squareRoot()
+    }
+
     /// Niveau efficace (RMS).
     static func rms(_ samples: [Float]) -> Double {
         guard !samples.isEmpty else { return 0 }
@@ -391,8 +426,10 @@ struct TrackAnalysis: Codable, Sendable {
     var start: Double
     /// Fin « réelle », avant la queue silencieuse (nil = fin du fichier).
     var end: Double?
+    /// Volume PERÇU (filtré, fenêtré) : sert à mettre tous les morceaux au même volume.
+    var loudness: Double?
 
-    static let empty = TrackAnalysis(bpm: nil, confidence: 0, headDownbeat: nil, midDownbeat: nil, tailDownbeat: nil, key: nil, level: 0, start: 0, end: nil)
+    static let empty = TrackAnalysis(bpm: nil, confidence: 0, headDownbeat: nil, midDownbeat: nil, tailDownbeat: nil, key: nil, level: 0, start: 0, end: nil, loudness: nil)
 
     var hasGrid: Bool { bpm != nil }
 }
@@ -404,7 +441,7 @@ actor TrackAnalyzer {
 
     private static var storeURL: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("benten-analysis-v3.json")
+            .appendingPathComponent("benten-analysis-v4.json")
     }
 
     init() {
@@ -459,6 +496,10 @@ actor TrackAnalyzer {
 
         var result = TrackAnalysis.empty
         result.level = level
+        if let reference {
+            let perceived = AudioMath.perceivedLoudness(samples: reference.samples, sampleRate: reference.rate)
+            if perceived > 0 { result.loudness = perceived }
+        }
         if let head {
             result.start = AudioMath.firstLoud(samples: head.samples, sampleRate: head.rate, threshold: threshold, limit: 8)
         }

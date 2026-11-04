@@ -160,6 +160,53 @@ final class Player: NSObject, ObservableObject {
 
     func setAutomix(_ on: Bool) { automixEnabled = on }
 
+    // MARK: - Égalisation du volume
+
+    /// Tous les morceaux au MÊME volume perçu, en permanence (comme Sound Check d'Apple, mais avec
+    /// une mesure qui ne se laisse pas tromper par les grosses basses). Plus aucun morceau qui
+    /// écrase l'autre pendant ou après une transition.
+    @Published var normalizeVolume: Bool = Player.storedBool("player.normalize", true) {
+        didSet {
+            UserDefaults.standard.set(normalizeVolume, forKey: "player.normalize")
+            applyLoudness(to: activeDeck, for: current, ramp: true)
+        }
+    }
+
+    /// Volume perçu visé (même échelle que `TrackAnalysis.loudness`).
+    private static let loudnessTarget = 0.12
+    private var loudnessRampTask: Task<Void, Never>?
+
+    /// Gain (dB) qui ramène ce morceau au volume commun : −10 dB maximum pour un morceau masterisé
+    /// très fort, +5 dB maximum pour un morceau trop bas (au-delà, risque de saturation).
+    private func loudnessGain(for track: Track?) -> Float {
+        guard normalizeVolume, let track, let loudness = analyses[track.id]?.loudness, loudness > 0 else { return 0 }
+        let decibels = 20 * log10(Self.loudnessTarget / loudness)
+        return Float(max(-10, min(5, decibels)))
+    }
+
+    /// Applique le gain de volume d'un morceau sur sa platine — en douceur (1,6 s) si la musique
+    /// joue déjà, pour qu'on n'entende jamais de saut.
+    private func applyLoudness(to deck: AVAudioPlayerNode?, for track: Track?, ramp: Bool) {
+        guard let deck else { return }
+        let unit = fx(for: deck)
+        let target = loudnessGain(for: track)
+        loudnessRampTask?.cancel()
+        guard ramp, abs(unit.globalGain - target) > 0.3 else {
+            unit.globalGain = target
+            return
+        }
+        let from = unit.globalGain
+        loudnessRampTask = Task {
+            let steps = 40
+            for step in 1...steps {
+                if Task.isCancelled { return }
+                let u = Float(step) / Float(steps)
+                unit.globalGain = from + (target - from) * u * u * (3 - 2 * u)
+                try? await Task.sleep(nanoseconds: 40_000_000)
+            }
+        }
+    }
+
     // MARK: - Égaliseur
 
     @Published var eqEnabled: Bool = Player.storedBool(Keys.eqEnabled, false) {
@@ -652,6 +699,8 @@ final class Player: NSObject, ObservableObject {
         current = track
         currentBPM = analyses[track.id]?.bpm
         currentKey = analyses[track.id]?.key
+        loudnessRampTask?.cancel()
+        fxA.globalGain = loudnessGain(for: track)
 
         let start = max(0, seconds)
         schedule(on: deckA, file: file, from: start)
@@ -724,6 +773,9 @@ final class Player: NSObject, ObservableObject {
                 if self.current?.id == track.id {
                     self.currentBPM = result.bpm
                     self.currentKey = result.key
+                    // 1re écoute d'un morceau : son volume est égalisé dès que l'analyse est
+                    // prête, en douceur (les fois suivantes, c'est immédiat : l'analyse est gardée).
+                    if !self.fading { self.applyLoudness(to: self.activeDeck, for: track, ramp: true) }
                 }
                 if index <= 1 { self.refreshPlan() }
                 if index == 1 {
@@ -943,6 +995,7 @@ final class Player: NSObject, ObservableObject {
         incoming.stop()
         resetFX(incomingFX)
         incoming.volume = plan.style == .gapless ? 1 : 0
+        incomingFX.globalGain = loudnessGain(for: incomingTrack)
         if plan.bassSwap { incomingFX.bands[0].gain = plan.style == .beatmix ? -26 : -12 }
         pitch(for: incoming).rate = Float(plan.tempoRatio)
         schedule(on: incoming, file: file, from: plan.entryAt)
@@ -1022,7 +1075,9 @@ final class Player: NSObject, ObservableObject {
 
         // Retour progressif au tempo d'origine et au niveau propre de l'entrante (6 s, courbe douce).
         let ratio = plan.tempoRatio
-        let gain = plan.style == .gapless ? 1 : plan.levelGain
+        // Volume déjà égalisé par morceau → aucun réajustement après le mix (avant, l'entrante
+        // remontait à son volume d'origine et pouvait « prendre le dessus »).
+        let gain = (plan.style == .gapless || normalizeVolume) ? 1 : plan.levelGain
         if abs(ratio - 1) > 0.0005 || abs(gain - 1) > 0.01 {
             let glideStart = hostNow()
             while true {
@@ -1051,15 +1106,22 @@ final class Player: NSObject, ObservableObject {
     /// Courbes de transition, selon le style.
     private func applyCurves(_ plan: MixPlan, t: Double, outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode,
                              outFX: AVAudioUnitEQ, inFX: AVAudioUnitEQ) {
-        let gain = plan.levelGain
+        let gain = normalizeVolume ? 1 : plan.levelGain
         switch plan.style {
         case .beatmix:
-            // L'entrante monte (basses coupées) pendant la 1re moitié ; BASS SWAP au milieu ;
-            // la sortante descend pendant la 2nde moitié. Jamais deux grosses caisses à la fois.
-            let rise = min(1, t / 0.5)
-            incoming.volume = Float(sin(rise * .pi / 2) * gain)
-            let fall = max(0, (t - 0.5) / 0.5)
-            outgoing.volume = Float(t < 0.5 ? 1 - 0.12 * rise : 0.88 * cos(fall * .pi / 2))
+            // 1re moitié : l'entrante monte (basses coupées), la sortante cède un peu de place.
+            // Milieu : BASS SWAP, les deux à 0,82 (volume total ≈ +1 dB seulement, contre ~+3 dB
+            // avant). 2nde moitié : la sortante s'efface, l'entrante prend toute la place.
+            // Jamais deux grosses caisses à la fois, jamais un morceau qui écrase l'autre.
+            if t < 0.5 {
+                let rise = t / 0.5
+                incoming.volume = Float(0.82 * sin(rise * .pi / 2) * gain)
+                outgoing.volume = Float(1 - 0.18 * rise)
+            } else {
+                let fall = (t - 0.5) / 0.5
+                incoming.volume = Float((0.82 + 0.18 * fall) * gain)
+                outgoing.volume = Float(0.82 * cos(fall * .pi / 2))
+            }
             let swap = min(1, max(0, (t - 0.44) / 0.12))
             inFX.bands[0].gain = Float(-26 * (1 - swap))
             outFX.bands[0].gain = Float(-26 * swap)
