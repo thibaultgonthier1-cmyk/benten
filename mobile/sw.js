@@ -1,7 +1,7 @@
 /* Service worker : rend Benten Mobile disponible HORS-LIGNE.
    Stratégie « cache d'abord » sur les fichiers de l'app (ils ne changent pas sans redéploiement) :
    une fois installée sur l'écran d'accueil, l'app s'ouvre sans réseau, donc sans PC allumé. */
-const CACHE = "benten-mobile-v19"; // incrémenter à CHAQUE mise à jour de l'app mobile
+const CACHE = "benten-mobile-v20"; // incrémenter à CHAQUE mise à jour de l'app mobile
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {

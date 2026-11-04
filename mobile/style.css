@@ -597,7 +597,10 @@ body {
   background: rgba(255, 255, 255, 0.14);
   position: relative;
   cursor: pointer;
+  touch-action: none; /* le glissé déplace la tête de lecture, pas la page */
 }
+/* Zone tactile élargie (±16 px) : la barre fait 4 px mais on l'attrape sur ~36 px. */
+.track-bar::before { content: ""; position: absolute; left: 0; right: 0; top: -16px; bottom: -16px; }
 .track-bar .fill {
   position: absolute;
   left: 0;
@@ -606,6 +609,7 @@ body {
   width: 0;
   border-radius: 2px;
   background: var(--accent);
+  transition: width 0.18s linear; /* avance fluide entre deux tops d'horloge */
 }
 .track-bar .knob {
   position: absolute;
@@ -617,7 +621,11 @@ body {
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  transition: left 0.18s linear, transform 0.12s ease;
 }
+/* Pendant le glissé : pas de lissage (la tête colle au doigt) et le point grossit. */
+.track-bar.scrubbing .fill { transition: none; }
+.track-bar.scrubbing .knob { transition: transform 0.12s ease; transform: scale(1.4); }
 .times {
   display: flex;
   justify-content: space-between;
@@ -641,7 +649,9 @@ body {
   cursor: pointer;
   min-width: 44px;
   min-height: 44px;
+  transition: transform 0.15s ease, opacity 0.15s ease;
 }
+.transport .side:active { transform: scale(0.84); opacity: 0.72; }
 .big {
   width: 68px;
   height: 68px;
@@ -676,6 +686,16 @@ body {
 }
 .extras button:active { transform: scale(0.88); }
 .extras button.on { color: var(--accent); }
+
+/* ---------- Fluidité générale : tap instantané + enfoncement des boutons ---------- */
+button { touch-action: manipulation; } /* supprime le délai de 300 ms au tap */
+#tabs button { transition: transform 0.12s ease, color 0.22s ease, background 0.22s ease; }
+#tabs button:active { transform: scale(0.88); }
+.mini .medallion:active, .mini .icon-btn:active { transform: scale(0.88); }
+.chevron { transition: transform 0.15s ease, opacity 0.15s ease; }
+.chevron:active { transform: scale(0.84); opacity: 0.7; }
+.grabber { transition: transform 0.15s ease, background 0.2s ease; }
+.grabber:active { transform: scaleX(1.25); background: rgba(255, 255, 255, 0.5); }
 
 /* ---------- Icônes SVG (façon Apple Music) : taille et couleur héritée ---------- */
 .tabs .g { font-size: 0; }

@@ -994,18 +994,100 @@ audio.addEventListener("pause", () => { state.playing = false; updateTransport()
 audio.addEventListener("ended", () => step(1, true));
 audio.addEventListener("error", () => { if (audio.src) fail("audio", audio.error ?? new Error("format illisible")); });
 audio.addEventListener("loadedmetadata", () => { $("npDur").textContent = fmt(audio.duration); });
+// `scrubbing` gèle l'affichage pendant qu'on fait glisser le doigt, pour que
+// l'horloge audio ne vienne pas tirer la barre sous le doigt.
+let scrubbing = false;
+function paintBar(ratio) {
+  const pct = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
+  $("npFill").style.width = pct;
+  $("npKnob").style.left = pct;
+  $("miniBar").style.width = pct;
+}
 audio.addEventListener("timeupdate", () => {
+  if (scrubbing) return;
   const ratio = audio.duration > 0 ? audio.currentTime / audio.duration : 0;
-  $("npFill").style.width = `${ratio * 100}%`;
-  $("npKnob").style.left = `${ratio * 100}%`;
+  paintBar(ratio);
   $("npPos").textContent = fmt(audio.currentTime);
-  $("miniBar").style.width = `${ratio * 100}%`;
 });
-$("npBar").onclick = (event) => {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const ratio = (event.clientX - rect.left) / rect.width;
-  if (Number.isFinite(audio.duration)) audio.currentTime = ratio * audio.duration;
-};
+
+// Barre de progression : on peut TAPER un point ou GLISSER le doigt le long
+// (comme Apple Music), pas seulement taper. Pointer Events = tactile + souris.
+(() => {
+  const bar = $("npBar");
+  if (!bar) return;
+  let active = false;
+  const ratioAt = (clientX) => {
+    const rect = bar.getBoundingClientRect();
+    return rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0;
+  };
+  const preview = (clientX) => {
+    const ratio = ratioAt(clientX);
+    paintBar(ratio);
+    if (Number.isFinite(audio.duration)) $("npPos").textContent = fmt(ratio * audio.duration);
+    return ratio;
+  };
+  bar.addEventListener("pointerdown", (event) => {
+    active = true;
+    scrubbing = true;
+    bar.classList.add("scrubbing");
+    try { bar.setPointerCapture(event.pointerId); } catch { /* capture non supportée : sans gravité */ }
+    preview(event.clientX);
+    event.preventDefault();
+  });
+  bar.addEventListener("pointermove", (event) => { if (active) preview(event.clientX); });
+  const commit = (event) => {
+    if (!active) return;
+    active = false;
+    const ratio = ratioAt(event.clientX);
+    if (Number.isFinite(audio.duration)) audio.currentTime = ratio * audio.duration;
+    scrubbing = false;
+    bar.classList.remove("scrubbing");
+    try { bar.releasePointerCapture(event.pointerId); } catch { /* idem */ }
+  };
+  bar.addEventListener("pointerup", commit);
+  bar.addEventListener("pointercancel", () => { active = false; scrubbing = false; bar.classList.remove("scrubbing"); });
+})();
+
+// Fenêtre « En lecture » : on la referme en la faisant glisser vers le bas
+// (comme Apple Music), en plus du chevron et de la poignée.
+(() => {
+  const np = $("np");
+  if (!np) return;
+  let dragging = false;
+  let startY = 0;
+  let dy = 0;
+  // On ne démarre PAS le glissé depuis un contrôle (sinon on casse les boutons et la barre).
+  const fromControl = (el) => el.closest && el.closest("button, .track-bar, .slider, input, a, label");
+  np.addEventListener("pointerdown", (event) => {
+    if (!np.classList.contains("open") || fromControl(event.target)) return;
+    dragging = true;
+    startY = event.clientY;
+    dy = 0;
+    np.style.transition = "none";
+    try { np.setPointerCapture(event.pointerId); } catch { /* sans gravité */ }
+  });
+  np.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    dy = Math.max(0, event.clientY - startY);
+    np.style.transform = `translateY(${dy}px)`;
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    np.style.transition = "transform 0.3s cubic-bezier(0.2, 0.8, 0.3, 1)";
+    const reset = () => { np.style.transition = ""; np.style.transform = ""; np.removeEventListener("transitionend", reset); };
+    if (dy > 110) {
+      np.style.transform = "translateY(100%)";
+      const done = () => { np.classList.remove("open"); reset(); np.removeEventListener("transitionend", done); };
+      np.addEventListener("transitionend", done);
+    } else {
+      np.style.transform = "translateY(0)";
+      np.addEventListener("transitionend", reset);
+    }
+  };
+  np.addEventListener("pointerup", end);
+  np.addEventListener("pointercancel", end);
+})();
 
 /* ------------------------------- Utilitaires ------------------------------- */
 
