@@ -481,19 +481,6 @@ function renderSettings() {
       </div>
     </div>
 
-    <div class="group"><h4>Lecture</h4>
-      <div class="card">
-        <div class="line"><span>Lecture aléatoire</span>
-          <button class="toggle ${state.shuffle ? "on" : ""}" data-toggle="shuffle"></button></div>
-        <div class="line"><span>Répéter</span>
-          <select id="repeatSelect" class="field" style="width:auto;margin-top:0;min-height:36px;padding:0 10px">
-            <option value="off" ${state.repeat === "off" ? "selected" : ""}>Non</option>
-            <option value="all" ${state.repeat === "all" ? "selected" : ""}>Toute la liste</option>
-            <option value="one" ${state.repeat === "one" ? "selected" : ""}>Ce titre</option>
-          </select></div>
-      </div>
-    </div>
-
     <div class="group"><h4>Bibliothèque</h4>
       <div class="card">
         <div class="line"><span>Morceaux</span><span class="val">${state.tracks.length}</span></div>
@@ -514,9 +501,6 @@ function renderSettings() {
 // Après chaque rendu, on ne recâble QUE les champs (saisie/sélection) : les clics passent
 // par la délégation unique sur #view (setupDelegation), posée une seule fois au démarrage.
 function bind() {
-  const repeat = $("repeatSelect");
-  if (repeat) repeat.onchange = () => { state.repeat = repeat.value; savePrefs(); updateTransport(); };
-
   const search = $("searchInput");
   if (search) {
     search.oninput = () => {
@@ -550,15 +534,6 @@ function setupDelegation() {
     if (style) { state.style = style.dataset.style; applyStyle(); savePrefs(); render(); return; }
     const pal = t.closest("[data-palette]");
     if (pal) { applyPalette(pal.dataset.palette); savePrefs(); return; }
-    const tog = t.closest("[data-toggle]");
-    if (tog) {
-      if (tog.dataset.toggle === "shuffle") {
-        state.shuffle = !state.shuffle;
-        if (state.queue.length) buildOrder(state.index);
-        savePrefs(); render();
-      }
-      return;
-    }
     if (t.closest("[data-back]")) { state.detail = null; render(); const v = $("view"); if (v) v.scrollTop = 0; return; }
     if (t.closest("[data-play-detail]")) { const list = detailTracks(); if (list.length) playQueue(list, 0); return; }
     if (t.closest("[data-shuffle-detail]")) {
@@ -974,7 +949,6 @@ $("npHeart").onclick = () => { if (state.current) toggleFavorite(state.current.i
 $("mini").onclick = openNowPlaying;
 $("miniPlay").onclick = (event) => { event.stopPropagation(); togglePlay(); };
 $("miniNext").onclick = (event) => { event.stopPropagation(); step(1); };
-$("btnSearch").onclick = () => switchTab("search");
 
 document.querySelectorAll("#tabs button").forEach((button) => {
   button.onclick = () => switchTab(button.dataset.tab);
