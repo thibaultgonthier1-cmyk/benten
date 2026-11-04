@@ -116,6 +116,40 @@ enum AudioMath {
         return (sum / Double(samples.count)).squareRoot()
     }
 
+    /// Premier instant « audible » (au-dessus du seuil), cherché dans les `limit` premières
+    /// secondes. Sert à sauter le silence d'intro de la piste entrante.
+    static func firstLoud(samples: [Float], sampleRate: Double, threshold: Float, limit: Double) -> Double {
+        let window = max(1, Int(sampleRate * 0.05))
+        let maxIndex = min(samples.count, Int(sampleRate * limit))
+        var start = 0
+        while start + window <= maxIndex {
+            var sum: Float = 0
+            for i in start..<(start + window) { sum += samples[i] * samples[i] }
+            if (sum / Float(window)).squareRoot() > threshold {
+                return max(0, Double(start) / sampleRate - 0.02)
+            }
+            start += window
+        }
+        return 0
+    }
+
+    /// Dernier instant « audible » d'un extrait (en secondes depuis le début de l'extrait).
+    /// Renvoie 0 si tout l'extrait est sous le seuil.
+    static func lastLoud(samples: [Float], sampleRate: Double, threshold: Float) -> Double {
+        let window = max(1, Int(sampleRate * 0.05))
+        var last = -1
+        var index = 0
+        var start = 0
+        while start + window <= samples.count {
+            var sum: Float = 0
+            for i in start..<(start + window) { sum += samples[i] * samples[i] }
+            if (sum / Float(window)).squareRoot() > threshold { last = index }
+            index += 1
+            start += window
+        }
+        return last < 0 ? 0 : Double((last + 1) * window) / sampleRate
+    }
+
     /// Écart de vitesse pour accorder l'entrante sur le tempo de la sortante.
     ///
     /// Sur iOS, la correction est appliquée par `AVAudioUnitTimePitch`, qui change la vitesse SANS
@@ -129,54 +163,87 @@ enum AudioMath {
     }
 }
 
-/// Analyse d'un fichier audio : tempo et niveau, avec mémoire par morceau.
+/// Résultat de l'analyse d'un morceau, utilisé par l'automix.
+struct TrackAnalysis: Sendable {
+    /// Tempo estimé (nil si ambigu : on ne cale pas plutôt que de mal caler).
+    var bpm: Double?
+    /// Niveau efficace (RMS) de la première minute : sert à égaliser les volumes pendant le fondu.
+    var level: Double
+    /// Silence d'intro à sauter (secondes).
+    var start: Double
+    /// Fin « réelle » du morceau (secondes), avant la queue silencieuse ; nil = fin du fichier.
+    var end: Double?
+
+    static let empty = TrackAnalysis(bpm: nil, level: 0, start: 0, end: nil)
+}
+
+/// Analyse d'un fichier audio, avec mémoire par morceau.
 ///
-/// L'analyse coûte quelques dizaines de millisecondes par titre : on la fait UNE fois, puis on
-/// garde le résultat en mémoire pour toute la session.
+/// UNE seule lecture de fichier par morceau (l'ancienne version relisait le fichier séparément
+/// pour le tempo et pour le niveau) : la première minute pour le tempo, le niveau et l'intro, les
+/// 25 dernières secondes pour trouver la vraie fin. Le résultat est gardé pour toute la session.
+/// C'est un `actor` : tout ce travail tourne hors du fil principal.
 actor TrackAnalyzer {
-    private var bpmCache: [UUID: Double?] = [:]
-    private var levelCache: [UUID: Double] = [:]
+    private var cache: [UUID: TrackAnalysis] = [:]
 
-    /// Tempo estimé d'un morceau, ou `nil` si le signal est ambigu.
-    func bpm(of track: Track) -> Double? {
-        if let cached = bpmCache[track.id] { return cached }
-        let value = readSamples(of: track).flatMap { data in
-            AudioMath.estimateBPM(samples: data.samples, sampleRate: data.rate)
+    func analysis(of track: Track) -> TrackAnalysis {
+        if let hit = cache[track.id] { return hit }
+        let result = Self.analyze(url: track.fileURL)
+        cache[track.id] = result
+        return result
+    }
+
+    func bpm(of track: Track) -> Double? { analysis(of: track).bpm }
+    func level(of track: Track) -> Double { analysis(of: track).level }
+
+    private static func analyze(url: URL) -> TrackAnalysis {
+        guard let file = try? AVAudioFile(forReading: url) else { return .empty }
+        let rate = file.processingFormat.sampleRate
+        guard rate > 0, file.length > 0 else { return .empty }
+        let total = Double(file.length) / rate
+
+        let head = readMono(file: file, from: 0, seconds: 60)
+        let bpm = head.flatMap { AudioMath.estimateBPM(samples: $0.samples, sampleRate: $0.rate) }
+        let level = head.map { AudioMath.rms($0.samples) } ?? 0
+        // Seuil de « silence » : ~22 dB sous le niveau moyen du morceau, jamais ridiculement bas.
+        let threshold = Float(max(0.004, level * 0.08))
+
+        var start = 0.0
+        if let head {
+            start = AudioMath.firstLoud(samples: head.samples, sampleRate: head.rate, threshold: threshold, limit: 8)
         }
-        bpmCache[track.id] = value
-        return value
+
+        var end: Double?
+        let tailSeconds = min(25, total)
+        let tailStartFrame = AVAudioFramePosition(max(0, Double(file.length) - tailSeconds * rate))
+        if let tail = readMono(file: file, from: tailStartFrame, seconds: tailSeconds) {
+            let lastLoud = AudioMath.lastLoud(samples: tail.samples, sampleRate: tail.rate, threshold: threshold)
+            let candidate = Double(tailStartFrame) / rate + lastLoud
+            // Garde-fou : une « fin » trouvée dans la première moitié serait une erreur d'analyse.
+            if candidate > total * 0.5, candidate < total - 0.3 { end = candidate }
+        }
+        return TrackAnalysis(bpm: bpm, level: level, start: start, end: end)
     }
 
-    /// Niveau efficace du morceau (pour égaliser les volumes pendant le fondu).
-    func level(of track: Track) -> Double {
-        if let cached = levelCache[track.id] { return cached }
-        let value = readSamples(of: track).map { AudioMath.rms($0.samples) } ?? 0
-        levelCache[track.id] = value
-        return value
-    }
-
-    /// Lit jusqu'à 60 s du morceau en mono et à taux réduit : suffisant pour le tempo, et rapide.
-    private func readSamples(of track: Track) -> (samples: [Float], rate: Double)? {
-        guard let file = try? AVAudioFile(forReading: track.fileURL) else { return nil }
+    /// Lit un extrait en mono, à ~22 kHz : suffisant pour le tempo et les silences, et rapide.
+    private static func readMono(file: AVAudioFile, from frame: AVAudioFramePosition, seconds: Double) -> (samples: [Float], rate: Double)? {
         let format = file.processingFormat
-        let target: Double = 22_050
-        let ratio = format.sampleRate / target
-        let frames = AVAudioFrameCount(min(Double(file.length), format.sampleRate * 60))
+        let available = file.length - frame
+        guard available > 0 else { return nil }
+        let frames = AVAudioFrameCount(min(Double(available), format.sampleRate * seconds))
         guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
-        do {
-            try file.read(into: buffer)
-        } catch {
-            return nil
-        }
+        file.framePosition = frame
+        do { try file.read(into: buffer, frameCount: frames) } catch { return nil }
         guard let channel = buffer.floatChannelData?[0] else { return nil }
         let length = Int(buffer.frameLength)
-        var samples = [Float](repeating: 0, count: length)
-        for index in 0..<length { samples[index] = channel[index] }
-        // Sous-échantillonnage simple : l'autocorrélation travaille sur 100 points par seconde,
-        // donc une fréquence native élevée n'apporterait rien.
-        let step = max(1, Int(ratio))
-        if step > 1 {
-            samples = stride(from: 0, to: samples.count, by: step).map { samples[$0] }
+        guard length > 0 else { return nil }
+        let step = max(1, Int(format.sampleRate / 22_050))
+        var samples = [Float]()
+        samples.reserveCapacity(length / step + 1)
+        var index = 0
+        while index < length {
+            samples.append(channel[index])
+            index += step
         }
         return (samples, format.sampleRate / Double(step))
     }

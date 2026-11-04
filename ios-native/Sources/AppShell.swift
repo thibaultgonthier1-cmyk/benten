@@ -21,8 +21,21 @@ final class ArtworkCache {
     private let images = NSCache<NSString, UIImage>()
     private let tints = NSCache<NSString, UIColor>()
 
+    /// Tailles demandées par l'interface (en pixels) — sert à oublier toutes les variantes d'une
+    /// pochette quand elle change.
+    static let sizes: [CGFloat] = [180, 260, 560, 700, 1000]
+
     private init() {
-        images.countLimit = 160
+        images.countLimit = 220
+        images.totalCostLimit = 140 * 1024 * 1024
+    }
+
+    /// Oublie une pochette précise (toutes tailles) — quand elle vient d'être remplacée.
+    func forget(fileName: String) {
+        for size in Self.sizes {
+            images.removeObject(forKey: "\(fileName)@\(Int(size))" as NSString)
+        }
+        tints.removeObject(forKey: fileName as NSString)
     }
 
     private func key(_ url: URL, _ maxPixel: CGFloat) -> NSString {
@@ -58,7 +71,8 @@ final class ArtworkCache {
         }.value
         guard let image else { return nil }
 
-        images.setObject(image, forKey: k)
+        let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+        images.setObject(image, forKey: k, cost: cost)
         let tintKey = url.lastPathComponent as NSString
         if tints.object(forKey: tintKey) == nil {
             tints.setObject(image.dominantColor, forKey: tintKey)

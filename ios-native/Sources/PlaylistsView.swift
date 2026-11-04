@@ -1,13 +1,12 @@
 import SwiftUI
 
-/// Onglet Playlists : création, contenu, lecture.
+/// Onglet Playlists : création, contenu, lecture. « Phonk / Funk » se remplit toute seule.
 struct PlaylistsView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var playlists: PlaylistStore
     @State private var newName = ""
     @State private var creating = false
-    @State private var genreResult: String?
 
     var body: some View {
         NavigationStack {
@@ -17,57 +16,42 @@ struct PlaylistsView: View {
                 if playlists.items.isEmpty {
                     empty
                 } else {
-                    List {
-                        ForEach(playlists.items) { playlist in
-                            NavigationLink {
-                                PlaylistDetailView(playlist: playlist)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    // Mosaïque de 4 albums, comme Apple Music : une playlist se
-                                    // reconnaît à son mélange, pas à son premier titre.
-                                    PlaylistMosaicView(
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(playlists.items) { playlist in
+                                NavigationLink(value: playlist.id) {
+                                    PlaylistRow(
+                                        playlist: playlist,
                                         tracks: playlists.tracks(of: playlist, in: library),
-                                        cornerRadius: 9
+                                        isAuto: playlist.name == PlaylistStore.genrePlaylistName
                                     )
-                                    .frame(width: 46, height: 46)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(playlist.name)
-                                            .font(.system(size: 14, weight: .medium))
-                                            .foregroundStyle(Theme.ivory)
-                                            .lineLimit(1)
-                                        Text("\(playlist.trackIDs.count) titre\(playlist.trackIDs.count > 1 ? "s" : "")")
-                                            .font(.system(size: 11.5))
-                                            .foregroundStyle(Theme.dim)
-                                    }
+                                }
+                                .buttonStyle(PressableStyle(scale: 0.98))
+                                .contextMenu {
+                                    Button {
+                                        player.play(playlists.tracks(of: playlist, in: library), startingAt: 0)
+                                    } label: { Label("Lire", systemImage: "play.fill") }
+                                    Button {
+                                        player.playShuffled(playlists.tracks(of: playlist, in: library))
+                                    } label: { Label("Aléatoire", systemImage: "shuffle") }
+                                    Button(role: .destructive) {
+                                        withAnimation(Motion.spring) { playlists.delete(playlist.id) }
+                                    } label: { Label("Supprimer", systemImage: "trash") }
                                 }
                             }
-                            .listRowBackground(Theme.ink2)
                         }
-                        .onDelete { offsets in
-                            for index in offsets { playlists.delete(playlists.items[index].id) }
-                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
                     }
-                    .scrollContentBackground(.hidden)
-                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Playlists")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Theme.ink, for: .navigationBar)
+            .navigationDestination(for: UUID.self) { id in
+                PlaylistDetailView(playlistID: id)
+            }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Haptics.press()
-                        let added = playlists.buildGenrePlaylists(library: library)
-                        genreResult = added > 0
-                            ? "Playlist Phonk / Funk : \(added) morceau\(added > 1 ? "x" : "") classé\(added > 1 ? "s" : "")."
-                            : "Aucun morceau de ces genres n'est encore téléchargé sur l'appareil."
-                    } label: {
-                        Image(systemName: "wand.and.stars")
-                            .font(.system(size: 19))
-                            .foregroundStyle(Theme.accent)
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Haptics.press()
@@ -76,24 +60,19 @@ struct PlaylistsView: View {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 22))
                             .foregroundStyle(Theme.accent)
+                            .symbolRenderingMode(.hierarchical)
                     }
                 }
-            }
-            .alert("Playlists par genre", isPresented: Binding(get: { genreResult != nil }, set: { if !$0 { genreResult = nil } })) {
-                Button("OK", role: .cancel) { genreResult = nil }
-            } message: {
-                Text(genreResult ?? "")
             }
             .alert("Nouvelle playlist", isPresented: $creating) {
                 TextField("Nom", text: $newName)
                 Button("Créer") {
-                    let created = playlists.create(named: newName)
+                    withAnimation(Motion.spring) { _ = playlists.create(named: newName) }
                     newName = ""
-                    _ = created
                 }
                 Button("Annuler", role: .cancel) { newName = "" }
             } message: {
-                Text("Tu pourras y ajouter des morceaux depuis un album ou les favoris.")
+                Text("Ajoute ensuite des morceaux depuis la vue lecture (bouton …).")
             }
         }
     }
@@ -101,11 +80,13 @@ struct PlaylistsView: View {
     private var empty: some View {
         VStack(spacing: 12) {
             Image(systemName: "music.note.list")
-                .font(.system(size: 40, weight: .light))
+                .font(.system(size: 44, weight: .light))
                 .foregroundStyle(Theme.accent)
+                .symbolEffect(.pulse)
             Text("Aucune playlist")
-                .serifTitle(22)
-            Text("Touche + pour en créer une, puis ajoute des morceaux par appui long.")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.ivory)
+            Text("Touche + pour en créer une. « Phonk / Funk » apparaîtra toute seule dès que tu as des morceaux du genre.")
                 .font(.footnote)
                 .foregroundStyle(Theme.dim)
                 .multilineTextAlignment(.center)
@@ -114,59 +95,96 @@ struct PlaylistsView: View {
     }
 }
 
-/// Contenu d'une playlist : lecture, retrait d'un morceau, suppression de la liste.
-struct PlaylistDetailView: View {
+private struct PlaylistRow: View {
     let playlist: Playlist
+    let tracks: [Track]
+    let isAuto: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            PlaylistMosaicView(tracks: tracks, cornerRadius: 10)
+                .frame(width: 64, height: 64)
+                .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(playlist.name)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.ivory)
+                        .lineLimit(1)
+                    if isAuto {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.accent)
+                    }
+                }
+                Text(isAuto ? "Automatique · \(tracks.count) titres" : "\(tracks.count) titre\(tracks.count > 1 ? "s" : "")")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.dim)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.dim.opacity(0.7))
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Contenu d'une playlist : en-tête mosaïque, Lecture / Aléatoire, morceaux.
+struct PlaylistDetailView: View {
+    let playlistID: UUID
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var playlists: PlaylistStore
     @Environment(\.dismiss) private var dismiss
 
-    /// Recalculé à chaque rendu : la playlist peut avoir changé (ajout/retrait).
-    private var current: Playlist? { playlists.items.first { $0.id == playlist.id } }
-    private var tracks: [Track] { current.map { playlists.tracks(of: $0, in: library) } ?? [] }
-
     var body: some View {
         ZStack {
             AnimatedBackdrop()
-            if tracks.isEmpty {
-                VStack(spacing: 10) {
-                    Text("Playlist vide").serifTitle(20)
-                    Text("Ajoute des morceaux par appui long sur un titre.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.dim)
-                }
-            } else {
+            if let playlist = playlists.items.first(where: { $0.id == playlistID }) {
+                let tracks = playlists.tracks(of: playlist, in: library)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Button {
-                            Haptics.press()
-                            player.play(tracks, startingAt: 0)
-                            player.showFullScreen = true
-                        } label: {
-                            Label("Lire la playlist", systemImage: "play.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.ink)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 9)
-                                .background(Capsule().fill(Theme.accentGradient))
+                    LazyVStack(spacing: 2) {
+                        VStack(spacing: 14) {
+                            PlaylistMosaicView(tracks: tracks, cornerRadius: 14, maxPixel: 560)
+                                .frame(width: 230, height: 230)
+                                .shadow(color: .black.opacity(0.5), radius: 22, y: 12)
+                                .padding(.top, 8)
+                            VStack(spacing: 4) {
+                                Text(playlist.name)
+                                    .font(.system(size: 22, weight: .bold))
+                                    .foregroundStyle(Theme.ivory)
+                                Text("\(tracks.count) titre\(tracks.count > 1 ? "s" : "")")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Theme.dim)
+                            }
+                            HStack(spacing: 10) {
+                                bigButton("Lecture", icon: "play.fill") { player.play(tracks, startingAt: 0) }
+                                bigButton("Aléatoire", icon: "shuffle") { player.playShuffled(tracks) }
+                            }
+                            .disabled(tracks.isEmpty)
                         }
-                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+
+                        if tracks.isEmpty {
+                            Text("Playlist vide. Ajoute des morceaux depuis la vue lecture (bouton …).")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.dim)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 20)
+                        }
 
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { offset, track in
                             TrackRow(
                                 track: track,
                                 isCurrent: player.current?.id == track.id,
-                                isFavorite: false,
-                                onPlay: {
-                                    player.play(tracks, startingAt: offset)
-                                    player.showFullScreen = true
-                                },
-                                onToggleFavorite: {}
+                                isPlaying: player.playing,
+                                onPlay: { player.play(tracks, startingAt: offset) }
                             )
                             .contextMenu {
                                 Button(role: .destructive) {
-                                    playlists.remove(track.id, from: playlist.id)
+                                    withAnimation(Motion.spring) { playlists.remove(track.id, from: playlist.id) }
                                 } label: {
                                     Label("Retirer de la playlist", systemImage: "minus.circle")
                                 }
@@ -174,17 +192,18 @@ struct PlaylistDetailView: View {
                         }
                     }
                     .padding(.horizontal, 14)
-                    .padding(.bottom, 40)
+                    .padding(.bottom, 24)
                 }
+            } else {
+                Text("Playlist introuvable").foregroundStyle(Theme.dim)
             }
         }
-        .navigationTitle(current?.name ?? "Playlist")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button(role: .destructive) {
-                        playlists.delete(playlist.id)
+                        playlists.delete(playlistID)
                         dismiss()
                     } label: {
                         Label("Supprimer la playlist", systemImage: "trash")
@@ -196,5 +215,19 @@ struct PlaylistDetailView: View {
             }
         }
     }
-}
 
+    private func bigButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.press()
+            action()
+        } label: {
+            Label(title, systemImage: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(PressableStyle())
+    }
+}

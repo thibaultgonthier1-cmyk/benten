@@ -37,14 +37,83 @@ final class Library: ObservableObject {
     }
     private static var indexURL: URL { documents.appendingPathComponent("library.json") }
 
-    @Published private(set) var tracks: [Track] = []
+    @Published private(set) var tracks: [Track] = [] {
+        didSet { tracksChanged() }
+    }
     @Published private(set) var importing = false
     @Published var lastError: String?
     private var saveTask: Task<Void, Never>?
 
+    // Vues dérivées, calculées UNE fois par changement de la bibliothèque, hors du fil principal.
+    // Avant, albums / artistes / titres étaient re-groupés et re-triés à CHAQUE rendu de l'écran
+    // (donc à chaque play, pause, ouverture du lecteur…) : ~1000 morceaux triés en boucle.
+    @Published private(set) var albums: [AlbumGroup] = []
+    @Published private(set) var artists: [ArtistGroup] = []
+    @Published private(set) var tracksByTitle: [Track] = []
+    /// Accès direct par identifiant (playlists, favoris) au lieu d'une recherche linéaire.
+    private(set) var byID: [UUID: Track] = [:]
+    private var remoteIDs: Set<Int> = []
+    private var derivedTask: Task<Void, Never>?
+
     init() {
         createDirectories()
         load()
+    }
+
+    private func refreshIndexes() {
+        byID = Dictionary(tracks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        remoteIDs = Set(tracks.compactMap(\.remoteID))
+    }
+
+    private func tracksChanged() {
+        refreshIndexes()
+        derivedTask?.cancel()
+        let snapshot = tracks
+        derivedTask = Task { [weak self] in
+            // Regroupe les rafales (synchro de 1000 titres) : un seul calcul après la dernière.
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            if Task.isCancelled { return }
+            let derived = await Task.detached(priority: .userInitiated) { Library.derive(snapshot) }.value
+            guard let self, !Task.isCancelled else { return }
+            self.apply(derived)
+        }
+    }
+
+    private func apply(_ derived: Derived) {
+        albums = derived.albums
+        artists = derived.artists
+        tracksByTitle = derived.byTitle
+    }
+
+    struct Derived: Sendable {
+        let albums: [AlbumGroup]
+        let artists: [ArtistGroup]
+        let byTitle: [Track]
+    }
+
+    /// Calcule albums, artistes et titres triés. Fonction pure, appelée hors du fil principal.
+    nonisolated static func derive(_ tracks: [Track]) -> Derived {
+        var buckets: [String: [Track]] = [:]
+        for track in tracks {
+            buckets["\(track.album)||\(track.artist)", default: []].append(track)
+        }
+        let albums: [AlbumGroup] = buckets.map { key, list in
+            let sorted = list.sorted { $0.addedAt < $1.addedAt }
+            let reference = sorted.first(where: { $0.artworkName != nil }) ?? sorted[0]
+            return AlbumGroup(id: key, title: sorted[0].album, artist: sorted[0].artist, artworkTrack: reference, tracks: sorted)
+        }
+        .sorted { ($0.tracks.last?.addedAt ?? .distantPast) > ($1.tracks.last?.addedAt ?? .distantPast) }
+
+        var byArtist: [String: [AlbumGroup]] = [:]
+        for album in albums { byArtist[album.artist, default: []].append(album) }
+        let artists: [ArtistGroup] = byArtist.map { name, list in
+            let reference = list.first(where: { $0.artworkTrack.artworkName != nil })?.artworkTrack ?? list[0].artworkTrack
+            return ArtistGroup(id: name, name: name, artworkTrack: reference, albums: list)
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        let byTitle = tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        return Derived(albums: albums, artists: artists, byTitle: byTitle)
     }
 
     private func createDirectories() {
@@ -57,8 +126,12 @@ final class Library: ObservableObject {
 
     private func load() {
         guard let data = try? Data(contentsOf: Self.indexURL) else { return }
-        tracks = (try? JSONDecoder().decode([Track].self, from: data)) ?? []
-        tracks.sort { $0.addedAt < $1.addedAt }
+        let loaded = ((try? JSONDecoder().decode([Track].self, from: data)) ?? []).sorted { $0.addedAt < $1.addedAt }
+        tracks = loaded
+        // Au lancement, on calcule tout de suite : la grille s'affiche pleine dès la 1re image.
+        refreshIndexes()
+        derivedTask?.cancel()
+        apply(Self.derive(loaded))
     }
 
     /// Sauvegarde l'index — HORS du fil principal et REGROUPÉE : pendant une synchro de 1000
@@ -122,7 +195,7 @@ final class Library: ObservableObject {
     /// identifier le format réel, puis on renomme avec la bonne extension.
     @discardableResult
     func adopt(data: Data, remote: Int, fallbackTitle: String, fallbackArtist: String) async -> UUID? {
-        guard !tracks.contains(where: { $0.remoteID == remote }) else { return nil }
+        guard !remoteIDs.contains(remote) else { return nil }
         let identifier = UUID()
         let temporary = Self.audioDirectory.appendingPathComponent("\(identifier.uuidString).incoming")
         do {
@@ -164,7 +237,9 @@ final class Library: ObservableObject {
         }.value
         guard ok, let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
         tracks[index].artworkName = name
-        ArtworkCache.shared.invalidate()
+        // On oublie SEULEMENT cette pochette. Avant, tout le cache était vidé à chaque pochette
+        // reçue : pendant une synchro, toutes les tuiles se rechargeaient en boucle (saccades).
+        ArtworkCache.shared.forget(fileName: name)
         save()
     }
 
@@ -269,15 +344,16 @@ final class Library: ObservableObject {
             if let artwork = track.artworkURL { try? FileManager.default.removeItem(at: artwork) }
         }
         tracks.removeAll()
+        ArtworkCache.shared.invalidate()
         save()
     }
 
-    func track(withID id: UUID) -> Track? { tracks.first { $0.id == id } }
+    func track(withID id: UUID) -> Track? { byID[id] }
 
-    // MARK: - Regroupement par album
+    // MARK: - Regroupements
 
     /// Un album de la bibliothèque, avec sa pochette de référence et ses morceaux.
-    struct AlbumGroup: Identifiable {
+    struct AlbumGroup: Identifiable, Sendable {
         let id: String
         let title: String
         let artist: String
@@ -286,51 +362,12 @@ final class Library: ObservableObject {
     }
 
     /// Un artiste, avec ses albums et sa pochette de référence.
-    struct ArtistGroup: Identifiable {
+    struct ArtistGroup: Identifiable, Sendable {
         let id: String
         let name: String
         let artworkTrack: Track
         let albums: [AlbumGroup]
         var trackCount: Int { albums.reduce(0) { $0 + $1.tracks.count } }
-    }
-
-    /// Artistes regroupés, triés par nom (comme la vue Artistes du PC).
-    var artists: [ArtistGroup] {
-        var buckets: [String: [AlbumGroup]] = [:]
-        for album in albums {
-            buckets[album.artist, default: []].append(album)
-        }
-        return buckets.map { name, list in
-            let reference = list.first(where: { $0.artworkTrack.artworkURL != nil })?.artworkTrack ?? list[0].artworkTrack
-            return ArtistGroup(id: name, name: name, artworkTrack: reference, albums: list)
-        }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    /// Morceaux à plat, triés par titre (comme la vue Titres du PC).
-    var tracksByTitle: [Track] {
-        tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-    }
-
-    /// Albums groupés (album + artiste), triés par ajout le plus récent.
-    var albums: [AlbumGroup] {
-        var buckets: [String: [Track]] = [:]
-        for track in tracks {
-            let key = "\(track.album)||\(track.artist)"
-            buckets[key, default: []].append(track)
-        }
-        return buckets.map { key, list in
-            let sorted = list.sorted { $0.addedAt < $1.addedAt }
-            let reference = sorted.first(where: { $0.artworkURL != nil }) ?? sorted[0]
-            return AlbumGroup(
-                id: key,
-                title: sorted[0].album,
-                artist: sorted[0].artist,
-                artworkTrack: reference,
-                tracks: sorted
-            )
-        }
-        .sorted { ($0.tracks.last?.addedAt ?? .distantPast) > ($1.tracks.last?.addedAt ?? .distantPast) }
     }
 }
 

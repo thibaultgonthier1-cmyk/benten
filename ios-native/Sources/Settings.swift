@@ -8,8 +8,8 @@ struct SearchView: View {
 
     private var results: [Track] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return library.tracks }
-        return library.tracks.filter {
+        guard !trimmed.isEmpty else { return library.tracksByTitle }
+        return library.tracksByTitle.filter {
             $0.title.localizedCaseInsensitiveContains(trimmed)
                 || $0.artist.localizedCaseInsensitiveContains(trimmed)
                 || $0.album.localizedCaseInsensitiveContains(trimmed)
@@ -20,53 +20,56 @@ struct SearchView: View {
         NavigationStack {
             ZStack {
                 AnimatedBackdrop()
-                List {
-                    ForEach(Array(results.enumerated()), id: \.element.id) { offset, track in
-                        Button {
-                            player.play(results, startingAt: offset)
-                        } label: {
-                            HStack(spacing: 12) {
-                                ArtworkView(track: track)
-                                    .frame(width: 46, height: 46)
-                                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(track.title)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(Theme.ivory)
-                                        .lineLimit(1)
-                                    Text(track.artist)
-                                        .font(.system(size: 11.5))
-                                        .foregroundStyle(Theme.dim)
-                                        .lineLimit(1)
-                                }
+                let list = results
+                if list.isEmpty && !query.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 36, weight: .light))
+                            .foregroundStyle(Theme.dim)
+                            .symbolEffect(.pulse)
+                        Text("Aucun résultat pour « \(query) »")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(Theme.ivory)
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(list.enumerated()), id: \.element.id) { offset, track in
+                                TrackRow(
+                                    track: track,
+                                    isCurrent: player.current?.id == track.id,
+                                    isPlaying: player.playing,
+                                    onPlay: { player.play(list, startingAt: offset) }
+                                )
                             }
                         }
-                        .listRowBackground(Theme.ink2)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 20)
                     }
+                    .scrollDismissesKeyboard(.immediately)
                 }
-                .scrollContentBackground(.hidden)
-                .listStyle(.plain)
             }
-            .searchable(text: $query, prompt: "Titre, artiste, album")
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Titres, artistes, albums")
             .navigationTitle("Recherche")
             .toolbarBackground(Theme.ink, for: .navigationBar)
         }
     }
 }
 
-/// Réglages : tout ce qui existe sur le bureau, au format téléphone.
-///
-/// Sections : synchronisation PC, lecture (aléatoire, répétition, fondu, minuteur), égaliseur
-/// 10 bandes avec presets, bibliothèque, à propos.
+/// Réglages.
 struct SettingsView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
+    @EnvironmentObject private var clock: PlaybackClock
+    @EnvironmentObject private var playlists: PlaylistStore
     @State private var confirmDelete = false
     @StateObject private var sync = SyncService()
     @AppStorage("sync.base") private var syncBase = ""
     @AppStorage("sync.token") private var syncToken = ""
     @AppStorage("sync.limit") private var syncLimit = 100
     @State private var sleepMinutes = 0
+    @State private var usedBytes: Int64 = 0
+    @State private var genreMessage: String?
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
     @AppStorage("design") private var designRaw = "apple"
 
@@ -75,11 +78,12 @@ struct SettingsView: View {
             ZStack {
                 AnimatedBackdrop()
                 Form {
+                    automixSection
+                    soundSection
+                    playbackSection
                     designSection
                     paletteSection
                     syncSection
-                    playbackSection
-                    equalizerSection
                     librarySection
                     aboutSection
                 }
@@ -91,10 +95,154 @@ struct SettingsView: View {
                 Button("Tout supprimer", role: .destructive) { library.deleteAll() }
                 Button("Annuler", role: .cancel) {}
             }
+            .alert("Playlist Phonk / Funk", isPresented: Binding(get: { genreMessage != nil }, set: { if !$0 { genreMessage = nil } })) {
+                Button("OK", role: .cancel) { genreMessage = nil }
+            } message: {
+                Text(genreMessage ?? "")
+            }
+            // Espace disque : calculé UNE fois en arrière-plan, et seulement quand le nombre de
+            // morceaux change (avant : 1019 lectures de fichier à chaque play / pause).
+            .task(id: library.tracks.count) {
+                let urls = library.tracks.map(\.fileURL)
+                usedBytes = await Task.detached(priority: .utility) {
+                    urls.reduce(Int64(0)) { sum, url in
+                        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+                        return sum + size
+                    }
+                }.value
+            }
         }
     }
 
-    /// Les six palettes du bureau : seule la teinte d'accent change, jamais le laque ni l'ivoire.
+    // MARK: AutoMix
+
+    private var automixSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { player.automixEnabled },
+                set: { on in
+                    Haptics.choose()
+                    withAnimation(Motion.quick) { player.setAutomix(on) }
+                }
+            )) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AutoMix")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Enchaîne les morceaux comme un DJ")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                } icon: {
+                    Image(systemName: "dial.high.fill")
+                        .foregroundStyle(Theme.accent)
+                        .symbolEffect(.bounce, value: player.automixEnabled)
+                }
+            }
+            .tint(Theme.accent)
+
+            if player.automixEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Durée du fondu")
+                        Spacer()
+                        Text("\(Int(player.crossfade)) s")
+                            .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(Theme.accent)
+                    }
+                    Slider(value: $player.crossfade, in: 2...12, step: 1)
+                        .tint(Theme.accent)
+                }
+                Toggle("Caler sur le tempo (beatmatch)", isOn: $player.beatMatched)
+                    .tint(Theme.accent)
+                Text(player.beatMatched
+                     ? "Le fondu tombe sur les temps et le tempo du morceau suivant est accordé sans changer la voix. Les silences de fin et d'intro sont sautés.\(player.currentBPM.map { " Tempo actuel : \(Int($0)) BPM." } ?? "")"
+                     : "Fondu de durée fixe, sans calage rythmique.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.dim)
+            }
+        } header: {
+            Text("Enchaînement").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
+    // MARK: Son
+
+    private var soundSection: some View {
+        Section {
+            NavigationLink {
+                EqualizerView()
+            } label: {
+                HStack {
+                    Label("Égaliseur", systemImage: "slider.vertical.3")
+                    Spacer()
+                    Text(player.eqEnabled ? player.eqPresetName : "Désactivé")
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+        } header: {
+            Text("Son").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
+    // MARK: Lecture
+
+    private var playbackSection: some View {
+        Section {
+            Toggle(isOn: $player.shuffle) {
+                Label("Lecture aléatoire", systemImage: "shuffle")
+            }
+            .tint(Theme.accent)
+
+            Picker(selection: $player.repeatMode) {
+                Text("Non").tag(Player.RepeatMode.off)
+                Text("Toute la liste").tag(Player.RepeatMode.all)
+                Text("Ce titre").tag(Player.RepeatMode.one)
+            } label: {
+                Label("Répéter", systemImage: "repeat")
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Stepper(value: $sleepMinutes, in: 0...180, step: 15) {
+                    Label(sleepMinutes == 0 ? "Minuteur : désactivé" : "Minuteur : \(sleepMinutes) min", systemImage: "moon.zzz")
+                }
+                .onChange(of: sleepMinutes) { _, minutes in
+                    player.setSleepTimer(minutes: minutes == 0 ? nil : minutes)
+                }
+                if let remaining = clock.sleepRemaining {
+                    Text("Arrêt dans \(remaining / 60) min \(String(format: "%02d", remaining % 60)) s")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        } header: {
+            Text("Lecture").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
+    // MARK: Interface
+
+    private var designSection: some View {
+        Section {
+            Picker("Style", selection: $designRaw) {
+                Text("Apple Music").tag("apple")
+                Text("Benten").tag("benten")
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: designRaw) { _, value in
+                Haptics.choose()
+                Theme.appleStyle = value == "apple"
+            }
+            Text(designRaw == "apple"
+                 ? "Grandes pochettes, fond animé tiré de la pochette, comme Apple Music."
+                 : "Titres en sérif, halos colorés, disque laqué en lecture.")
+                .font(.caption2)
+                .foregroundStyle(Theme.dim)
+        } header: {
+            Text("Interface").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
     private var paletteSection: some View {
         Section {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
@@ -122,7 +270,7 @@ struct SettingsView: View {
                                 )
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableStyle())
                 }
             }
             .padding(.vertical, 4)
@@ -131,28 +279,7 @@ struct SettingsView: View {
         }
     }
 
-    /// Deux grammaires visuelles. Benten : sérif, halos, disque laqué. Apple Music : SF Pro en
-    /// gras, pochettes nettes, grande pochette, volume en bas.
-    private var designSection: some View {
-        Section {
-            Picker("Style", selection: $designRaw) {
-                Text("Apple Music").tag("apple")
-                Text("Benten").tag("benten")
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: designRaw) { value in
-                Haptics.choose()
-                Theme.appleStyle = value == "apple"
-            }
-            Text(designRaw == "apple"
-                 ? "Titres en SF Pro gras, pochettes sans halo, grande pochette, curseur de volume."
-                 : "Titres en sérif, halos colorés derrière les pochettes, disque laqué en lecture.")
-                .font(.caption2)
-                .foregroundStyle(Theme.dim)
-        } header: {
-            Text("Interface").foregroundStyle(Theme.accent.opacity(0.8))
-        }
-    }
+    // MARK: Synchronisation
 
     private var syncSection: some View {
         Section {
@@ -166,6 +293,7 @@ struct SettingsView: View {
             Stepper("Morceaux à récupérer : \(syncLimit)", value: $syncLimit, in: 1...5000, step: 50)
 
             Button {
+                Haptics.press()
                 Task { await sync.run(base: syncBase, token: syncToken, limit: syncLimit, library: library) }
             } label: {
                 Label(sync.running ? "Récupération…" : "Récupérer depuis le PC", systemImage: "arrow.down.circle")
@@ -186,113 +314,22 @@ struct SettingsView: View {
         }
     }
 
-    private var playbackSection: some View {
-        Section {
-            Toggle("Lecture aléatoire", isOn: $player.shuffle)
-                .tint(Theme.accent)
-
-            Picker("Répéter", selection: $player.repeatMode) {
-                Text("Non").tag(Player.RepeatMode.off)
-                Text("Toute la liste").tag(Player.RepeatMode.all)
-                Text("Ce titre").tag(Player.RepeatMode.one)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Fondu enchaîné : \(player.crossfade == 0 ? "désactivé" : "\(Int(player.crossfade)) s")")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.ivory)
-                Slider(value: $player.crossfade, in: 0...12, step: 1).tint(Theme.accent)
-                Toggle("Caler sur le tempo", isOn: $player.beatMatched)
-                    .tint(Theme.accent)
-                    .disabled(player.crossfade == 0)
-                Text(player.crossfade == 0
-                     ? "Enchaînement sans trou (gapless)."
-                     : player.beatMatched
-                       ? "Durée arrondie à une mesure, tempo accordé sans changer la hauteur.\(player.currentBPM.map { " Tempo détecté : \(Int($0)) BPM." } ?? "")"
-                       : "Durée fixe, sans calage rythmique.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.dim)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Stepper(
-                    "Minuteur de sommeil : \(sleepMinutes == 0 ? "désactivé" : "\(sleepMinutes) min")",
-                    value: $sleepMinutes,
-                    in: 0...180,
-                    step: 15
-                )
-                .onChange(of: sleepMinutes) { minutes in
-                    player.setSleepTimer(minutes: minutes == 0 ? nil : minutes)
-                }
-                if let remaining = player.sleepRemaining {
-                    Text("Arrêt dans \(remaining / 60) min \(remaining % 60) s")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-        } header: {
-            Text("Lecture").foregroundStyle(Theme.accent.opacity(0.8))
-        }
-    }
-
-    private var equalizerSection: some View {
-        Section {
-            Toggle("Égaliseur", isOn: $player.eqEnabled).tint(Theme.accent)
-
-            if player.eqEnabled {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(Player.presets.keys).sorted(), id: \.self) { name in
-                            Button(name) { player.applyPreset(name) }
-                                .font(.system(size: 12))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Capsule().strokeBorder(Theme.accent.opacity(0.6), lineWidth: 1))
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                ForEach(Array(Player.equalizerFrequencies.enumerated()), id: \.offset) { index, frequency in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(frequency >= 1000 ? "\(Int(frequency / 1000)) kHz" : "\(Int(frequency)) Hz")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.dim)
-                            Spacer()
-                            Text(String(format: "%+.0f dB", player.eqGains[index]))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.ivory)
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { player.eqGains[index] },
-                                set: { value in
-                                    var gains = player.eqGains
-                                    gains[index] = value
-                                    player.eqGains = gains
-                                }
-                            ),
-                            in: -12...12,
-                            step: 0.5
-                        )
-                        .tint(Theme.accent)
-                    }
-                }
-            }
-        } header: {
-            Text("Égaliseur").foregroundStyle(Theme.accent.opacity(0.8))
-        }
-    }
+    // MARK: Bibliothèque
 
     private var librarySection: some View {
         Section {
             LabeledContent("Morceaux", value: "\(library.tracks.count)")
-            LabeledContent(
-                "Espace utilisé",
-                value: ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)
-            )
+            LabeledContent("Espace utilisé", value: ByteCountFormatter.string(fromByteCount: usedBytes, countStyle: .file))
+            Button {
+                Haptics.press()
+                let added = playlists.buildGenrePlaylists(library: library)
+                genreMessage = added > 0
+                    ? "\(added) morceau\(added > 1 ? "x" : "") ajouté\(added > 1 ? "s" : "")."
+                    : "La playlist est déjà à jour (elle se met à jour toute seule)."
+            } label: {
+                Label("Mettre à jour Phonk / Funk", systemImage: "wand.and.stars")
+                    .foregroundStyle(Theme.accent)
+            }
             Button(role: .destructive) {
                 confirmDelete = true
             } label: {
@@ -306,35 +343,20 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Bundle.main.appVersion)
-            // L'appareil détecté : la grille de pochettes s'y adapte (2, 3, 4 ou 5 colonnes).
             LabeledContent("Appareil", value: DeviceLayout.current.deviceName)
-            LabeledContent("Colonnes de pochettes", value: "\(DeviceLayout.current.gridColumns)")
-            Text("Benten lit les fichiers de l'appareil, hors-ligne. iOS interdit à une app de parcourir un dossier : les morceaux viennent de Fichiers, d'iCloud, ou du PC par synchronisation.")
+            Text("Benten lit tes morceaux hors-ligne, écran verrouillé compris. Les morceaux viennent de Fichiers, d'iCloud, ou du PC par synchronisation.")
                 .font(.caption2)
                 .foregroundStyle(Theme.dim)
         } header: {
             Text("À propos").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
-
-    private var totalBytes: Int {
-        library.tracks.reduce(0) { sum, track in
-            let size = (try? FileManager.default.attributesOfItem(atPath: track.fileURL.path)[.size] as? Int) ?? 0
-            return sum + size
-        }
-    }
 }
 
-private extension Bundle {
+extension Bundle {
     var appVersion: String {
         let version = infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = infoDictionary?["CFBundleVersion"] as? String ?? "?"
         return "\(version) (\(build))"
     }
 }
-
-
-
-
-
-

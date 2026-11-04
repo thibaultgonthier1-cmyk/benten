@@ -47,6 +47,8 @@ struct DeviceLayout {
     var gridColumns: Int {
         let idiom = UIDevice.current.userInterfaceIdiom
         if idiom == .pad { return screenWidth > 900 ? 5 : 4 }
+        // Style Apple Music : 2 grandes pochettes par ligne, comme l'app d'Apple.
+        if Theme.appleStyle { return 2 }
         if screenWidth >= 430 { return 3 }
         if screenWidth >= 390 { return 3 }
         return 2

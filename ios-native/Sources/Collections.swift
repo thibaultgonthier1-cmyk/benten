@@ -114,36 +114,68 @@ final class PlaylistStore: ObservableObject {
     }
 
     /// Morceaux réels d'une playlist, dans l'ordre, en ignorant les identifiants disparus.
+    /// Accès par dictionnaire : avant, chaque identifiant était cherché dans toute la bibliothèque
+    /// (336 × 1019 comparaisons à chaque rendu de l'onglet Playlists).
     func tracks(of playlist: Playlist, in library: Library) -> [Track] {
-        playlist.trackIDs.compactMap { id in library.tracks.first { $0.id == id } }
+        playlist.trackIDs.compactMap { library.byID[$0] }
     }
 
-    /// Crée/complète les playlists par genre depuis la liste préparée `smart-playlists.json`
-    /// (classement phonk / funk / montagem fait en amont). On associe par l'identifiant PC
-    /// (`remoteID`) et on n'ajoute QUE les morceaux réellement présents sur l'appareil.
+    static let genrePlaylistName = "Phonk / Funk"
+
+    /// Mots qui signent le genre dans un titre / artiste / album.
+    private static let genreKeywords = [
+        "phonk", "funk", "montagem", "mtg", "automotivo", "slowed", "sped up", "speed up",
+        "drift", "brazil", "brasil", "bailão", "bailao", "tralala", "sigma", "aggressive",
+    ]
+
+    /// Artistes phonk / funk connus (classement fait sur la bibliothèque du PC).
+    private static let genreArtists = [
+        "kordhell", "dvrst", "interworld", "sxmpra", "ghostface playa", "pharmacist", "lxngvx",
+        "mythrodak", "h6itam", "eternxlkz", "kaito shoma", "ncts", "hxvrmxn", "dj fku",
+        "kxllswxtch", "phonkha", "sayfalse", "slowboy", "kslv", "freddie dredd", "playaphonk",
+        "akiaura", "lufer", "vøj", "narvent", "scythermane", "mc gw", "mc pedrinho", "dj ronaldo",
+        "flame runner", "ariis", "irokz", "zxkai", "brodex", "dj zk3", "dj xavier", "crxsade",
+        "4mal", "trxshbxy", "nxght", "dxrk", "noixes", "sleepwalker", "plvtinum", "vxlious",
+    ]
+
+    /// Un morceau est-il du phonk / funk ? Liste préparée sur le PC OU signes dans ses métadonnées.
+    static func isGenreTrack(_ track: Track, prepared: Set<Int>) -> Bool {
+        if let remote = track.remoteID, prepared.contains(remote) { return true }
+        let text = "\(track.title) \(track.artist) \(track.album)".lowercased()
+        if genreKeywords.contains(where: { text.contains($0) }) { return true }
+        let artist = track.artist.lowercased()
+        return genreArtists.contains(where: { artist.contains($0) })
+    }
+
+    private static let preparedGenreIDs: Set<Int> = {
+        guard let url = Bundle.main.url(forResource: "smart-playlists", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let map = try? JSONDecoder().decode([String: [Int]].self, from: data) else { return [] }
+        return Set(map.values.flatMap { $0 })
+    }()
+
+    /// Crée / complète AUTOMATIQUEMENT la playlist « Phonk / Funk » avec tous les morceaux du genre
+    /// présents sur l'iPhone. Appelée au lancement et à chaque changement de bibliothèque (synchro,
+    /// import) : la playlist se tient à jour toute seule. N'enlève jamais un titre ajouté à la main.
     /// Renvoie le nombre de morceaux ajoutés.
     @discardableResult
     func buildGenrePlaylists(library: Library) -> Int {
-        guard let url = Bundle.main.url(forResource: "smart-playlists", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let map = try? JSONDecoder().decode([String: [Int]].self, from: data) else { return 0 }
-        var total = 0
-        for (name, remoteIDs) in map {
-            let want = Set(remoteIDs)
-            let ids = library.tracks.filter { $0.remoteID.map(want.contains) ?? false }.map(\.id)
-            guard !ids.isEmpty else { continue }
-            if let index = items.firstIndex(where: { $0.name == name }) {
-                for id in ids where !items[index].trackIDs.contains(id) {
-                    items[index].trackIDs.append(id)
-                    total += 1
-                }
-            } else {
-                items.append(Playlist(name: name, trackIDs: ids))
-                total += ids.count
+        let prepared = Self.preparedGenreIDs
+        let ids = library.tracks.filter { Self.isGenreTrack($0, prepared: prepared) }.map(\.id)
+        guard !ids.isEmpty else { return 0 }
+        var added = 0
+        if let index = items.firstIndex(where: { $0.name == Self.genrePlaylistName }) {
+            let existing = Set(items[index].trackIDs)
+            for id in ids where !existing.contains(id) {
+                items[index].trackIDs.append(id)
+                added += 1
             }
+        } else {
+            items.insert(Playlist(name: Self.genrePlaylistName, trackIDs: ids), at: 0)
+            added = ids.count
         }
-        if total > 0 { save() }
-        return total
+        if added > 0 { save() }
+        return added
     }
 
     func prune(keeping tracks: [Track]) {

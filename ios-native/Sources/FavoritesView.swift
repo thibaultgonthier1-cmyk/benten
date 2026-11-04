@@ -6,79 +6,83 @@ struct FavoritesView: View {
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var favorites: FavoritesStore
 
-    private var tracks: [Track] {
-        library.tracks.filter { favorites.contains($0.id) }
-    }
-
     var body: some View {
         NavigationStack {
             ZStack {
                 AnimatedBackdrop()
+                let tracks = library.tracks.filter { favorites.contains($0.id) }.reversed().map { $0 }
 
                 if tracks.isEmpty {
                     empty
                 } else {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            header
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            header(tracks)
                             ForEach(Array(tracks.enumerated()), id: \.element.id) { offset, track in
                                 TrackRow(
                                     track: track,
                                     isCurrent: player.current?.id == track.id,
+                                    isPlaying: player.playing,
                                     isFavorite: true,
-                                    onPlay: {
-                                        player.play(tracks, startingAt: offset)
-                                        player.showFullScreen = true
-                                    },
-                                    onToggleFavorite: { favorites.toggle(track.id) }
+                                    onPlay: { player.play(tracks, startingAt: offset) },
+                                    onToggleFavorite: {
+                                        withAnimation(Motion.spring) { favorites.toggle(track.id) }
+                                    }
                                 )
+                                .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
                             }
                         }
                         .padding(.horizontal, 14)
-                        .padding(.bottom, 96)
+                        .padding(.bottom, 20)
                     }
                 }
             }
             .navigationTitle("Favoris")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Theme.ink, for: .navigationBar)
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("♥ · tes morceaux")
-                .font(.system(size: 11, weight: .medium))
-                .tracking(2.0)
-                .foregroundStyle(Theme.accent.opacity(0.75))
-            Text("Favoris")
-                .serifTitle(28)
+    private func header(_ tracks: [Track]) -> some View {
+        HStack(spacing: 10) {
             Button {
                 Haptics.press()
                 player.play(tracks, startingAt: 0)
-                player.showFullScreen = true
             } label: {
-                Label("Tout lire", systemImage: "play.fill")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 9)
-                    .background(Capsule().fill(Theme.accentGradient))
+                Label("Lecture", systemImage: "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.08)))
             }
-            .padding(.top, 2)
+            .buttonStyle(PressableStyle())
+            Button {
+                Haptics.press()
+                player.playShuffled(tracks)
+            } label: {
+                Label("Aléatoire", systemImage: "shuffle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.08)))
+            }
+            .buttonStyle(PressableStyle())
         }
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .padding(.vertical, 10)
     }
 
     private var empty: some View {
         VStack(spacing: 12) {
             Image(systemName: "heart")
-                .font(.system(size: 40, weight: .light))
+                .font(.system(size: 44, weight: .light))
                 .foregroundStyle(Theme.accent)
+                .symbolEffect(.pulse)
             Text("Aucun favori")
-                .serifTitle(22)
-            Text("Touche le cœur dans la vue lecture ou dans un album.")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.ivory)
+            Text("Touche le cœur dans la vue lecture pour retrouver tes morceaux ici.")
                 .font(.footnote)
                 .foregroundStyle(Theme.dim)
                 .multilineTextAlignment(.center)
@@ -87,48 +91,89 @@ struct FavoritesView: View {
     }
 }
 
-/// Une ligne de morceau, réutilisable (favoris, playlists, albums).
+/// Une ligne de morceau, réutilisable (favoris, playlists, recherche, titres).
+///
+/// Le morceau en cours affiche des barres animées à la place de la pochette, comme Apple Music.
 struct TrackRow: View {
     let track: Track
     let isCurrent: Bool
-    let isFavorite: Bool
+    var isPlaying: Bool = false
+    /// `nil` : pas de bouton cœur.
+    var isFavorite: Bool? = nil
     let onPlay: () -> Void
-    let onToggleFavorite: () -> Void
+    var onToggleFavorite: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: onPlay) {
+            Button {
+                Haptics.tap()
+                onPlay()
+            } label: {
                 HStack(spacing: 12) {
-                    ArtworkView(track: track)
-                        .frame(width: 46, height: 46)
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
+                    ZStack {
+                        ArtworkView(track: track, maxPixel: 180)
+                            .frame(width: 48, height: 48)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        if isCurrent {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.black.opacity(0.45))
+                                .frame(width: 48, height: 48)
+                            NowPlayingBars(animating: isPlaying)
+                                .frame(width: 18, height: 16)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(track.title)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(isCurrent ? Theme.accent : Theme.ivory)
                             .lineLimit(1)
-                        Text("\(track.artist) · \(TimeFormatting.short(track.duration))")
-                            .font(.system(size: 11.5))
+                        Text(track.artist)
+                            .font(.system(size: 12.5))
                             .foregroundStyle(Theme.dim)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 4)
                 }
+                .padding(.vertical, 5)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle(scale: 0.98))
 
-            Button {
-                Haptics.choose()
-                onToggleFavorite()
-            } label: {
-                Image(systemName: isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 17))
-                    .foregroundStyle(isFavorite ? Theme.accent : Theme.dim)
-                    .padding(8)
+            if let isFavorite {
+                Button {
+                    Haptics.choose()
+                    onToggleFavorite()
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .font(.system(size: 17))
+                        .foregroundStyle(isFavorite ? Theme.accent : Theme.dim)
+                        .symbolEffect(.bounce, value: isFavorite)
+                        .padding(8)
+                }
+                .buttonStyle(PressableStyle(scale: 0.8))
             }
-            .buttonStyle(.plain)
         }
-        .padding(.vertical, 4)
+    }
+}
+
+/// Barres d'égaliseur animées « en lecture » (comme Apple Music). Figées en pause.
+struct NowPlayingBars: View {
+    let animating: Bool
+    var color: Color = .white
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !animating)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(0..<4, id: \.self) { index in
+                    let phase = time * (5.5 + Double(index) * 1.7) + Double(index) * 1.3
+                    let level = animating ? 0.3 + 0.7 * abs(sin(phase)) : 0.3
+                    Capsule()
+                        .fill(color)
+                        .frame(height: max(2, CGFloat(level) * 16))
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .bottom)
+        }
     }
 }

@@ -14,6 +14,8 @@ import SwiftUI
 struct PlaylistMosaicView: View {
     let tracks: [Track]
     var cornerRadius: CGFloat = 9
+    /// Finesse des vignettes : 180 px suffit pour une ligne, l'en-tête demande 560.
+    var maxPixel: CGFloat = 180
 
     /// Jusqu'à 4 pochettes DISTINCTES : quatre morceaux du même album ne font pas une mosaïque.
     private var covers: [Track] {
@@ -40,25 +42,25 @@ struct PlaylistMosaicView: View {
                     .foregroundStyle(Theme.dim)
 
             case 1:
-                ArtworkView(track: covers[0])
+                ArtworkView(track: covers[0], maxPixel: maxPixel)
 
             case 2:
                 HStack(spacing: 0) {
-                    ArtworkView(track: covers[0])
-                    ArtworkView(track: covers[1])
+                    ArtworkView(track: covers[0], maxPixel: maxPixel)
+                    ArtworkView(track: covers[1], maxPixel: maxPixel)
                 }
 
             default:
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
-                        ArtworkView(track: covers[0])
-                        ArtworkView(track: covers[1])
+                        ArtworkView(track: covers[0], maxPixel: maxPixel)
+                        ArtworkView(track: covers[1], maxPixel: maxPixel)
                     }
                     HStack(spacing: 0) {
-                        ArtworkView(track: covers[2])
+                        ArtworkView(track: covers[2], maxPixel: maxPixel)
                         // La case manquante reprend la première : sans elle, la mosaïque aurait un
                         // trou noir qui attire l'œil plus que les pochettes.
-                        ArtworkView(track: covers.count > 3 ? covers[3] : covers[0])
+                        ArtworkView(track: covers.count > 3 ? covers[3] : covers[0], maxPixel: maxPixel)
                     }
                 }
             }

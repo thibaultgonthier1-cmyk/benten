@@ -47,38 +47,42 @@ struct BentenApp: App {
 struct RootView: View {
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var library: Library
+    @EnvironmentObject private var playlists: PlaylistStore
+    @EnvironmentObject private var favorites: FavoritesStore
 
     var body: some View {
         ZStack {
             TabView(selection: $router.tab) {
+                // Le mini-lecteur est posé DANS chaque onglet : il se place juste au-dessus de la
+                // barre d'onglets, qui reste toujours accessible (réglages compris).
                 LibraryView()
-                    .tabItem { Label("Bibliothèque", systemImage: "music.note.list") }
+                    .miniPlayerInset()
+                    .tabItem { Label("Bibliothèque", systemImage: "square.stack.fill") }
                     .tag(AppRouter.Tab.library)
 
                 FavoritesView()
-                    .tabItem { Label("Favoris", systemImage: "heart") }
+                    .miniPlayerInset()
+                    .tabItem { Label("Favoris", systemImage: "heart.fill") }
                     .tag(AppRouter.Tab.favorites)
 
                 PlaylistsView()
+                    .miniPlayerInset()
                     .tabItem { Label("Playlists", systemImage: "music.note.list") }
                     .tag(AppRouter.Tab.playlists)
 
                 SearchView()
+                    .miniPlayerInset()
                     .tabItem { Label("Recherche", systemImage: "magnifyingglass") }
                     .tag(AppRouter.Tab.search)
 
                 SettingsView()
-                    .tabItem { Label("Réglages", systemImage: "gearshape") }
+                    .miniPlayerInset()
+                    .tabItem { Label("Réglages", systemImage: "gearshape.fill") }
                     .tag(AppRouter.Tab.settings)
             }
             .tint(Theme.accent)
-            // Le mini-lecteur est inséré sur la TabView → il se pose JUSTE AU-DESSUS de la barre
-            // d'onglets (disposition Apple Music), au lieu de flotter en bas sur l'ancien conteneur.
-            .safeAreaInset(edge: .bottom) {
-                if player.current != nil && !player.showFullScreen {
-                    MiniPlayer()
-                }
-            }
+            .onChange(of: router.tab) { _, _ in Haptics.choose() }
 
             if player.current != nil && player.showFullScreen {
                 NowPlayingView()
@@ -86,7 +90,17 @@ struct RootView: View {
                     .zIndex(10)
             }
         }
-        .animation(Motion.spring, value: player.showFullScreen)
+        // Playlist Phonk / Funk tenue à jour TOUTE SEULE : au lancement et à chaque changement de
+        // la bibliothèque (synchro, import, suppression). Regroupé : une passe 1 s après la rafale.
+        .task(id: library.tracks.count) {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // Bibliothèque vide = rien à faire. Surtout : ne JAMAIS « nettoyer » favoris et playlists
+            // contre une bibliothèque vide (sinon un index illisible effacerait tout).
+            guard !Task.isCancelled, !library.tracks.isEmpty else { return }
+            favorites.prune(keeping: library.tracks)
+            playlists.prune(keeping: library.tracks)
+            playlists.buildGenrePlaylists(library: library)
+        }
     }
 }
 
