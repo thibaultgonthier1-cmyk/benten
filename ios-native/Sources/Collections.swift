@@ -147,7 +147,7 @@ final class PlaylistStore: ObservableObject {
         return genreArtists.contains(where: { artist.contains($0) })
     }
 
-    private static let preparedGenreIDs: Set<Int> = {
+    static let preparedGenreIDs: Set<Int> = {
         guard let url = Bundle.main.url(forResource: "smart-playlists", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let map = try? JSONDecoder().decode([String: [Int]].self, from: data) else { return [] }

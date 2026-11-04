@@ -72,6 +72,7 @@ struct SettingsView: View {
     @State private var genreMessage: String?
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
     @AppStorage("design") private var designRaw = "apple"
+    @AppStorage("visualizer") private var visualizerOn = true
 
     var body: some View {
         NavigationStack {
@@ -142,22 +143,33 @@ struct SettingsView: View {
             .tint(Theme.accent)
 
             if player.automixEnabled {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Durée du fondu")
-                        Spacer()
-                        Text("\(Int(player.crossfade)) s")
-                            .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                            .foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Longueur des transitions")
+                    Picker("Longueur", selection: $player.mixLength) {
+                        ForEach(Player.MixLength.allCases) { length in
+                            Text(length.label).tag(length)
+                        }
                     }
-                    Slider(value: $player.crossfade, in: 2...12, step: 1)
-                        .tint(Theme.accent)
+                    .pickerStyle(.segmented)
+                    Text("\(player.mixLength.beats) temps quand le rythme est détecté, \(Int(player.mixLength.seconds)) s sinon.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.dim)
                 }
-                Toggle("Caler sur le tempo (beatmatch)", isOn: $player.beatMatched)
+                Toggle("Mix calé (beatmatch + bass swap)", isOn: $player.beatMatched)
                     .tint(Theme.accent)
+                if let bpm = player.currentBPM {
+                    HStack(spacing: 8) {
+                        Label("\(Int(bpm.rounded())) BPM", systemImage: "metronome.fill")
+                        if let key = AudioMath.camelotLabel(player.currentKey) {
+                            Label(key, systemImage: "tuningfork")
+                        }
+                    }
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Theme.accent)
+                }
                 Text(player.beatMatched
-                     ? "Le fondu tombe sur les temps et le tempo du morceau suivant est accordé sans changer la voix. Les silences de fin et d'intro sont sautés.\(player.currentBPM.map { " Tempo actuel : \(Int($0)) BPM." } ?? "")"
-                     : "Fondu de durée fixe, sans calage rythmique.")
+                     ? "Comme un DJ : le morceau suivant démarre pile sur un temps fort, son tempo est accordé sans changer la voix, les basses sont échangées au milieu pour ne jamais se battre, les silences sont sautés. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
+                     : "Fondu simple à puissance constante, sans calage rythmique.")
                     .font(.caption2)
                     .foregroundStyle(Theme.dim)
             }
@@ -191,6 +203,25 @@ struct SettingsView: View {
         Section {
             Toggle(isOn: $player.shuffle) {
                 Label("Lecture aléatoire", systemImage: "shuffle")
+            }
+            .tint(Theme.accent)
+
+            Toggle(isOn: $player.autoplay) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lecture continue")
+                        Text("À la fin de la file : même genre, tempo proche")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                } icon: {
+                    Image(systemName: "infinity")
+                }
+            }
+            .tint(Theme.accent)
+
+            Toggle(isOn: $visualizerOn) {
+                Label("Visualiseur audio", systemImage: "waveform")
             }
             .tint(Theme.accent)
 

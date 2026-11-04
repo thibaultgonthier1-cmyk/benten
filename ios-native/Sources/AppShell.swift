@@ -55,6 +55,20 @@ final class ArtworkCache {
         return tints.object(forKey: url.lastPathComponent as NSString).map(Color.init(uiColor:))
     }
 
+    /// Variante VIVE et lumineuse de la teinte de la pochette : lisible sur fond sombre, sert à
+    /// colorer le lecteur (halo, barre, visualiseur, boutons actifs) — chaque morceau a sa couleur.
+    func cachedVividTint(for track: Track) -> Color? {
+        guard let url = track.artworkURL,
+              let base = tints.object(forKey: url.lastPathComponent as NSString) else { return nil }
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        guard base.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
+            return Color(uiColor: base)
+        }
+        // Une pochette grise donne un gris : on garde alors l'accent de l'app.
+        guard saturation > 0.12 else { return nil }
+        return Color(hue: Double(hue), saturation: Double(min(1, max(0.5, saturation * 1.2))), brightness: Double(max(0.85, brightness)))
+    }
+
     /// Prépare la vignette en arrière-plan (décodage + redimensionnement), la met en cache et la
     /// renvoie. Ne bloque jamais le fil principal.
     ///

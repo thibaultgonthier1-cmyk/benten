@@ -128,6 +128,7 @@ struct LibraryView: View {
         let currentID = player.current?.id
         switch mode {
         case .albums:
+            recentShelf
             LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 8) {
                 ForEach(library.albums) { album in
                     let isCurrent = currentID.map { id in album.tracks.contains { $0.id == id } } ?? false
@@ -175,6 +176,65 @@ struct LibraryView: View {
                 }
             }
             .transition(.opacity)
+        }
+    }
+
+    /// Étagère « Écoutés récemment » : reprendre en un geste ce qu'on écoutait.
+    @ViewBuilder private var recentShelf: some View {
+        let recent = player.history.prefix(16).compactMap { library.track(withID: $0) }
+        if recent.count > 1 {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Écoutés récemment")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.ivory)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(recent) { track in
+                            Button {
+                                Haptics.tap()
+                                playFromItsAlbum(track)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ZStack(alignment: .bottomTrailing) {
+                                        ArtworkView(track: track, maxPixel: 560)
+                                            .frame(width: 132, height: 132)
+                                            .clipShape(RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous))
+                                        if player.current?.id == track.id {
+                                            NowPlayingBars(animating: player.playing, color: Theme.ink)
+                                                .frame(width: 13, height: 11)
+                                                .padding(7)
+                                                .background(Circle().fill(Theme.accentGradient))
+                                                .padding(6)
+                                        }
+                                    }
+                                    Text(track.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Theme.ivory)
+                                        .lineLimit(1)
+                                    Text(track.artist)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Theme.dim)
+                                        .lineLimit(1)
+                                }
+                                .frame(width: 132, alignment: .leading)
+                            }
+                            .buttonStyle(PressableStyle())
+                        }
+                    }
+                }
+                .scrollClipDisabled()
+            }
+            .padding(.bottom, 6)
+        }
+    }
+
+    /// Lit un morceau dans le contexte de son album (la suite enchaîne naturellement).
+    private func playFromItsAlbum(_ track: Track) {
+        if let album = library.albums.first(where: { $0.tracks.contains { $0.id == track.id } }),
+           let index = album.tracks.firstIndex(where: { $0.id == track.id }) {
+            player.play(album.tracks, startingAt: index)
+        } else {
+            player.play([track], startingAt: 0)
         }
     }
 
@@ -473,9 +533,13 @@ struct NowPlayingView: View {
     @EnvironmentObject private var favorites: FavoritesStore
     @EnvironmentObject private var playlists: PlaylistStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("visualizer") private var visualizerOn = true
     @State private var dragOffset: CGFloat = 0
     @State private var previousTaps = 0
     @State private var nextTaps = 0
+    /// Couleur du morceau en cours (tirée de la pochette).
+    @State private var tint: Color = Theme.accent
 
     private var screen: CGSize { UIScreen.main.bounds.size }
 
@@ -502,7 +566,14 @@ struct NowPlayingView: View {
                 if let track = player.current {
                     Spacer(minLength: 10)
                     artwork(track)
-                    Spacer(minLength: 16)
+                    if visualizerOn {
+                        SpectrumBars(tint: tint)
+                            .frame(height: 30)
+                            .padding(.horizontal, 32)
+                            .padding(.top, 14)
+                            .transition(.opacity)
+                    }
+                    Spacer(minLength: 12)
                     titleRow(track)
                         .padding(.horizontal, 28)
                     ScrubBar { player.seek(to: $0) }
@@ -543,6 +614,26 @@ struct NowPlayingView: View {
                 }
         )
         .ignoresSafeArea()
+        // Couleur du morceau, tirée de sa pochette (halo, visualiseur, boutons actifs).
+        .task(id: player.current?.id) {
+            guard let track = player.current else { return }
+            if let ready = ArtworkCache.shared.cachedVividTint(for: track) {
+                withAnimation(.easeInOut(duration: 0.6)) { tint = ready }
+                return
+            }
+            _ = await ArtworkCache.shared.load(for: track, maxPixel: 1000)
+            let resolved = ArtworkCache.shared.cachedVividTint(for: track) ?? Theme.accent
+            withAnimation(.easeInOut(duration: 0.6)) { tint = resolved }
+        }
+        // Visualiseur branché seulement quand on le voit (vue ouverte + app au premier plan).
+        .onAppear { player.setVisualizer(active: visualizerOn) }
+        .onDisappear { player.setVisualizer(active: false) }
+        .onChange(of: scenePhase) { _, phase in
+            player.setVisualizer(active: visualizerOn && phase == .active)
+        }
+        .onChange(of: visualizerOn) { _, on in
+            player.setVisualizer(active: on)
+        }
     }
 
     @ViewBuilder private var background: some View {
@@ -563,10 +654,15 @@ struct NowPlayingView: View {
             ArtworkView(track: track, maxPixel: 1000)
                 .frame(width: Theme.appleStyle ? side : side * 0.68, height: Theme.appleStyle ? side : side * 0.68)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.appleStyle ? 12 : 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.appleStyle ? 12 : 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08))
+                )
+                // Halo DE LA COULEUR du morceau sous la pochette (Apple : ombre noire neutre).
                 .shadow(
-                    color: .black.opacity(player.playing ? 0.5 : 0.28),
-                    radius: player.playing ? 30 : 12,
-                    y: player.playing ? 18 : 6
+                    color: tint.opacity(player.playing ? 0.55 : 0.22),
+                    radius: player.playing ? 38 : 14,
+                    y: player.playing ? 20 : 6
                 )
                 // Apple Music : la pochette rétrécit en pause et reprend sa taille en lecture.
                 .scaleEffect(player.playing || reduceMotion ? 1 : 0.8)
@@ -592,9 +688,27 @@ struct NowPlayingView: View {
                     .font(.system(size: 18))
                     .foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
+                // Infos de DJ : tempo et tonalité (Camelot). Apple ne les montre pas.
+                if let bpm = player.currentBPM {
+                    HStack(spacing: 6) {
+                        Text("\(Int(bpm.rounded())) BPM")
+                        if let key = AudioMath.camelotLabel(player.currentKey) {
+                            Text("·")
+                            Text(key)
+                        }
+                    }
+                    .font(.system(size: 11, weight: .bold).monospacedDigit())
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(tint.opacity(0.16)))
+                    .padding(.top, 4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+                }
             }
             .id(track.id)
             .transition(.opacity)
+            .animation(Motion.quick, value: player.currentBPM)
             Spacer(minLength: 8)
 
             Button {
@@ -603,7 +717,7 @@ struct NowPlayingView: View {
             } label: {
                 Image(systemName: isFavorite ? "heart.fill" : "heart")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(isFavorite ? Theme.accent : .white)
+                    .foregroundStyle(isFavorite ? tint : .white)
                     .symbolEffect(.bounce, value: isFavorite)
                     .frame(width: 34, height: 34)
                     .background(Circle().fill(Color.white.opacity(0.14)))
@@ -713,7 +827,7 @@ struct NowPlayingView: View {
             } label: {
                 Image(systemName: "shuffle")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(player.shuffle ? Theme.accent : .white.opacity(0.65))
+                    .foregroundStyle(player.shuffle ? tint : .white.opacity(0.65))
                     .symbolEffect(.bounce, value: player.shuffle)
                     .frame(width: 40, height: 36)
             }
@@ -725,18 +839,28 @@ struct NowPlayingView: View {
                 Haptics.choose()
                 withAnimation(Motion.quick) { player.setAutomix(!player.automixEnabled) }
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "dial.high.fill")
-                        .symbolEffect(.bounce, value: player.automixEnabled)
-                    Text("AutoMix")
+                HStack(spacing: 6) {
+                    if let next = player.mixingInto {
+                        // Pendant la transition : on montre vers quoi on mixe, ondes animées.
+                        Image(systemName: "waveform")
+                            .symbolEffect(.variableColor.iterative, isActive: true)
+                        Text("Mix → \(next.title)")
+                            .lineLimit(1)
+                            .frame(maxWidth: 130)
+                    } else {
+                        Image(systemName: "dial.high.fill")
+                            .symbolEffect(.bounce, value: player.automixEnabled)
+                        Text("AutoMix")
+                    }
                 }
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(player.automixEnabled ? Theme.ink : .white.opacity(0.75))
+                .foregroundStyle(player.automixEnabled ? Color.black.opacity(0.85) : .white.opacity(0.75))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(
-                    Capsule().fill(player.automixEnabled ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.white.opacity(0.12)))
+                    Capsule().fill(player.automixEnabled ? AnyShapeStyle(tint) : AnyShapeStyle(Color.white.opacity(0.12)))
                 )
+                .animation(Motion.spring, value: player.mixingInto?.id)
             }
             .buttonStyle(PressableStyle(scale: 0.9))
 
@@ -757,7 +881,7 @@ struct NowPlayingView: View {
             } label: {
                 Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(player.repeatMode == .off ? .white.opacity(0.65) : Theme.accent)
+                    .foregroundStyle(player.repeatMode == .off ? .white.opacity(0.65) : tint)
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: 40, height: 36)
             }
@@ -781,6 +905,38 @@ struct NowPlayingView: View {
             withTransaction(transaction) { player.showFullScreen = false }
             dragOffset = 0
         }
+    }
+}
+
+/// Visualiseur audio en temps réel (spectre de ce qui sort vraiment des haut-parleurs), aux
+/// couleurs du morceau. Apple Music n'en a pas. Ne coûte rien quand la vue lecture est fermée.
+struct SpectrumBars: View {
+    @EnvironmentObject private var spectrum: SpectrumModel
+    let tint: Color
+
+    var body: some View {
+        let bands = spectrum.bands
+        Canvas { context, size in
+            let count = bands.count
+            guard count > 0 else { return }
+            let gap: CGFloat = 3
+            let width = max(1, (size.width - gap * CGFloat(count - 1)) / CGFloat(count))
+            for (index, value) in bands.enumerated() {
+                let level = CGFloat(min(1, max(0, value)))
+                let height = max(3, level * size.height)
+                let rect = CGRect(
+                    x: CGFloat(index) * (width + gap),
+                    y: (size.height - height) / 2,
+                    width: width,
+                    height: height
+                )
+                context.fill(
+                    Path(roundedRect: rect, cornerRadius: width / 2),
+                    with: .color(tint.opacity(0.3 + 0.7 * Double(level)))
+                )
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

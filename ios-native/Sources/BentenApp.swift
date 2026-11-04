@@ -24,6 +24,9 @@ struct BentenApp: App {
                 .onAppear {
                   Theme.apply(Palette(rawValue: paletteRaw) ?? .or)
                   Theme.appleStyle = designRaw == "apple"
+                  // Lecture continue : le lecteur pioche dans toute la bibliothèque.
+                  let library = library
+                  player.libraryProvider = { library.tracks }
                 }
                 .onChange(of: paletteRaw) { value in Theme.apply(Palette(rawValue: value) ?? .or) }
                 .environmentObject(library)
@@ -32,6 +35,7 @@ struct BentenApp: App {
                 .environmentObject(favorites)
                 .environmentObject(playlists)
                 .environmentObject(player.clock)
+                .environmentObject(player.spectrum)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
