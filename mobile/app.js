@@ -14,7 +14,7 @@
  */
 
 const DB_NAME = "benten-mobile";
-const DB_VERSION = 3; // v3 : métadonnées et audio dans deux magasins séparés (tenir 1000+ morceaux).
+const DB_VERSION = 4; // v4 : ajout du magasin « playlists » (ajout non destructif).
 const VERSION = "2.0.0";
 const SYNC_KEY = "benten-sync";
 const PREFS_KEY = "benten-prefs";
@@ -60,6 +60,10 @@ function setVol(el, v) {
   if (gainNodes[i]) gainNodes[i].gain.value = v;
   else el.volume = v;
 }
+// Si iOS a suspendu le moteur audio en arrière-plan, on le relance au retour en avant-plan.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && actx && actx.state === "suspended") actx.resume().catch(() => {});
+});
 
 /* ------------------------------- État ------------------------------- */
 
@@ -72,7 +76,8 @@ const state = {
   index: 0,
   order: [],
   pos: 0,
-  detail: null, // { type: "album" | "artist", key } — page détail façon Apple Music
+  detail: null, // { type: "album" | "artist" | "playlist", key } — page détail façon Apple Music
+  playlists: [], // listes de l'utilisateur, chargées depuis IndexedDB au démarrage
   playing: false,
   shuffle: false,
   repeat: "all",
@@ -113,6 +118,8 @@ const ICON = {
   repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 2 21 6 17 10"/><path d="M3 12V9.5A3.5 3.5 0 0 1 6.5 6H21"/><polyline points="7 22 3 18 7 14"/><path d="M21 12v2.5A3.5 3.5 0 0 1 17.5 18H3"/></svg>',
   repeatOne: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 2 21 6 17 10"/><path d="M3 12V9.5A3.5 3.5 0 0 1 6.5 6H21"/><polyline points="7 22 3 18 7 14"/><path d="M21 12v2.5A3.5 3.5 0 0 1 17.5 18H3"/><text x="12" y="14.6" font-size="7.5" font-weight="700" fill="currentColor" stroke="none" text-anchor="middle">1</text></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>',
+  minus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>',
 };
 
 // Pose les icônes fixes (onglets, précédent/suivant, aléatoire, chevron) une fois au démarrage.
@@ -157,6 +164,7 @@ function fail(where, error) {
 //   AUDIO : le fichier son (lourd)      → lu UNIQUEMENT quand on lance le morceau.
 const META = "meta";
 const AUDIO = "audio";
+const PLAYLISTS = "playlists"; // listes de l'utilisateur : { id, name, trackIds[], createdAt }
 const LEGACY = "tracks"; // ancien magasin « tout-en-un » (v1/v2), migré à la volée.
 
 let dbPromise = null;
@@ -178,6 +186,7 @@ function openDb() {
       const db = request.result;
       if (!db.objectStoreNames.contains(META)) db.createObjectStore(META, { keyPath: "id" });
       if (!db.objectStoreNames.contains(AUDIO)) db.createObjectStore(AUDIO, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(PLAYLISTS)) db.createObjectStore(PLAYLISTS, { keyPath: "id" });
       // L'ancien magasin `tracks` est conservé tel quel : on le vide par migration au chargement.
     };
     request.onsuccess = () => resolve(request.result);
@@ -232,6 +241,105 @@ async function clearTracks() {
   const db = await openDb();
   await reqPromise(db.transaction(META, "readwrite").objectStore(META).clear());
   await reqPromise(db.transaction(AUDIO, "readwrite").objectStore(AUDIO).clear());
+}
+
+/* ---- Playlists : stockées dans IndexedDB (persistent, survit aux mises à jour) ---- */
+async function loadPlaylists() {
+  const db = await openDb();
+  const rows = await reqPromise(db.transaction(PLAYLISTS, "readonly").objectStore(PLAYLISTS).getAll());
+  return rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+}
+function savePlaylistDb(pl) {
+  if (DEMO) return Promise.resolve(); // la démo ne touche pas au stockage réel
+  return openDb().then((db) => reqPromise(db.transaction(PLAYLISTS, "readwrite").objectStore(PLAYLISTS).put(pl)))
+    .catch((e) => console.warn("[benten] playlist non enregistrée", e));
+}
+function deletePlaylistDb(id) {
+  if (DEMO) return Promise.resolve();
+  return openDb().then((db) => reqPromise(db.transaction(PLAYLISTS, "readwrite").objectStore(PLAYLISTS).delete(id)))
+    .catch((e) => console.warn("[benten] playlist non supprimée", e));
+}
+
+// Opérations mémoire + persistance. Les playlists ne stockent que des IDENTIFIANTS de morceaux
+// (léger) ; les morceaux eux-mêmes restent dans META/AUDIO.
+function newPlaylist(name) {
+  const pl = { id: `pl:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`, name: (name || "").trim() || "Nouvelle playlist", trackIds: [], createdAt: Date.now() };
+  state.playlists.push(pl);
+  void savePlaylistDb(pl);
+  return pl;
+}
+function addToPlaylist(plId, trackIds) {
+  const pl = state.playlists.find((p) => p.id === plId);
+  if (!pl) return 0;
+  const seen = new Set(pl.trackIds);
+  let added = 0;
+  for (const id of trackIds) { if (!seen.has(id)) { pl.trackIds.push(id); seen.add(id); added += 1; } }
+  if (added) void savePlaylistDb(pl);
+  return added;
+}
+function removeFromPlaylist(plId, trackId) {
+  const pl = state.playlists.find((p) => p.id === plId);
+  if (!pl) return;
+  pl.trackIds = pl.trackIds.filter((id) => id !== trackId);
+  void savePlaylistDb(pl);
+}
+function renamePlaylist(plId, name) {
+  const pl = state.playlists.find((p) => p.id === plId);
+  if (!pl || !name || !name.trim()) return;
+  pl.name = name.trim();
+  void savePlaylistDb(pl);
+}
+function deletePlaylist(plId) {
+  state.playlists = state.playlists.filter((p) => p.id !== plId);
+  void deletePlaylistDb(plId);
+}
+// Résout les morceaux d'une playlist (ignore les IDs dont le morceau n'est plus là).
+function playlistTracks(pl) {
+  const byId = new Map(state.tracks.map((t) => [t.id, t]));
+  return pl.trackIds.map((id) => byId.get(id)).filter(Boolean);
+}
+
+// Feuille « Ajouter à… » : choisir une playlist existante ou en créer une.
+function closeSheet() { const s = $("sheet"); if (s) s.remove(); }
+function openAddSheet(trackIds) {
+  trackIds = (trackIds || []).filter(Boolean);
+  if (!trackIds.length) { say("rien à ajouter", "error"); return; }
+  closeSheet();
+  const lists = state.playlists.map((pl) =>
+    `<button class="sheet-item" data-pick="${escapeAttr(pl.id)}"><span class="sheet-ic">${ICON.playlists}</span><span class="sheet-name">${escapeHtml(pl.name)}</span><span class="sheet-count">${pl.trackIds.length}</span></button>`).join("");
+  const sheet = document.createElement("div");
+  sheet.className = "sheet-backdrop";
+  sheet.id = "sheet";
+  sheet.innerHTML = `
+    <div class="sheet">
+      <div class="sheet-grab"></div>
+      <div class="sheet-head">Ajouter ${trackIds.length > 1 ? `${trackIds.length} morceaux` : "le morceau"} à…</div>
+      <button class="sheet-item new" data-pick-new type="button"><span class="sheet-ic">${ICON.plus}</span><span class="sheet-name">Nouvelle playlist…</span></button>
+      ${lists}
+    </div>`;
+  sheet.addEventListener("click", (e) => {
+    if (e.target === sheet) { closeSheet(); return; }
+    const pick = e.target.closest("[data-pick]");
+    if (pick) {
+      const n = addToPlaylist(pick.dataset.pick, trackIds);
+      closeSheet();
+      say(n ? `${n} morceau${n > 1 ? "x" : ""} ajouté${n > 1 ? "s" : ""}` : "déjà dans la playlist", "info");
+      if (state.tab === "playlists" || state.detail) render();
+      return;
+    }
+    if (e.target.closest("[data-pick-new]")) {
+      const name = prompt("Nom de la playlist :", "");
+      if (name === null) return;
+      const pl = newPlaylist(name);
+      const n = addToPlaylist(pl.id, trackIds);
+      closeSheet();
+      say(`« ${pl.name} » créée · ${n} morceau${n > 1 ? "x" : ""}`, "info");
+      if (state.tab === "playlists") render();
+      return;
+    }
+  });
+  document.body.appendChild(sheet);
+  requestAnimationFrame(() => sheet.classList.add("show"));
 }
 
 /** Migration douce depuis l'ancien magasin « tout-en-un » : un morceau à la fois, pour ne
@@ -426,6 +534,7 @@ function renderRow(track, index) {
         <div class="s">${escapeHtml(track.artist)} · ${fmt(track.durationSec)}</div>
       </div>
       <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? ICON.heartFill : ICON.heart}</button>
+      <button class="rowbtn" data-add="${escapeAttr(track.id)}" aria-label="Ajouter à une playlist">${ICON.plus}</button>
     </div>`;
 }
 
@@ -439,7 +548,26 @@ function renderFavorites() {
 }
 
 function renderPlaylists() {
-  return `<div class="empty">Les playlists arrivent depuis le PC avec la synchro.<br>Pour l'instant : <b>Bibliothèque</b> et <b>Favoris</b>.</div>`;
+  const head = `<div class="eyebrow">≣ · TES LISTES</div>
+    <div class="title">Playlists</div>
+    <div class="sub">${state.playlists.length} playlist${state.playlists.length > 1 ? "s" : ""}</div>
+    <button class="pill" data-new-playlist type="button" style="margin:16px 0 4px">${ICON.plus} Nouvelle playlist</button>`;
+  if (!state.playlists.length) {
+    return head + `<div class="empty">Aucune playlist.<br>Crée-en une, puis ajoute des morceaux avec le <b>+</b> sur un titre, un album ou une recherche.</div>`;
+  }
+  const rows = state.playlists.map((pl) => {
+    const tr = playlistTracks(pl);
+    const art = tr.find((t) => t.cover) || tr[0];
+    return `<div class="row" data-open-playlist="${escapeAttr(pl.id)}">
+      <div class="thumb" style="${coverGradient(pl.name)}">${art ? coverInner(art) : `<span class="glyph">≣</span>`}</div>
+      <div class="meta">
+        <div class="n">${escapeHtml(pl.name)}</div>
+        <div class="s">${tr.length} morceau${tr.length > 1 ? "x" : ""}</div>
+      </div>
+      <span class="chevright">›</span>
+    </div>`;
+  }).join("");
+  return head + `<div class="rows" style="padding-top:8px">${rows}</div>`;
 }
 
 /* ---- Page détail (album / artiste) façon Apple Music ---- */
@@ -449,6 +577,10 @@ function detailTracks() {
   if (state.detail.type === "album") {
     const g = albums().find((x) => x.key === state.detail.key);
     return g ? g.tracks : [];
+  }
+  if (state.detail.type === "playlist") {
+    const pl = state.playlists.find((p) => p.id === state.detail.key);
+    return pl ? playlistTracks(pl) : [];
   }
   const a = artists().find((x) => x.name === state.detail.key);
   return a ? a.albums.flatMap((z) => z.tracks) : [];
@@ -466,35 +598,65 @@ function openDetail(type, key) {
 }
 
 function renderDetail() {
+  const type = state.detail.type;
   const tracks = detailTracks();
-  if (!tracks.length) { state.detail = null; return renderLibrary(); }
-  const isAlbum = state.detail.type === "album";
-  const group = isAlbum ? albums().find((x) => x.key === state.detail.key) : null;
-  const artist = isAlbum ? null : artists().find((x) => x.name === state.detail.key);
-  const title = isAlbum ? group.album : artist.name;
-  const sub = isAlbum
-    ? `${escapeHtml(group.artist)} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}`
-    : `${artist.albums.length} album${artist.albums.length > 1 ? "s" : ""} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}`;
+  // Un album/artiste vide n'existe pas : on revient à la bibliothèque. Une playlist, elle,
+  // peut être vide (on vient de la créer) : on l'affiche quand même.
+  if (!tracks.length && type !== "playlist") { state.detail = null; return renderLibrary(); }
+
+  let title, sub, extra = "";
+  if (type === "album") {
+    const group = albums().find((x) => x.key === state.detail.key);
+    if (!group) { state.detail = null; return renderLibrary(); }
+    title = group.album;
+    sub = `${escapeHtml(group.artist)} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}`;
+  } else if (type === "artist") {
+    const artist = artists().find((x) => x.name === state.detail.key);
+    if (!artist) { state.detail = null; return renderLibrary(); }
+    title = artist.name;
+    sub = `${artist.albums.length} album${artist.albums.length > 1 ? "s" : ""} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}`;
+  } else {
+    const pl = state.playlists.find((p) => p.id === state.detail.key);
+    if (!pl) { state.detail = null; return renderLibrary(); }
+    title = pl.name;
+    sub = `${tracks.length} morceau${tracks.length > 1 ? "x" : ""}`;
+    extra = `<div class="detail-manage">
+      <button class="chipbtn" data-rename-playlist="${escapeAttr(pl.id)}" type="button">Renommer</button>
+      <button class="chipbtn danger" data-del-playlist="${escapeAttr(pl.id)}" type="button">Supprimer</button>
+    </div>`;
+  }
+  const isRound = type === "artist";
   const art = tracks.find((t) => t.cover) || tracks[0];
+  const actions = tracks.length ? `
+        <div class="detail-actions">
+          <button class="pill" data-play-detail type="button">${ICON.play} Lecture</button>
+          <button class="pill ghost" data-shuffle-detail type="button">${ICON.shuffle} Aléatoire</button>
+          ${type !== "playlist" ? `<button class="pill ghost" data-add-all type="button" aria-label="Ajouter à une playlist">${ICON.plus}</button>` : ""}
+        </div>` : "";
+  const body = tracks.length
+    ? `<div class="rows">${tracks.map((t, i) => renderDetailRow(t, i)).join("")}</div>`
+    : `<div class="empty">Playlist vide.<br>Ajoute des morceaux avec le <b>+</b> depuis la bibliothèque ou une recherche.</div>`;
   return `
     <div class="detail">
       <button class="back" data-back type="button">‹ Retour</button>
       <div class="detail-hero">
-        <div class="detail-art ${isAlbum ? "" : "round"}" style="${coverGradient(title)}">${coverInner(art)}</div>
+        <div class="detail-art ${isRound ? "round" : ""}" style="${coverGradient(title)}">${art ? coverInner(art) : `<span class="glyph">≣</span>`}</div>
         <h1 class="detail-title">${escapeHtml(title)}</h1>
         <p class="detail-sub">${sub}</p>
-        <div class="detail-actions">
-          <button class="pill" data-play-detail type="button">${ICON.play} Lecture</button>
-          <button class="pill ghost" data-shuffle-detail type="button">${ICON.shuffle} Aléatoire</button>
-        </div>
+        ${actions}
+        ${extra}
       </div>
-      <div class="rows">${tracks.map((t, i) => renderDetailRow(t, i)).join("")}</div>
+      ${body}
     </div>`;
 }
 
 function renderDetailRow(track, index) {
   const fav = state.favorites.has(track.id);
   const current = state.current && state.current.id === track.id;
+  const inPlaylist = state.detail && state.detail.type === "playlist";
+  const rightBtn = inPlaylist
+    ? `<button class="rowbtn" data-remove-plitem="${escapeAttr(track.id)}" aria-label="Retirer de la playlist">${ICON.minus}</button>`
+    : `<button class="rowbtn" data-add="${escapeAttr(track.id)}" aria-label="Ajouter à une playlist">${ICON.plus}</button>`;
   return `
     <div class="row drow ${current ? "current" : ""}" data-play-index="${index}" data-id="${escapeAttr(track.id)}">
       <div class="rownum">${current ? "▶" : index + 1}</div>
@@ -503,14 +665,16 @@ function renderDetailRow(track, index) {
         <div class="s">${escapeHtml(track.artist)} · ${fmt(track.durationSec)}</div>
       </div>
       <button class="heart ${fav ? "on" : ""}" data-fav="${track.id}">${fav ? ICON.heartFill : ICON.heart}</button>
+      ${rightBtn}
     </div>`;
 }
 
 function renderSearch() {
   return `<div class="group" style="margin-top:14px">
-      <input id="searchInput" class="field" style="margin-top:0" placeholder="Titre, artiste, album" autocomplete="off" />
+      <input id="searchInput" class="field" style="margin-top:0" placeholder="Titre, artiste, album (ex. phonk, funk…)" autocomplete="off" />
     </div>
-    <div class="rows" id="searchResults" style="padding-top:12px"></div>`;
+    <button class="pill ghost" data-add-search type="button" style="margin:12px 0 2px">${ICON.plus} Ajouter les résultats à une playlist</button>
+    <div class="rows" id="searchResults" style="padding-top:4px"></div>`;
 }
 
 function renderSettings() {
@@ -599,6 +763,24 @@ function setupDelegation() {
     const t = event.target;
     const fav = t.closest("[data-fav]");
     if (fav) { event.stopPropagation(); toggleFavorite(Number(fav.dataset.fav)); return; }
+    // ---- Playlists (avant la ligne cliquable, pour ne pas lancer la lecture) ----
+    const add = t.closest("[data-add]");
+    if (add) { event.stopPropagation(); openAddSheet([add.dataset.add]); return; }
+    const rm = t.closest("[data-remove-plitem]");
+    if (rm) {
+      event.stopPropagation();
+      if (state.detail && state.detail.type === "playlist") { removeFromPlaylist(state.detail.key, rm.dataset.removePlitem); render(); }
+      return;
+    }
+    if (t.closest("[data-new-playlist]")) { const name = prompt("Nom de la playlist :", ""); if (name !== null) { newPlaylist(name); render(); } return; }
+    const openPl = t.closest("[data-open-playlist]");
+    if (openPl) { openDetail("playlist", openPl.dataset.openPlaylist); return; }
+    if (t.closest("[data-add-all]")) { openAddSheet(detailTracks().map((x) => x.id)); return; }
+    if (t.closest("[data-add-search]")) { openAddSheet(lastSearchResults.map((x) => x.id)); return; }
+    const ren = t.closest("[data-rename-playlist]");
+    if (ren) { const name = prompt("Nouveau nom :", ""); if (name && name.trim()) { renamePlaylist(ren.dataset.renamePlaylist, name); render(); } return; }
+    const del = t.closest("[data-del-playlist]");
+    if (del) { if (confirm("Supprimer cette playlist ? (les morceaux restent dans ta bibliothèque)")) { deletePlaylist(del.dataset.delPlaylist); state.detail = null; render(); } return; }
     const mode = t.closest("[data-mode]");
     if (mode) { state.mode = mode.dataset.mode; render(); return; }
     if (t.closest("#filterMenu")) {
@@ -1345,6 +1527,7 @@ async function start() {
   try {
     state.tracks = await loadMeta();
     state.persistent = true;
+    try { state.playlists = await loadPlaylists(); } catch { state.playlists = []; }
     render();
   } catch (error) {
     state.persistent = false;

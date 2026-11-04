@@ -69,7 +69,12 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string _benten._tcp" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 'Benten se connecte a votre ordinateur sur le reseau local pour recuperer vos morceaux.'" "$PLIST" 2>/dev/null || true
+          # Lecture en arriere-plan / ecran verrouille (comme Apple Music) : il faut declarer
+          # le mode "audio", sinon iOS met la musique en pause des que l'app passe en fond.
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST"
 
       - name: Forcer la fenetre "Reseau local" (declencheur natif)
         run: |
@@ -85,12 +90,17 @@ jobs:
           s = open(p, encoding="utf-8").read()
           if "import Network" not in s:
               s = s.replace("import Capacitor", "import Capacitor\nimport Network", 1)
+          if "import AVFoundation" not in s:
+              s = s.replace("import Capacitor", "import Capacitor\nimport AVFoundation", 1)
           if "bentenBrowser" not in s:
               s = s.replace("var window: UIWindow?",
                             "var window: UIWindow?\n    var bentenBrowser: NWBrowser?", 1)
           anchor = "// Override point for customization after application launch."
           if "browser.start" not in s and anchor in s:
               trigger = (anchor
+                  + "\n        // Lecture en arriere-plan / ecran verrouille (comme Apple Music)."
+                  + "\n        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)"
+                  + "\n        try? AVAudioSession.sharedInstance().setActive(true)"
                   + "\n        let browser = NWBrowser(for: .bonjour(type: \"_benten._tcp\", domain: \"local.\"), using: NWParameters())"
                   + "\n        browser.stateUpdateHandler = { _ in }"
                   + "\n        browser.start(queue: .main)"
