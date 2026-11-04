@@ -72,6 +72,13 @@ struct RootView: View {
                     .tag(AppRouter.Tab.settings)
             }
             .tint(Theme.accent)
+            // Le mini-lecteur est inséré sur la TabView → il se pose JUSTE AU-DESSUS de la barre
+            // d'onglets (disposition Apple Music), au lieu de flotter en bas sur l'ancien conteneur.
+            .safeAreaInset(edge: .bottom) {
+                if player.current != nil && !player.showFullScreen {
+                    MiniPlayer()
+                }
+            }
 
             if player.current != nil && player.showFullScreen {
                 NowPlayingView()
@@ -80,12 +87,6 @@ struct RootView: View {
             }
         }
         .animation(Motion.spring, value: player.showFullScreen)
-        .safeAreaInset(edge: .bottom) {
-            // Le mini-lecteur n'apparaît que la vue Lecture fermée : sinon il ferait doublon.
-            if player.current != nil && !player.showFullScreen {
-                MiniPlayer()
-            }
-        }
     }
 }
 
