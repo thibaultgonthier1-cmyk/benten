@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// Les fichiers sont COPIES dans le dossier Documents de l'app : après import, ils vivent sur le
 /// téléphone et se lisent hors-ligne, sans PC.
-struct Track: Identifiable, Codable, Equatable {
+struct Track: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var title: String
     var artist: String
@@ -40,6 +40,7 @@ final class Library: ObservableObject {
     @Published private(set) var tracks: [Track] = []
     @Published private(set) var importing = false
     @Published var lastError: String?
+    private var saveTask: Task<Void, Never>?
 
     init() {
         createDirectories()
@@ -60,11 +61,20 @@ final class Library: ObservableObject {
         tracks.sort { $0.addedAt < $1.addedAt }
     }
 
+    /// Sauvegarde l'index — HORS du fil principal et REGROUPÉE : pendant une synchro de 1000
+    /// morceaux, au lieu d'encoder+écrire à chaque titre (ce qui saccade), on attend 0,6 s après
+    /// le dernier changement. Encodage et écriture se font sur un fil de fond.
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
-        if let data = try? encoder.encode(tracks) {
-            try? data.write(to: Self.indexURL, options: .atomic)
+        saveTask?.cancel()
+        let snapshot = tracks
+        let url = Self.indexURL
+        saveTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            if Task.isCancelled { return }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            guard let data = try? encoder.encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
         }
     }
 
@@ -116,7 +126,8 @@ final class Library: ObservableObject {
         let identifier = UUID()
         let temporary = Self.audioDirectory.appendingPathComponent("\(identifier.uuidString).incoming")
         do {
-            try data.write(to: temporary, options: .atomic)
+            // Écriture du fichier audio (plusieurs Mo) HORS du fil principal → pas de saccade.
+            try await Task.detached(priority: .utility) { try data.write(to: temporary, options: .atomic) }.value
         } catch {
             lastError = "écriture impossible : \(error.localizedDescription)"
             return nil
@@ -142,17 +153,16 @@ final class Library: ObservableObject {
     /// Le PC garde ses pochettes dans un cache séparé (`art-cache`), pas dans les fichiers audio :
     /// sans cette étape, un morceau synchronisé affichait une tuile vide alors que le PC montre une
     /// pochette. On écrit le PNG à côté, sous le même identifiant que le morceau.
-    func attachArtwork(trackID: UUID, data: Data) {
-        guard let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        guard let image = UIImage(data: data), let png = image.pngData() else { return }
+    func attachArtwork(trackID: UUID, data: Data) async {
+        guard tracks.contains(where: { $0.id == trackID }) else { return }
         let name = "\(trackID.uuidString).png"
         let url = Self.artworkDirectory.appendingPathComponent(name)
-        do {
-            try png.write(to: url, options: .atomic)
-        } catch {
-            lastError = "pochette non enregistrée : \(error.localizedDescription)"
-            return
-        }
+        // Décodage + ré-encodage PNG + écriture HORS du fil principal (sinon saccade à la synchro).
+        let ok = await Task.detached(priority: .utility) { () -> Bool in
+            guard let image = UIImage(data: data), let png = image.pngData() else { return false }
+            do { try png.write(to: url, options: .atomic); return true } catch { return false }
+        }.value
+        guard ok, let index = tracks.firstIndex(where: { $0.id == trackID }) else { return }
         tracks[index].artworkName = name
         ArtworkCache.shared.invalidate()
         save()
