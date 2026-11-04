@@ -84,7 +84,8 @@ const state = {
   favorites: new Set(),
   palette: "or",
   style: "apple",
-  crossfade: 6, // fondu enchaîné entre morceaux, en secondes (0 = désactivé)
+  crossfade: 0, // fondu enchaîné en secondes (0 = désactivé). OFF par défaut : le moteur
+                // Web Audio du fondu est suspendu par iOS en arrière-plan et couperait la musique.
   persistent: false,
 };
 
@@ -748,6 +749,7 @@ function renderSettings() {
               .map(([v, label]) => `<button data-xfade="${v}" class="${state.crossfade === Number(v) ? "on" : ""}">${label}</button>`)
               .join("")}
           </div>
+          <p class="hint" style="margin-top:8px">Fond les morceaux (comme Apple). ⚠️ Peut couper la musique quand l'écran est verrouillé — laisse sur Off pour la lecture en arrière-plan.</p>
         </div>
       </div>
     </div>
@@ -1022,6 +1024,11 @@ function step(delta, auto = false) {
   } else if (pos < 0) {
     pos = state.repeat === "off" ? 0 : state.order.length - 1;
   }
+  // Fondu activé + un morceau joue déjà → on fond vers la cible, y compris sur Suivant/Précédent.
+  if (state.crossfade > 0 && !(DEMO && !DEMO_AUDIO) && state.current && !audio.paused) {
+    crossfadeTo(pos);
+    return;
+  }
   state.pos = pos;
   state.index = state.order[pos];
   load(state.queue[state.index]);
@@ -1040,7 +1047,7 @@ function maybeCrossfade() {
   const remaining = audio.duration - audio.currentTime;
   if (remaining > state.crossfade || remaining <= 0.25) return;
   const np = nextPosition();
-  if (np != null) startCrossfade(np);
+  if (np != null) crossfadeTo(np);
 }
 
 function nextPosition() {
@@ -1054,27 +1061,31 @@ function nextPosition() {
   return pos;
 }
 
-function startCrossfade(np) {
-  const nextTrack = state.queue[state.order[np]];
-  if (!nextTrack) return;
+// Fond enchaîné vers la position `pos` de la file : le morceau en cours descend pendant
+// que le nouveau monte. Utilisé AUSSI bien à la fin naturelle qu'au bouton suivant/précédent
+// (comme Apple Music, qui fond à chaque changement).
+function crossfadeTo(pos) {
+  const target = state.queue[state.order[pos]];
+  if (!target) return;
+  cancelCrossfade(); // règle proprement un fondu déjà en cours
+  ensureGraph();
   const outgoing = audio;
   const incoming = audioEls[1 - ai];
   crossfading = true;
-  ensureGraph();
   const token = ++xfadeToken;
-  loadBlobInto(incoming, nextTrack).then(() => {
+  loadBlobInto(incoming, target).then(() => {
     if (token !== xfadeToken) return; // fondu annulé entre-temps
     setVol(incoming, 0);
     try { incoming.currentTime = 0; } catch { /* pas encore prêt : sans gravité */ }
     incoming.play().catch(() => {});
-    // On bascule l'affichage sur le nouveau morceau dès le DÉBUT du fondu (comme Apple).
+    // On bascule l'affichage sur le nouveau morceau dès le DÉBUT du fondu.
     ai = 1 - ai;
     audio = incoming;
     loadToken++; // invalide un chargement éventuel visant le lecteur sortant
-    state.pos = np;
-    state.index = state.order[np];
-    state.current = nextTrack;
-    paintTrack(nextTrack);
+    state.pos = pos;
+    state.index = state.order[pos];
+    state.current = target;
+    paintTrack(target);
     updateTransport();
     const durMs = Math.max(400, state.crossfade * 1000);
     rampVolume(outgoing, 1, 0, durMs, token, () => { outgoing.pause(); try { outgoing.currentTime = 0; } catch {} });
@@ -1083,11 +1094,24 @@ function startCrossfade(np) {
 }
 
 function rampVolume(el, from, to, durMs, token, done) {
+  const i = audioEls.indexOf(el);
+  // Chemin iPhone : rampe programmée sur l'AudioParam (thread audio), lisse et indépendante
+  // de requestAnimationFrame (qui est gelé quand l'onglet n'a pas le focus).
+  if (gainNodes[i] && actx) {
+    const g = gainNodes[i].gain;
+    const t = actx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(Math.max(0, Math.min(1, from)), t);
+    g.linearRampToValueAtTime(Math.max(0, Math.min(1, to)), t + durMs / 1000);
+    if (done) setTimeout(() => { if (token === xfadeToken) done(); }, durMs);
+    return;
+  }
+  // Repli navigateur (pas de Web Audio) : rampe via requestAnimationFrame sur .volume.
   const t0 = performance.now();
   function tick(now) {
-    if (token !== xfadeToken) return; // fondu annulé : on stoppe la rampe
+    if (token !== xfadeToken) return;
     const p = Math.min(1, (now - t0) / durMs);
-    setVol(el, from + (to - from) * p);
+    el.volume = Math.max(0, Math.min(1, from + (to - from) * p));
     if (p < 1) requestAnimationFrame(tick);
     else if (done) done();
   }
@@ -1095,10 +1119,12 @@ function rampVolume(el, from, to, durMs, token, done) {
 }
 
 function cancelCrossfade() {
-  xfadeToken++;        // stoppe toute rampe de volume en cours
+  xfadeToken++;        // invalide les callbacks de fin de rampe en cours
   crossfading = false;
   const other = audioEls[1 - ai];
   try { other.pause(); } catch { /* sans gravité */ }
+  // Annule toute rampe de gain programmée et remet les deux lecteurs à plein volume.
+  if (actx) for (const g of gainNodes) { if (g) g.gain.cancelScheduledValues(actx.currentTime); }
   setVol(other, 1);
   if (audio) setVol(audio, 1);
 }
@@ -1156,6 +1182,7 @@ function savePrefs() {
     localStorage.setItem(PREFS_KEY, JSON.stringify({
       palette: state.palette, style: state.style, shuffle: state.shuffle,
       repeat: state.repeat, favorites: [...state.favorites], crossfade: state.crossfade,
+      cfMigrated: true,
     }));
   } catch { /* stockage refusé : les préférences restent en session. */ }
 }
@@ -1168,6 +1195,9 @@ function loadPrefs() {
     if (p.repeat) state.repeat = p.repeat;
     if (Array.isArray(p.favorites)) state.favorites = new Set(p.favorites);
     if (typeof p.crossfade === "number") state.crossfade = p.crossfade;
+    // Migration one-shot : le fondu coupait la lecture en arrière-plan → on le remet OFF
+    // une fois sur les installations existantes, puis on retient le choix de l'utilisateur.
+    if (!p.cfMigrated) { state.crossfade = 0; savePrefs(); }
   } catch { /* défauts conservés */ }
 }
 
@@ -1389,6 +1419,9 @@ audioEls.forEach(wireAudio);
 (() => {
   const bar = $("npBar");
   if (!bar) return;
+  // On écoute sur TOUT le bloc du curseur (.slider), bien plus grand que la barre de 4 px :
+  // plus besoin de viser pile la barre, le doigt n'importe où dans la zone suffit.
+  const surface = bar.closest(".slider") || bar;
   let active = false;
   const ratioAt = (clientX) => {
     const rect = bar.getBoundingClientRect();
@@ -1400,15 +1433,15 @@ audioEls.forEach(wireAudio);
     if (Number.isFinite(audio.duration)) $("npPos").textContent = fmt(ratio * audio.duration);
     return ratio;
   };
-  bar.addEventListener("pointerdown", (event) => {
+  surface.addEventListener("pointerdown", (event) => {
     active = true;
     scrubbing = true;
     bar.classList.add("scrubbing");
-    try { bar.setPointerCapture(event.pointerId); } catch { /* capture non supportée : sans gravité */ }
+    try { surface.setPointerCapture(event.pointerId); } catch { /* capture non supportée : sans gravité */ }
     preview(event.clientX);
     event.preventDefault();
   });
-  bar.addEventListener("pointermove", (event) => { if (active) preview(event.clientX); });
+  surface.addEventListener("pointermove", (event) => { if (active) preview(event.clientX); });
   const commit = (event) => {
     if (!active) return;
     active = false;
@@ -1416,10 +1449,10 @@ audioEls.forEach(wireAudio);
     if (Number.isFinite(audio.duration)) audio.currentTime = ratio * audio.duration;
     scrubbing = false;
     bar.classList.remove("scrubbing");
-    try { bar.releasePointerCapture(event.pointerId); } catch { /* idem */ }
+    try { surface.releasePointerCapture(event.pointerId); } catch { /* idem */ }
   };
-  bar.addEventListener("pointerup", commit);
-  bar.addEventListener("pointercancel", () => { active = false; scrubbing = false; bar.classList.remove("scrubbing"); });
+  surface.addEventListener("pointerup", commit);
+  surface.addEventListener("pointercancel", () => { active = false; scrubbing = false; bar.classList.remove("scrubbing"); });
 })();
 
 // Fenêtre « En lecture » : on la referme en la faisant glisser vers le bas

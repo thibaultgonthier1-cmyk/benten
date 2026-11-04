@@ -3,7 +3,7 @@
   "appName": "Benten",
   "webDir": "../mobile",
   "ios": {
-    "contentInset": "always",
+    "contentInset": "never",
     "backgroundColor": "#0a0908"
   },
   "plugins": {

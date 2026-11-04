@@ -590,7 +590,7 @@ body {
   margin-top: 4px;
 }
 
-.slider { width: min(78vw, 320px); margin-top: 22px; }
+.slider { width: min(78vw, 320px); margin-top: 22px; padding: 10px 0; touch-action: none; }
 .track-bar {
   height: 4px;
   border-radius: 2px;

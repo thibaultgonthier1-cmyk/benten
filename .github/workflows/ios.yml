@@ -73,6 +73,9 @@ jobs:
           # le mode "audio", sinon iOS met la musique en pause des que l'app passe en fond.
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" 2>/dev/null || true
+          # Barre d'etat claire (texte blanc) sur le fond sombre, plein ecran.
+          /usr/libexec/PlistBuddy -c "Add :UIViewControllerBasedStatusBarAppearance bool false" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIStatusBarStyle string UIStatusBarStyleLightContent" "$PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity" "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST"
 
