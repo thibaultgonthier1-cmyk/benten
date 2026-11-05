@@ -12,12 +12,15 @@ enum LibraryRoute: Hashable {
 // MARK: - Bibliothèque
 
 struct LibraryView: View {
+    // FLUIDITÉ : la bibliothèque n'observe NI le lecteur, NI le routeur, NI les favoris. Avant,
+    // chaque play/pause, changement d'onglet ou cœur recalculait toute la grille. Les cellules
+    // lisent elles-mêmes ce qui les concerne (`NowPlayingState`, favoris) : seules les cellules
+    // VISIBLES et CONCERNÉES se redessinent.
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
-    @EnvironmentObject private var router: AppRouter
-    @EnvironmentObject private var favorites: FavoritesStore
     @State private var showImporter = false
     @State private var mode: BrowseMode = LibraryView.initialMode
+    @Namespace private var modeChip
+    private var nowPlaying: NowPlayingState { .shared }
 
     private static var initialMode: BrowseMode {
         #if DEBUG
@@ -62,9 +65,11 @@ struct LibraryView: View {
                         // Index A–Z sur le bord droit, comme la liste des titres d'Apple Music.
                         .overlay(alignment: .trailing) {
                             if mode == .tracks, library.tracks.count > 30 {
-                                let firsts = letterAnchors
-                                AlphabetIndex(letters: firsts.map { $0.letter }) { letter in
-                                    if let id = firsts.first(where: { $0.letter == letter })?.id {
+                                // Ancres pré-calculées par la bibliothèque (hors fil principal) :
+                                // avant, 1000+ titres « repliés » (accents, casse) à CHAQUE rendu.
+                                let anchors = library.letterAnchors
+                                AlphabetIndex(letters: anchors.map(\.letter)) { letter in
+                                    if let id = anchors.first(where: { $0.letter == letter })?.id {
                                         proxy.scrollTo(id, anchor: .top)
                                     }
                                 }
@@ -108,7 +113,7 @@ struct LibraryView: View {
                     HStack(spacing: 6) {
                         Button {
                             Haptics.tap()
-                            router.tab = .search
+                            AppRouter.shared?.tab = .search
                         } label: {
                             Image(systemName: "magnifyingglass")
                                 .font(.system(size: 17, weight: .medium))
@@ -152,27 +157,24 @@ struct LibraryView: View {
     }
 
     @ViewBuilder private var content: some View {
-        let currentID = player.current?.id
         switch mode {
         case .albums:
-            recentShelf
+            RecentShelf()
             LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 8) {
                 ForEach(library.albums) { album in
-                    let isCurrent = currentID.map { id in album.tracks.contains { $0.id == id } } ?? false
                     NavigationLink(value: LibraryRoute.album(album.id)) {
-                        AlbumTileView(album: album, isCurrent: isCurrent, isPlaying: player.playing)
+                        LiveAlbumTile(album: album)
                     }
                     .buttonStyle(PressableStyle())
                     .contextMenu {
-                        Button { player.play(album.tracks, startingAt: 0) } label: { Label("Lire", systemImage: "play.fill") }
-                        Button { player.playShuffled(album.tracks) } label: { Label("Aléatoire", systemImage: "shuffle") }
+                        Button { nowPlaying.play(album.tracks, startingAt: 0) } label: { Label("Lire", systemImage: "play.fill") }
+                        Button { nowPlaying.playShuffled(album.tracks) } label: { Label("Aléatoire", systemImage: "shuffle") }
                         DeleteFromDeviceButton("Supprimer l'album de l'iPhone") {
                             deletion = DeletionRequest(tracks: album.tracks, name: album.title)
                         }
                     }
                 }
             }
-            .transition(.opacity)
 
         case .artists:
             LazyVGrid(columns: layout.columns, spacing: layout.gridSpacing + 8) {
@@ -182,112 +184,28 @@ struct LibraryView: View {
                     }
                     .buttonStyle(PressableStyle())
                     .contextMenu {
-                        let all = artist.albums.flatMap(\.tracks)
-                        Button { player.play(all, startingAt: 0) } label: { Label("Tout lire", systemImage: "play.fill") }
-                        Button { player.playShuffled(all) } label: { Label("Aléatoire", systemImage: "shuffle") }
+                        // Liste des titres calculée AU TOUCHER (avant : à chaque rendu, par artiste).
+                        Button { nowPlaying.play(artist.albums.flatMap(\.tracks), startingAt: 0) } label: { Label("Tout lire", systemImage: "play.fill") }
+                        Button { nowPlaying.playShuffled(artist.albums.flatMap(\.tracks)) } label: { Label("Aléatoire", systemImage: "shuffle") }
                         DeleteFromDeviceButton("Supprimer l'artiste de l'iPhone") {
-                            deletion = DeletionRequest(tracks: all, name: artist.name)
+                            deletion = DeletionRequest(tracks: artist.albums.flatMap(\.tracks), name: artist.name)
                         }
                     }
                 }
             }
-            .transition(.opacity)
 
         case .tracks:
             // LazyVStack : seules les lignes visibles sont construites (fluide avec 1000+ titres).
             LazyVStack(spacing: 2) {
                 let list = library.tracksByTitle
-                ForEach(Array(list.enumerated()), id: \.element.id) { offset, track in
-                    TrackRow(
-                        track: track,
-                        isCurrent: currentID == track.id,
-                        isPlaying: player.playing,
-                        isFavorite: favorites.contains(track.id),
-                        onPlay: { player.play(list, startingAt: offset) },
-                        onToggleFavorite: { favorites.toggle(track.id) }
-                    )
-                    .contextMenu {
-                        DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
-                    }
-                    .id(track.id)
-                }
-            }
-            .transition(.opacity)
-        }
-    }
-
-    /// Premier titre de chaque lettre (pour l'index A–Z).
-    private var letterAnchors: [(letter: String, id: UUID)] {
-        var result: [(letter: String, id: UUID)] = []
-        var seen = Set<String>()
-        for track in library.tracksByTitle {
-            let letter = AlphabetIndex.letter(for: track.title)
-            if seen.insert(letter).inserted { result.append((letter, track.id)) }
-        }
-        // « # » en tête, comme Apple.
-        return result.sorted { ($0.letter == "#" ? "" : $0.letter) < ($1.letter == "#" ? "" : $1.letter) }
-    }
-
-    /// Étagère « Écoutés récemment » : reprendre en un geste ce qu'on écoutait.
-    @ViewBuilder private var recentShelf: some View {
-        let recent = player.history.prefix(16).compactMap { library.track(withID: $0) }
-        if recent.count > 1 {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Écoutés récemment")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Theme.ivory)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    // HStack (16 tuiles maximum) : aucune tuile qui « saute » en apparaissant,
-                    // et défilement aimanté tuile par tuile comme les étagères d'Apple Music.
-                    HStack(alignment: .top, spacing: 12) {
-                        ForEach(recent) { track in
-                            Button {
-                                Haptics.tap()
-                                playFromItsAlbum(track)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    ZStack(alignment: .bottomTrailing) {
-                                        ArtworkView(track: track, maxPixel: 560)
-                                            .frame(width: 132, height: 132)
-                                            .clipShape(RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous))
-                                        if player.current?.id == track.id {
-                                            NowPlayingBars(animating: player.playing, color: Theme.ink)
-                                                .frame(width: 13, height: 11)
-                                                .padding(7)
-                                                .background(Circle().fill(Theme.accentGradient))
-                                                .padding(6)
-                                        }
-                                    }
-                                    Text(track.title)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(Theme.ivory)
-                                        .lineLimit(1)
-                                    Text(track.artist)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Theme.dim)
-                                        .lineLimit(1)
-                                }
-                                .frame(width: 132, alignment: .leading)
-                            }
-                            .buttonStyle(PressableStyle())
+                ForEach(list) { track in
+                    LibraryTrackRow(track: track) { nowPlaying.play(list, from: track) }
+                        .contextMenu {
+                            DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
                         }
-                    }
-                    .scrollTargetLayout()
+                        .id(track.id)
                 }
-                .scrollTargetBehavior(.viewAligned)
-                .scrollClipDisabled()
             }
-            .padding(.bottom, 6)
-        }
-    }
-
-    /// Lit un morceau dans le contexte de son album (la suite enchaîne naturellement).
-    private func playFromItsAlbum(_ track: Track) {
-        if let album = library.albums.first(where: { $0.tracks.contains { $0.id == track.id } }),
-           let index = album.tracks.firstIndex(where: { $0.id == track.id }) {
-            player.play(album.tracks, startingAt: index)
-        } else {
-            player.play([track], startingAt: 0)
         }
     }
 
@@ -297,21 +215,32 @@ struct LibraryView: View {
                 ForEach(BrowseMode.allCases, id: \.self) { value in
                     let selected = mode == value
                     Button {
+                        guard mode != value else { return }
                         Haptics.choose()
-                        withAnimation(Motion.quick) { mode = value }
+                        // Contenu échangé IMMÉDIATEMENT (pas de fondu croisé de deux grilles
+                        // entières, coûteux et mou) ; seule la pastille glisse, comme Apple.
+                        mode = value
                     } label: {
                         Label(value.rawValue, systemImage: value.icon)
                             .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
                             .foregroundStyle(selected ? Theme.ink : Theme.ivory.opacity(0.9))
                             .padding(.horizontal, 13)
                             .padding(.vertical, 8)
-                            .background(
-                                Capsule().fill(selected ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.white.opacity(0.08)))
-                            )
+                            .background {
+                                ZStack {
+                                    Capsule().fill(Color.white.opacity(0.08))
+                                    if selected {
+                                        Capsule()
+                                            .fill(Theme.accentGradient)
+                                            .matchedGeometryEffect(id: "chip", in: modeChip)
+                                    }
+                                }
+                            }
                     }
                     .buttonStyle(PressableStyle(scale: 0.92))
                 }
             }
+            .animation(Motion.quick, value: mode)
             Text("\(library.tracks.count) morceaux · \(library.albums.count) albums · v\(Bundle.main.appVersion)")
                 .font(.system(size: 11.5).monospacedDigit())
                 .foregroundStyle(Theme.dim)
@@ -355,13 +284,122 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - Cellules « vivantes »
+
+/// Étagère « Écoutés récemment » : reprendre en un geste ce qu'on écoutait. Vue À PART : elle
+/// seule se redessine quand l'historique change (avant : toute la bibliothèque).
+private struct RecentShelf: View {
+    @EnvironmentObject private var library: Library
+    private var nowPlaying: NowPlayingState { .shared }
+
+    var body: some View {
+        let recent = nowPlaying.history.prefix(16).compactMap { library.track(withID: $0) }
+        let currentID = nowPlaying.currentID
+        if recent.count > 1 {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Écoutés récemment")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.ivory)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    // HStack (16 tuiles maximum) : aucune tuile qui « saute » en apparaissant,
+                    // et défilement aimanté tuile par tuile comme les étagères d'Apple Music.
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(recent) { track in
+                            Button {
+                                Haptics.tap()
+                                playFromItsAlbum(track)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ZStack(alignment: .bottomTrailing) {
+                                        ArtworkView(track: track, maxPixel: 560)
+                                            .frame(width: 132, height: 132)
+                                            .clipShape(RoundedRectangle(cornerRadius: Theme.coverRadius, style: .continuous))
+                                        if currentID == track.id {
+                                            LiveNowPlayingBars(color: Theme.ink)
+                                                .frame(width: 13, height: 11)
+                                                .padding(7)
+                                                .background(Circle().fill(Theme.accentGradient))
+                                                .padding(6)
+                                        }
+                                    }
+                                    Text(track.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Theme.ivory)
+                                        .lineLimit(1)
+                                    Text(track.artist)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Theme.dim)
+                                        .lineLimit(1)
+                                }
+                                .frame(width: 132, alignment: .leading)
+                            }
+                            .buttonStyle(PressableStyle())
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollTargetBehavior(.viewAligned)
+                .scrollClipDisabled()
+            }
+            .padding(.bottom, 6)
+        }
+    }
+
+    /// Lit un morceau dans le contexte de son album (la suite enchaîne naturellement).
+    private func playFromItsAlbum(_ track: Track) {
+        if let album = library.albums.first(where: { $0.tracks.contains { $0.id == track.id } }),
+           let index = album.tracks.firstIndex(where: { $0.id == track.id }) {
+            nowPlaying.play(album.tracks, startingAt: index)
+        } else {
+            nowPlaying.play([track], startingAt: 0)
+        }
+    }
+}
+
+/// Tuile d'album de grille qui sait SEULE si elle est en cours : un changement de morceau ne
+/// redessine que les tuiles visibles, jamais la grille.
+struct LiveAlbumTile: View {
+    let album: Library.AlbumGroup
+    private var nowPlaying: NowPlayingState { .shared }
+
+    var body: some View {
+        let isCurrent = nowPlaying.currentID.map { id in album.tracks.contains { $0.id == id } } ?? false
+        AlbumTileView(album: album, isCurrent: isCurrent)
+    }
+}
+
+/// Ligne de la liste « Titres » : lit elle-même son cœur (un favori ne redessine qu'elle).
+private struct LibraryTrackRow: View {
+    let track: Track
+    let onPlay: () -> Void
+    @EnvironmentObject private var favorites: FavoritesStore
+
+    var body: some View {
+        TrackRow(
+            track: track,
+            isFavorite: favorites.contains(track.id),
+            onPlay: onPlay,
+            onToggleFavorite: { favorites.toggle(track.id) }
+        )
+    }
+}
+
+/// Barres « en lecture » qui lisent ELLES-MÊMES lecture/pause : une pause ne redessine que ce
+/// petit badge, pas la ligne ni la liste.
+struct LiveNowPlayingBars: View {
+    var color: Color = .white
+
+    var body: some View {
+        NowPlayingBars(animating: NowPlayingState.shared.playing, color: color)
+    }
+}
+
 // MARK: - Tuiles
 
 /// Tuile d'album (contenu seul : la navigation est portée par le `NavigationLink` parent).
 struct AlbumTileView: View {
     let album: Library.AlbumGroup
     let isCurrent: Bool
-    let isPlaying: Bool
 
     private var glow: Color {
         Theme.appleStyle ? .clear : (ArtworkCache.shared.cachedTint(for: album.artworkTrack) ?? Theme.accent)
@@ -381,7 +419,7 @@ struct AlbumTileView: View {
                             .strokeBorder(Theme.hairline)
                     )
                 if isCurrent {
-                    NowPlayingBars(animating: isPlaying, color: Theme.ink)
+                    LiveNowPlayingBars(color: Theme.ink)
                         .frame(width: 15, height: 13)
                         .padding(8)
                         .background(Circle().fill(Theme.accentGradient))
@@ -431,59 +469,106 @@ struct ArtistTileView: View {
 /// Décodage + redimensionnement HORS du fil principal (`ArtworkCache.load`). Le fil principal ne
 /// décode jamais d'image : le défilement reste lisse. `maxPixel` : 180 (lignes, mini-lecteur),
 /// 560 (tuiles, en-têtes), 1000 (lecteur plein écran).
+///
+/// POCHETTES NON CARRÉES (16:9…) — elles s'affichaient ROGNÉES au centre. Cause : elles étaient
+/// dessinées dans un `ZStack { flou .scaledToFill ; net .scaledToFit }`. Le calque « fill »
+/// déborde du cadre (356 × 200 pour une case de 200 × 200), le `ZStack` prend cette taille, puis
+/// PLACE chacun de ses enfants en leur proposant SA propre taille : le calque « fit » recevait donc
+/// 356 × 200, devenait aussi grand que le flou et le recouvrait exactement — résultat identique à
+/// un simple rognage, flou invisible. Désormais chaque calque est un `overlay` distinct de
+/// `Color.clear` : chacun reçoit le cadre EXACT, le « fit » tient entier dedans, quoi qu'il arrive.
 struct ArtworkView: View {
     let track: Track
     var maxPixel: CGFloat = 560
-    @State private var loaded: UIImage?
+    @State private var loaded: Loaded?
+
+    /// Clé de chargement : morceau + fichier de pochette + taille.
+    private struct LoadKey: Equatable {
+        let id: UUID
+        let artwork: String?
+        let pixels: Int
+    }
+
+    /// Image chargée, AVEC la clé pour laquelle elle l'a été : quand la vue est réutilisée pour un
+    /// autre morceau (mini-lecteur, changement de titre), on n'affiche jamais une image périmée,
+    /// et une pochette déjà en cache apparaît dans la MÊME image que le changement.
+    private struct Loaded {
+        let key: LoadKey
+        let image: UIImage
+        let backdrop: UIImage?
+    }
+
+    private var loadKey: LoadKey {
+        LoadKey(id: track.id, artwork: track.artworkName, pixels: Int(maxPixel))
+    }
 
     var body: some View {
-        // `Color.clear` prend EXACTEMENT la place proposée : l'image remplit ce cadre sans jamais
-        // l'agrandir. Avant, une image « fill » imposait sa propre taille à la mise en page :
-        // dans la mosaïque des playlists, les pochettes débordaient et se coupaient n'importe où.
-        Color.clear.overlay {
-            if let image = loaded ?? ArtworkCache.shared.cached(for: track, maxPixel: maxPixel) {
-                let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
-                if abs(aspect - 1) > 0.22 {
-                    // Pochette vraiment rectangulaire : affichée ENTIÈRE, sur un fond flouté
-                    // d'elle-même (rien n'est coupé).
-                    ZStack {
+        let cache = ArtworkCache.shared
+        let key = loadKey
+        let fresh = loaded?.key == key ? loaded : nil
+        let image = fresh?.image ?? cache.cached(for: track, maxPixel: maxPixel)
+        let wide = image.map(ArtworkCache.isNonSquare) ?? false
+
+        // `Color.clear` prend EXACTEMENT la place proposée ; chaque calque est un overlay séparé
+        // qui reçoit ce cadre exact (jamais la taille d'un voisin qui déborde).
+        Color.clear
+            .overlay {
+                if let image {
+                    if wide {
+                        // Fond : la pochette floutée, PRÉ-CALCULÉE (aucun flou en direct).
+                        if let fill = fresh?.backdrop ?? cache.cachedBackdrop(for: track, maxPixel: maxPixel) {
+                            Image(uiImage: fill)
+                                .resizable()
+                                .interpolation(.medium)
+                                .scaledToFill()
+                                .opacity(0.75)
+                                .transition(.opacity)
+                        } else {
+                            Theme.ink3
+                        }
+                    } else {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
-                            .blur(radius: 14, opaque: true)
-                            .opacity(0.75)
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
+                            .transition(.opacity)
                     }
-                    .transition(.opacity)
                 } else {
+                    Theme.accentGradient
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 22, weight: .light))
+                                .foregroundStyle(Theme.ink.opacity(0.55))
+                        )
+                }
+            }
+            .overlay {
+                // Pochette rectangulaire : ENTIÈRE, rien n'est coupé.
+                if let image, wide {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFill()
+                        .scaledToFit()
                         .transition(.opacity)
                 }
-            } else {
-                Theme.accentGradient
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 22, weight: .light))
-                            .foregroundStyle(Theme.ink.opacity(0.55))
-                    )
             }
-        }
-        .clipped()
-        .task(id: "\(track.id)@\(Int(maxPixel))") {
-            if let hit = ArtworkCache.shared.cached(for: track, maxPixel: maxPixel) {
-                loaded = hit
-                return
+            .clipped()
+            .task(id: key) {
+                let cache = ArtworkCache.shared
+                if let hit = cache.cached(for: track, maxPixel: maxPixel),
+                   !ArtworkCache.isNonSquare(hit) || cache.cachedBackdrop(for: track, maxPixel: maxPixel) != nil {
+                    // Déjà prête : affichée dès le premier rendu (via le cache), sans animation.
+                    loaded = Loaded(key: key, image: hit, backdrop: cache.cachedBackdrop(for: track, maxPixel: maxPixel))
+                    return
+                }
+                let alreadyShown = cache.cached(for: track, maxPixel: maxPixel) != nil
+                guard let image = await cache.load(for: track, maxPixel: maxPixel), !Task.isCancelled else { return }
+                let ready = Loaded(key: key, image: image, backdrop: cache.cachedBackdrop(for: track, maxPixel: maxPixel))
+                if alreadyShown {
+                    loaded = ready
+                } else {
+                    // Fondu court (comme Apple Music) seulement quand la pochette arrive vraiment.
+                    withAnimation(.easeOut(duration: 0.18)) { loaded = ready }
+                }
             }
-            loaded = nil
-            let image = await ArtworkCache.shared.load(for: track, maxPixel: maxPixel)
-            if !Task.isCancelled {
-                withAnimation(.easeOut(duration: 0.18)) { loaded = image }
-            }
-        }
     }
 }
 
@@ -576,12 +661,15 @@ struct MiniPlayer: View {
 /// liste ne passe pas dessous). Simple espace vide : le mini-lecteur lui-même est UNIQUE et posé
 /// une seule fois par-dessus les onglets (voir `RootView`).
 struct MiniPlayerSpacer: ViewModifier {
-    @EnvironmentObject private var player: Player
+    // Plus d'abonnement au lecteur entier : ce modificateur (un par onglet) était réévalué à
+    // chaque play/pause/BPM… Il ne dépend plus que de « y a-t-il un morceau ? ».
+    private var nowPlaying: NowPlayingState { .shared }
 
     func body(content: Content) -> some View {
-        // iOS 26 : le système réserve lui-même la place de la barre et du mini-lecteur.
+        // iOS 26 : le système réserve lui-même la place de la barre et du mini-lecteur (et on ne
+        // lit alors même pas l'état du lecteur : aucune dépendance).
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: player.current == nil || ShellStyle.systemAccessory ? 0 : 70)
+            Color.clear.frame(height: ShellStyle.systemAccessory || nowPlaying.currentID == nil ? 0 : 70)
         }
     }
 }
@@ -720,585 +808,13 @@ enum TabBarMetrics {
     }
 }
 
-// MARK: - Lecteur plein écran
-
-/// Vue lecture, à la manière d'Apple Music : pochette qui grossit en lecture et rétrécit en pause,
-/// titre à gauche, barre de progression qui s'épaissit sous le doigt, transport, volume système
-/// réel, AirPlay, AutoMix. Se referme au chevron ou en tirant vers le bas.
-struct NowPlayingView: View {
-    @EnvironmentObject private var player: Player
-    @EnvironmentObject private var favorites: FavoritesStore
-    @EnvironmentObject private var playlists: PlaylistStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("visualizer") private var visualizerOn = true
-    @AppStorage("livingArtwork") private var livingArtwork = true
-    @State private var dragOffset: CGFloat = 0
-    /// Suivi horizontal du doigt sur la pochette animée (retour visuel du swipe).
-    @State private var artSwipe: CGFloat = 0
-    @State private var previousTaps = 0
-    @State private var nextTaps = 0
-    /// Couleur du morceau en cours (tirée de la pochette).
-    @State private var tint: Color = Theme.accent
-
-    private var screen: CGSize { UIScreen.main.bounds.size }
-
-    /// Marges réelles de l'écran (Dynamic Island, barre d'accueil) : le panneau couvre TOUT
-    /// l'écran (pour pouvoir arrondir ses coins quand on le tire), le contenu reste dans la zone sûre.
-    private var insets: UIEdgeInsets {
-        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.safeAreaInsets ?? .zero
-    }
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            background
-
-            // Pochette ANIMÉE : bord à bord en haut de l'écran, holographique, qui respire.
-            if living, let track = player.current {
-                // Carrée, pleine largeur, juste sous la barre d'état : la pochette ENTIÈRE est
-                // visible, bord à bord ; le fond (pochette floutée) la prolonge tout autour.
-                LivingArtwork(track: track, playing: player.playing, bpm: player.currentBPM,
-                              height: screen.width)
-                    .padding(.top, insets.top + 2)
-                    .offset(x: artSwipe)
-                    .opacity(1 - min(0.4, Double(abs(artSwipe)) / 400))
-                    .id(track.id)
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
-            }
-
-            VStack(spacing: 0) {
-                Capsule()
-                    .fill(Color.white.opacity(0.4))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .onTapGesture { close() }
-
-                if let track = player.current {
-                    Spacer(minLength: 10)
-                    artworkSlot(track)
-                        // Glisser la pochette : gauche = suivant, droite = précédent.
-                        .trackSwipe(
-                            onNext: { player.next() },
-                            onPrevious: { player.previous(force: true) },
-                            onDrag: { translation in
-                                if translation.height > 0, translation.height > abs(translation.width) {
-                                    dragOffset = translation.height
-                                } else if abs(translation.width) > abs(translation.height) {
-                                    artSwipe = translation.width / (1 + abs(translation.width) / 260)
-                                }
-                            },
-                            onRelease: { translation, projected in
-                                if translation.height > 0, translation.height > abs(translation.width) {
-                                    if translation.height > 130 || projected.height > 420 {
-                                        dismissFromDrag()
-                                    } else {
-                                        withAnimation(Motion.sheet) { dragOffset = 0 }
-                                    }
-                                }
-                                withAnimation(Motion.spring) { artSwipe = 0 }
-                            }
-                        )
-                    if visualizerOn {
-                        SpectrumBars(tint: tint)
-                            .frame(height: 30)
-                            .padding(.horizontal, 32)
-                            .padding(.top, 14)
-                            .transition(.opacity)
-                    }
-                    Spacer(minLength: 12)
-                    titleRow(track)
-                        .padding(.horizontal, 28)
-                    ScrubBar { player.seek(to: $0) }
-                        .padding(.horizontal, 28)
-                        .padding(.top, 16)
-                    transport
-                        .padding(.top, 10)
-                    volumeRow
-                        .padding(.horizontal, 28)
-                        .padding(.top, 14)
-                    bottomRow
-                        .padding(.horizontal, 36)
-                        .padding(.top, 14)
-                        .padding(.bottom, 8)
-                }
-            }
-            .padding(.top, insets.top)
-            .padding(.bottom, max(insets.bottom, 12))
-            .animation(Motion.spring, value: player.current?.id)
-        }
-        .animation(.easeInOut(duration: 0.6), value: player.current?.id)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: dragOffset > 1 ? 44 : 0, style: .continuous))
-        .offset(y: dragOffset)
-        .gesture(
-            DragGesture(minimumDistance: 14, coordinateSpace: .global)
-                .onChanged { value in
-                    let dy = value.translation.height
-                    guard dy > 0, abs(dy) > abs(value.translation.width) else { return }
-                    dragOffset = dy
-                }
-                .onEnded { value in
-                    let dy = value.translation.height
-                    if dy > 130 || value.predictedEndTranslation.height > 420 {
-                        dismissFromDrag()
-                    } else {
-                        withAnimation(Motion.sheet) { dragOffset = 0 }
-                    }
-                }
-        )
-        .ignoresSafeArea()
-        // Couleur du morceau, tirée de sa pochette (halo, visualiseur, boutons actifs).
-        .task(id: player.current?.id) {
-            guard let track = player.current else { return }
-            if let ready = ArtworkCache.shared.cachedVividTint(for: track) {
-                withAnimation(.easeInOut(duration: 0.6)) { tint = ready }
-                return
-            }
-            _ = await ArtworkCache.shared.load(for: track, maxPixel: 1000)
-            let resolved = ArtworkCache.shared.cachedVividTint(for: track) ?? Theme.accent
-            withAnimation(.easeInOut(duration: 0.6)) { tint = resolved }
-        }
-        // Visualiseur branché seulement quand on le voit (vue ouverte + app au premier plan).
-        // Visualiseur branché APRÈS l'animation d'ouverture (0,5 s) : l'ouverture reste fluide.
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if player.showFullScreen && visualizerOn { player.setVisualizer(active: true) }
-            }
-        }
-        .onDisappear { player.setVisualizer(active: false) }
-        .onChange(of: scenePhase) { _, phase in
-            player.setVisualizer(active: visualizerOn && phase == .active)
-        }
-        .onChange(of: visualizerOn) { _, on in
-            player.setVisualizer(active: on)
-        }
-    }
-
-    @ViewBuilder private var background: some View {
-        if Theme.appleStyle {
-            CoverBackdrop(track: player.current, playing: player.playing, bpm: player.currentBPM)
-        } else {
-            AnimatedBackdrop()
-        }
-    }
-
-    /// Pochette animée active (style Apple Music + réglage « Pochette animée »).
-    private var living: Bool { livingArtwork && Theme.appleStyle && !reduceMotion }
-
-    /// Emplacement de la pochette : la carte classique, ou un espace vide (touchable pour le
-    /// swipe) quand la pochette animée occupe tout le haut de l'écran.
-    @ViewBuilder private func artworkSlot(_ track: Track) -> some View {
-        if living {
-            Color.clear
-                .frame(height: min(screen.width - 56, 390))
-                .contentShape(Rectangle())
-        } else {
-            artwork(track)
-        }
-    }
-
-    private func artwork(_ track: Track) -> some View {
-        let side = min(screen.width - 56, 390)
-        return ZStack {
-            if !Theme.appleStyle {
-                LacquerDisc(playing: player.playing)
-                    .frame(width: side * 1.04, height: side * 1.04)
-            }
-            ArtworkView(track: track, maxPixel: 1000)
-                .frame(width: Theme.appleStyle ? side : side * 0.68, height: Theme.appleStyle ? side : side * 0.68)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.appleStyle ? 12 : 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.appleStyle ? 12 : 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08))
-                )
-                // Halo DE LA COULEUR du morceau sous la pochette (Apple : ombre noire neutre).
-                .shadow(
-                    color: tint.opacity(player.playing ? 0.55 : 0.22),
-                    radius: player.playing ? 38 : 14,
-                    y: player.playing ? 20 : 6
-                )
-                // Apple Music : la pochette rétrécit en pause et reprend sa taille en lecture.
-                .scaleEffect(player.playing || reduceMotion ? 1 : 0.8)
-                .animation(reduceMotion ? nil : Motion.artwork, value: player.playing)
-                .id(track.id)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.9).combined(with: .opacity),
-                    removal: .opacity
-                ))
-        }
-        .frame(height: side)
-    }
-
-    private func titleRow(_ track: Track) -> some View {
-        let isFavorite = favorites.contains(track.id)
-        return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(track.title)
-                    .font(.system(size: 21, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(track.artist)
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineLimit(1)
-                // Infos de DJ : tempo et tonalité (Camelot). Apple ne les montre pas.
-                if let bpm = player.currentBPM {
-                    HStack(spacing: 6) {
-                        Text("\(Int(bpm.rounded())) BPM")
-                        if let key = AudioMath.camelotLabel(player.currentKey) {
-                            Text("·")
-                            Text(key)
-                        }
-                    }
-                    .font(.system(size: 11, weight: .bold).monospacedDigit())
-                    .foregroundStyle(tint)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(tint.opacity(0.16)))
-                    .padding(.top, 4)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
-                }
-            }
-            .id(track.id)
-            .transition(.opacity)
-            .animation(Motion.quick, value: player.currentBPM)
-            Spacer(minLength: 8)
-
-            Button {
-                Haptics.choose()
-                favorites.toggle(track.id)
-            } label: {
-                Image(systemName: isFavorite ? "heart.fill" : "heart")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(isFavorite ? tint : .white)
-                    .symbolEffect(.bounce, value: isFavorite)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(Color.white.opacity(0.14)))
-            }
-            .buttonStyle(PressableStyle(scale: 0.85))
-
-            Menu {
-                Section("Ajouter à une playlist") {
-                    ForEach(playlists.items) { playlist in
-                        Button {
-                            Haptics.choose()
-                            playlists.add(track.id, to: playlist.id)
-                        } label: {
-                            Label(playlist.name, systemImage: "music.note.list")
-                        }
-                    }
-                    Button {
-                        Haptics.choose()
-                        playlists.create(named: track.title, from: [track.id])
-                    } label: {
-                        Label("Nouvelle playlist", systemImage: "plus")
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(Color.white.opacity(0.14)))
-            }
-        }
-    }
-
-    private var transport: some View {
-        HStack {
-            Spacer()
-            Button {
-                Haptics.tap()
-                previousTaps += 1
-                player.previous()
-            } label: {
-                Image(systemName: "backward.fill")
-                    .font(.system(size: 32))
-                    .symbolEffect(.bounce, value: previousTaps)
-                    .frame(width: 64, height: 64)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(TransportStyle(haloSize: 72))
-            Spacer()
-            Button {
-                Haptics.press()
-                player.toggle()
-            } label: {
-                ZStack {
-                    if !Theme.appleStyle {
-                        Circle()
-                            .fill(Theme.accentGradient)
-                            .frame(width: 76, height: 76)
-                            .shadow(color: Theme.accent.opacity(0.45), radius: 16, y: 6)
-                    }
-                    Image(systemName: player.playing ? "pause.fill" : "play.fill")
-                        .font(.system(size: Theme.appleStyle ? 46 : 30, weight: .bold))
-                        .foregroundStyle(Theme.appleStyle ? Color.white : Theme.ink)
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .frame(width: 80, height: 80)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(TransportStyle(haloSize: 84))
-            .animation(Motion.quick, value: player.playing)
-            Spacer()
-            Button {
-                Haptics.tap()
-                nextTaps += 1
-                player.next()
-            } label: {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 32))
-                    .symbolEffect(.bounce, value: nextTaps)
-                    .frame(width: 64, height: 64)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(TransportStyle(haloSize: 72))
-            Spacer()
-        }
-        .foregroundStyle(.white)
-    }
-
-    private var volumeRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "speaker.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.6))
-            SystemVolumeSlider()
-                .frame(height: 30)
-            Image(systemName: "speaker.wave.3.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.6))
-        }
-    }
-
-    private var bottomRow: some View {
-        HStack {
-            Button {
-                Haptics.choose()
-                player.shuffle.toggle()
-            } label: {
-                Image(systemName: "shuffle")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(player.shuffle ? tint : .white.opacity(0.65))
-                    .symbolEffect(.bounce, value: player.shuffle)
-                    .frame(width: 40, height: 36)
-            }
-            .buttonStyle(PressableStyle(scale: 0.85))
-
-            Spacer()
-
-            Button {
-                Haptics.choose()
-                withAnimation(Motion.quick) { player.setAutomix(!player.automixEnabled) }
-            } label: {
-                HStack(spacing: 6) {
-                    if let next = player.mixingInto {
-                        // Pendant la transition : on montre vers quoi on mixe, ondes animées.
-                        Image(systemName: "waveform")
-                            .symbolEffect(.variableColor.iterative, isActive: true)
-                        Text(next.id == player.current?.id ? "Mix en boucle" : "Mix → \(next.title)")
-                            .lineLimit(1)
-                            .frame(maxWidth: 130)
-                    } else {
-                        Image(systemName: "dial.high.fill")
-                            .symbolEffect(.bounce, value: player.automixEnabled)
-                        Text("AutoMix")
-                    }
-                }
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(player.automixEnabled ? Color.black.opacity(0.85) : .white.opacity(0.75))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule().fill(player.automixEnabled ? AnyShapeStyle(tint) : AnyShapeStyle(Color.white.opacity(0.12)))
-                )
-                .animation(Motion.spring, value: player.mixingInto?.id)
-            }
-            .buttonStyle(PressableStyle(scale: 0.9))
-
-            Spacer()
-
-            RoutePicker()
-                .frame(width: 36, height: 36)
-
-            Spacer()
-
-            Button {
-                Haptics.choose()
-                switch player.repeatMode {
-                case .off: player.repeatMode = .all
-                case .all: player.repeatMode = .one
-                case .one: player.repeatMode = .off
-                }
-            } label: {
-                Image(systemName: player.repeatMode == .one ? "repeat.1" : "repeat")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(player.repeatMode == .off ? .white.opacity(0.65) : tint)
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 40, height: 36)
-            }
-            .buttonStyle(PressableStyle(scale: 0.85))
-            .animation(Motion.quick, value: player.repeatMode)
-        }
-    }
-
-    private func close() {
-        Haptics.tap()
-        withAnimation(Motion.sheet) { player.showFullScreen = false }
-    }
-
-    /// Fermeture au glissé : le panneau continue sa course vers le bas, PUIS disparaît (sans saut).
-    private func dismissFromDrag() {
-        Haptics.tap()
-        withAnimation(Motion.sheet) { dragOffset = screen.height }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { player.showFullScreen = false }
-            dragOffset = 0
-        }
-    }
-}
-
-/// Visualiseur audio en temps réel (spectre de ce qui sort vraiment des haut-parleurs), aux
-/// couleurs du morceau. Apple Music n'en a pas. Ne coûte rien quand la vue lecture est fermée.
-struct SpectrumBars: View {
-    @EnvironmentObject private var spectrum: SpectrumModel
-    let tint: Color
-
-    var body: some View {
-        let bands = spectrum.bands
-        Canvas { context, size in
-            let count = bands.count
-            guard count > 0 else { return }
-            let gap: CGFloat = 3
-            let width = max(1, (size.width - gap * CGFloat(count - 1)) / CGFloat(count))
-            for (index, value) in bands.enumerated() {
-                let level = CGFloat(min(1, max(0, value)))
-                let height = max(3, level * size.height)
-                let rect = CGRect(
-                    x: CGFloat(index) * (width + gap),
-                    y: (size.height - height) / 2,
-                    width: width,
-                    height: height
-                )
-                context.fill(
-                    Path(roundedRect: rect, cornerRadius: width / 2),
-                    with: .color(tint.opacity(0.3 + 0.7 * Double(level)))
-                )
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-/// Barre de progression façon Apple Music : fine au repos, épaisse sous le doigt, glissé
-/// RELATIF (pas de saut au toucher), et le seek n'est envoyé QU'AU RELÂCHEMENT. Avant, chaque
-/// millimètre relançait l'audio et le curseur se battait avec le doigt.
-struct ScrubBar: View {
-    @EnvironmentObject private var clock: PlaybackClock
-    let onSeek: (Double) -> Void
-    @State private var dragging = false
-    @State private var dragValue: Double = 0
-    @State private var dragStart: Double = 0
-
-    var body: some View {
-        VStack(spacing: 7) {
-            GeometryReader { geo in
-                let total = max(1, clock.duration)
-                let value = dragging ? dragValue : clock.position
-                let fraction = CGFloat(min(1, max(0, value / total)))
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.22))
-                    Capsule()
-                        .fill(Color.white.opacity(dragging ? 1 : 0.78))
-                        .frame(width: max(0, geo.size.width * fraction))
-                        // Entre deux ticks (0,2 s), la barre glisse au lieu de sauter.
-                        .animation(dragging ? nil : .linear(duration: 0.2), value: fraction)
-                }
-                .frame(height: dragging ? 11 : 6)
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { gesture in
-                            if !dragging {
-                                dragStart = clock.position
-                                dragValue = clock.position
-                                withAnimation(Motion.quick) { dragging = true }
-                                Haptics.tap()
-                            }
-                            let delta = Double(gesture.translation.width / max(1, geo.size.width)) * total
-                            dragValue = min(total, max(0, dragStart + delta))
-                        }
-                        .onEnded { gesture in
-                            if abs(gesture.translation.width) > 2 {
-                                onSeek(dragValue)
-                            }
-                            withAnimation(Motion.quick) { dragging = false }
-                        }
-                )
-            }
-            .frame(height: 22)
-
-            HStack {
-                Text(clock.formatted(dragging ? dragValue : clock.position))
-                Spacer()
-                Text("-" + clock.formatted(max(0, clock.duration - (dragging ? dragValue : clock.position))))
-            }
-            .font(.system(size: 12, weight: .medium).monospacedDigit())
-            .foregroundStyle(.white.opacity(dragging ? 0.95 : 0.55))
-        }
-    }
-}
-
-/// Curseur de VOLUME SYSTÈME réel (celui des boutons du téléphone). L'ancien curseur ne
-/// pilotait rien.
-struct SystemVolumeSlider: UIViewRepresentable {
-    func makeUIView(context: Context) -> MPVolumeView {
-        let view = MPVolumeView(frame: .zero)
-        view.showsRouteButton = false
-        view.tintColor = .white
-        let size: CGFloat = 14
-        let thumb = UIGraphicsImageRenderer(size: CGSize(width: size, height: size)).image { ctx in
-            UIColor.white.setFill()
-            ctx.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: size, height: size))
-        }
-        view.setVolumeThumbImage(thumb, for: .normal)
-        for case let slider as UISlider in view.subviews {
-            slider.minimumTrackTintColor = .white
-            slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.22)
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
-}
-
-/// Bouton AirPlay / sortie audio (AirPods, enceintes, voiture).
-struct RoutePicker: UIViewRepresentable {
-    func makeUIView(context: Context) -> AVRoutePickerView {
-        let view = AVRoutePickerView()
-        view.tintColor = UIColor.white.withAlphaComponent(0.7)
-        view.activeTintColor = UIColor(Theme.accent)
-        view.prioritizesVideoDevices = false
-        return view
-    }
-
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
-}
-
 // MARK: - Pages album et artiste
 
 struct AlbumDetailView: View {
     let albumID: String
+    // Pas d'abonnement au lecteur : la page (en-tête, pochette holographique, liste) ne se
+    // reconstruit plus à chaque play/pause ; seules les lignes concernées se redessinent.
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
     @Environment(\.dismiss) private var dismiss
     @State private var deletion: DeletionRequest?
     @State private var leaveAfter = false
@@ -1335,13 +851,8 @@ struct AlbumDetailView: View {
                         .padding(.bottom, 14)
 
                         ForEach(Array(album.tracks.enumerated()), id: \.element.id) { offset, track in
-                            NumberedTrackRow(
-                                number: offset + 1,
-                                track: track,
-                                isCurrent: player.current?.id == track.id,
-                                isPlaying: player.playing
-                            ) {
-                                player.play(album.tracks, startingAt: offset)
+                            NumberedTrackRow(number: offset + 1, track: track) {
+                                NowPlayingState.shared.play(album.tracks, startingAt: offset)
                             }
                             .contextMenu {
                                 DeleteFromDeviceButton {
@@ -1383,7 +894,6 @@ struct AlbumDetailView: View {
 struct ArtistDetailView: View {
     let artistID: String
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
     @Environment(\.dismiss) private var dismiss
     @State private var deletion: DeletionRequest?
     @State private var leaveAfter = false
@@ -1417,12 +927,8 @@ struct ArtistDetailView: View {
                             LazyHStack(spacing: 14) {
                                 ForEach(artist.albums) { album in
                                     NavigationLink(value: LibraryRoute.album(album.id)) {
-                                        AlbumTileView(
-                                            album: album,
-                                            isCurrent: album.tracks.contains { $0.id == player.current?.id },
-                                            isPlaying: player.playing
-                                        )
-                                        .frame(width: 150)
+                                        LiveAlbumTile(album: album)
+                                            .frame(width: 150)
                                     }
                                     .buttonStyle(PressableStyle())
                                 }
@@ -1433,19 +939,14 @@ struct ArtistDetailView: View {
                             .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(Theme.ivory)
                         LazyVStack(spacing: 2) {
-                            ForEach(Array(all.enumerated()), id: \.element.id) { offset, track in
-                                TrackRow(
-                                    track: track,
-                                    isCurrent: player.current?.id == track.id,
-                                    isPlaying: player.playing,
-                                    onPlay: { player.play(all, startingAt: offset) }
-                                )
-                                .contextMenu {
-                                    DeleteFromDeviceButton {
-                                        leaveAfter = all.count <= 1
-                                        deletion = DeletionRequest(track: track)
+                            ForEach(all) { track in
+                                TrackRow(track: track, onPlay: { NowPlayingState.shared.play(all, from: track) })
+                                    .contextMenu {
+                                        DeleteFromDeviceButton {
+                                            leaveAfter = all.count <= 1
+                                            deletion = DeletionRequest(track: track)
+                                        }
                                     }
-                                }
                             }
                         }
                     }
@@ -1481,12 +982,11 @@ struct ArtistDetailView: View {
 /// Boutons « Lecture » / « Aléatoire » des pages album, artiste.
 struct PlayShuffleButtons: View {
     let tracks: [Track]
-    @EnvironmentObject private var player: Player
 
     var body: some View {
         HStack(spacing: 10) {
-            button("Lecture", icon: "play.fill") { player.play(tracks, startingAt: 0) }
-            button("Aléatoire", icon: "shuffle") { player.playShuffled(tracks) }
+            button("Lecture", icon: "play.fill") { NowPlayingState.shared.play(tracks, startingAt: 0) }
+            button("Aléatoire", icon: "shuffle") { NowPlayingState.shared.playShuffled(tracks) }
         }
         .disabled(tracks.isEmpty)
     }
@@ -1511,11 +1011,11 @@ struct PlayShuffleButtons: View {
 struct NumberedTrackRow: View {
     let number: Int
     let track: Track
-    let isCurrent: Bool
-    let isPlaying: Bool
     let onPlay: () -> Void
 
     var body: some View {
+        // Lu ICI (pas dans la page) : un changement de morceau ne redessine que deux lignes.
+        let isCurrent = NowPlayingState.shared.currentID == track.id
         Button {
             Haptics.tap()
             onPlay()
@@ -1524,7 +1024,7 @@ struct NumberedTrackRow: View {
                 HStack(spacing: 12) {
                     ZStack {
                         if isCurrent {
-                            NowPlayingBars(animating: isPlaying, color: Theme.accent)
+                            LiveNowPlayingBars(color: Theme.accent)
                                 .frame(width: 15, height: 13)
                         } else {
                             Text("\(number)")

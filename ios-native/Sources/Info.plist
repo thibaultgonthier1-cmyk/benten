@@ -38,6 +38,9 @@
 
     <!-- Lecture écran verrouillé et en arrière-plan : c'est ce qui distingue une vraie app
          de musique d'une simple page. -->
+    <!-- ProMotion : animations à 120 images/s (sans cette clé, iOS bride l'app à 60). -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>

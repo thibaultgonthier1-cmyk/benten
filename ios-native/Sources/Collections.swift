@@ -166,9 +166,11 @@ final class PlaylistStore: ObservableObject {
         var added = 0
         if let index = items.firstIndex(where: { $0.name == Self.genrePlaylistName }) {
             let existing = Set(items[index].trackIDs)
-            for id in ids where !existing.contains(id) {
-                items[index].trackIDs.append(id)
-                added += 1
+            // Ajouts groupés : UNE publication (avant : une par morceau ajouté).
+            let missing = ids.filter { !existing.contains($0) }
+            if !missing.isEmpty {
+                items[index].trackIDs.append(contentsOf: missing)
+                added = missing.count
             }
         } else {
             items.insert(Playlist(name: Self.genrePlaylistName, trackIDs: ids), at: 0)
@@ -180,12 +182,20 @@ final class PlaylistStore: ObservableObject {
 
     func prune(keeping tracks: [Track]) {
         let alive = Set(tracks.map(\.id))
+        // Travail sur une COPIE, publiée une seule fois et seulement si quelque chose a changé.
+        // Avant, chaque `items[index]…` modifiait le tableau publié : une notification par
+        // playlist à chaque lancement / synchro, même sans aucun changement — et autant de
+        // recalculs des onglets qui l'observent.
+        var updated = items
         var changed = false
-        for index in items.indices {
-            let before = items[index].trackIDs.count
-            items[index].trackIDs.removeAll { !alive.contains($0) }
-            if items[index].trackIDs.count != before { changed = true }
+        for index in updated.indices {
+            let before = updated[index].trackIDs.count
+            updated[index].trackIDs.removeAll { !alive.contains($0) }
+            if updated[index].trackIDs.count != before { changed = true }
         }
-        if changed { save() }
+        if changed {
+            items = updated
+            save()
+        }
     }
 }

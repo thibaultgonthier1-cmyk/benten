@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Recherche dans la bibliothèque locale (titre, artiste, album).
 struct SearchView: View {
+    // Pas d'abonnement au lecteur : avant, chaque play/pause re-filtrait toute la bibliothèque.
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
     @State private var query = ""
     @State private var deletion: DeletionRequest?
 
@@ -35,16 +35,11 @@ struct SearchView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 2) {
-                            ForEach(Array(list.enumerated()), id: \.element.id) { offset, track in
-                                TrackRow(
-                                    track: track,
-                                    isCurrent: player.current?.id == track.id,
-                                    isPlaying: player.playing,
-                                    onPlay: { player.play(list, startingAt: offset) }
-                                )
-                                .contextMenu {
-                                    DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
-                                }
+                            ForEach(list) { track in
+                                TrackRow(track: track, onPlay: { NowPlayingState.shared.play(list, from: track) })
+                                    .contextMenu {
+                                        DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
+                                    }
                             }
                         }
                         .padding(.horizontal, 14)
@@ -63,22 +58,25 @@ struct SearchView: View {
 }
 
 /// Réglages.
+///
+/// FLUIDITÉ : la page entière observait l'HORLOGE de lecture (publiée 10 fois par seconde) pour
+/// un seul texte « Arrêt dans… », et le lecteur entier : pendant la lecture, tout le formulaire
+/// (palettes, synchro, bibliothèque…) était recalculé 10 fois par seconde, même onglet caché —
+/// du travail volé au fil principal pendant les défilements et les animations des autres onglets.
+/// Désormais : les sections du lecteur sont une vue à part (`PlayerSettingsSections`), et le
+/// compte à rebours une toute petite vue (`SleepCountdown`) — seules elles se redessinent.
 struct SettingsView: View {
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
-    @EnvironmentObject private var clock: PlaybackClock
     @EnvironmentObject private var playlists: PlaylistStore
     @State private var confirmDelete = false
     @StateObject private var sync = SyncService()
     @AppStorage("sync.base") private var syncBase = ""
     @AppStorage("sync.token") private var syncToken = ""
     @AppStorage("sync.limit") private var syncLimit = 100
-    @State private var sleepMinutes = 0
     @State private var usedBytes: Int64 = 0
     @State private var genreMessage: String?
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
     @AppStorage("design") private var designRaw = "apple"
-    @AppStorage("visualizer") private var visualizerOn = true
     @AppStorage("livingArtwork") private var livingArtwork = true
 
     var body: some View {
@@ -86,9 +84,7 @@ struct SettingsView: View {
             ZStack {
                 AnimatedBackdrop()
                 Form {
-                    automixSection
-                    soundSection
-                    playbackSection
+                    PlayerSettingsSections()
                     designSection
                     paletteSection
                     syncSection
@@ -102,7 +98,7 @@ struct SettingsView: View {
             .toolbarBackground(Theme.ink, for: .navigationBar)
             .confirmationDialog("Supprimer tous les morceaux ?", isPresented: $confirmDelete) {
                 Button("Tout supprimer", role: .destructive) {
-                    player.stopAndClear()
+                    NowPlayingState.shared.player?.stopAndClear()
                     library.deleteAll()
                 }
                 Button("Annuler", role: .cancel) {}
@@ -123,134 +119,6 @@ struct SettingsView: View {
                     }
                 }.value
             }
-        }
-    }
-
-    // MARK: AutoMix
-
-    private var automixSection: some View {
-        Section {
-            Toggle(isOn: Binding(
-                get: { player.automixEnabled },
-                set: { on in
-                    Haptics.choose()
-                    withAnimation(Motion.quick) { player.setAutomix(on) }
-                }
-            )) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("AutoMix")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Enchaîne les morceaux comme un DJ")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.dim)
-                    }
-                } icon: {
-                    Image(systemName: "dial.high.fill")
-                        .foregroundStyle(Theme.accent)
-                        .symbolEffect(.bounce, value: player.automixEnabled)
-                }
-            }
-            .tint(Theme.accent)
-
-            if player.automixEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Longueur des transitions")
-                    Picker("Longueur", selection: $player.mixLength) {
-                        ForEach(Player.MixLength.allCases) { length in
-                            Text(length.label).tag(length)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    Text("\(player.mixLength.beats / 4) mesures (jusqu'au double si l'outro et l'intro sont longues), \(Int(player.mixLength.seconds)) s si le rythme n'est pas détecté.")
-                        .font(.caption2)
-                        .foregroundStyle(Theme.dim)
-                }
-                Toggle("Mix calé (beatmatch + bass swap)", isOn: $player.beatMatched)
-                    .tint(Theme.accent)
-                if let bpm = player.currentBPM {
-                    HStack(spacing: 8) {
-                        Label("\(Int(bpm.rounded())) BPM", systemImage: "metronome.fill")
-                        if let key = AudioMath.camelotLabel(player.currentKey) {
-                            Label(key, systemImage: "tuningfork")
-                        }
-                    }
-                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Theme.accent)
-                }
-                Text(player.beatMatched
-                     ? "Comme un DJ : les deux morceaux jouent ensemble, l'un monte pendant que l'autre descend, et leurs tempos glissent ensemble de l'un vers l'autre en restant sur les mêmes temps. Le suivant démarre sur un temps fort, calé sur la fin de son intro ; le mix se fait sur la fin musicale (outro), les basses sont échangées sur la mesure du milieu, tous les morceaux sont au même volume. Le calage est mesuré et corrigé en direct pendant chaque mix. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
-                     : "Fondu simple à puissance constante, sans calage rythmique.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.dim)
-            }
-        } header: {
-            Text("Enchaînement").foregroundStyle(Theme.accent.opacity(0.8))
-        }
-    }
-
-    // MARK: Son
-
-    private var soundSection: some View {
-        Section {
-            NavigationLink {
-                EqualizerView()
-            } label: {
-                HStack {
-                    Label("Égaliseur", systemImage: "slider.vertical.3")
-                    Spacer()
-                    Text(player.eqEnabled ? player.eqPresetName : "Désactivé")
-                        .foregroundStyle(Theme.dim)
-                }
-            }
-        } header: {
-            Text("Son").foregroundStyle(Theme.accent.opacity(0.8))
-        }
-    }
-
-    // MARK: Lecture
-
-    private var playbackSection: some View {
-        Section {
-            Toggle(isOn: $player.shuffle) {
-                Label("Lecture aléatoire", systemImage: "shuffle")
-            }
-            .tint(Theme.accent)
-
-            Toggle(isOn: $player.autoplay) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Lecture continue")
-                        Text("À la fin de la file : même genre, tempo proche")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.dim)
-                    }
-                } icon: {
-                    Image(systemName: "infinity")
-                }
-            }
-            .tint(Theme.accent)
-
-            Toggle(isOn: $visualizerOn) {
-                Label("Visualiseur audio", systemImage: "waveform")
-            }
-            .tint(Theme.accent)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Stepper(value: $sleepMinutes, in: 0...180, step: 15) {
-                    Label(sleepMinutes == 0 ? "Minuteur : désactivé" : "Minuteur : \(sleepMinutes) min", systemImage: "moon.zzz")
-                }
-                .onChange(of: sleepMinutes) { _, minutes in
-                    player.setSleepTimer(minutes: minutes == 0 ? nil : minutes)
-                }
-                if let remaining = clock.sleepRemaining {
-                    Text("Arrêt dans \(remaining / 60) min \(String(format: "%02d", remaining % 60)) s")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-        } header: {
-            Text("Lecture").foregroundStyle(Theme.accent.opacity(0.8))
         }
     }
 
@@ -406,6 +274,159 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.dim)
         } header: {
             Text("À propos").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+}
+
+/// Sections Réglages qui dépendent du LECTEUR (AutoMix, son, lecture) : elles seules observent
+/// `Player` ; le reste du formulaire ne se recalcule pas quand un morceau change.
+private struct PlayerSettingsSections: View {
+    @EnvironmentObject private var player: Player
+    @State private var sleepMinutes = 0
+    @AppStorage("visualizer") private var visualizerOn = true
+
+    var body: some View {
+        Group {
+            automixSection
+            soundSection
+            playbackSection
+        }
+    }
+
+    // MARK: AutoMix
+
+    private var automixSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { player.automixEnabled },
+                set: { on in
+                    Haptics.choose()
+                    withAnimation(Motion.quick) { player.setAutomix(on) }
+                }
+            )) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("AutoMix")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Enchaîne les morceaux comme un DJ")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                } icon: {
+                    Image(systemName: "dial.high.fill")
+                        .foregroundStyle(Theme.accent)
+                        .symbolEffect(.bounce, value: player.automixEnabled)
+                }
+            }
+            .tint(Theme.accent)
+
+            if player.automixEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Longueur des transitions")
+                    Picker("Longueur", selection: $player.mixLength) {
+                        ForEach(Player.MixLength.allCases) { length in
+                            Text(length.label).tag(length)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text("\(player.mixLength.beats / 4) mesures (jusqu'au double si l'outro et l'intro sont longues), \(Int(player.mixLength.seconds)) s si le rythme n'est pas détecté.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.dim)
+                }
+                Toggle("Mix calé (beatmatch + bass swap)", isOn: $player.beatMatched)
+                    .tint(Theme.accent)
+                if let bpm = player.currentBPM {
+                    HStack(spacing: 8) {
+                        Label("\(Int(bpm.rounded())) BPM", systemImage: "metronome.fill")
+                        if let key = AudioMath.camelotLabel(player.currentKey) {
+                            Label(key, systemImage: "tuningfork")
+                        }
+                    }
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Theme.accent)
+                }
+                Text(player.beatMatched
+                     ? "Comme un DJ : les deux morceaux jouent ensemble, l'un monte pendant que l'autre descend, et leurs tempos glissent ensemble de l'un vers l'autre en restant sur les mêmes temps. Le suivant démarre sur un temps fort, calé sur la fin de son intro ; le mix se fait sur la fin musicale (outro), les basses sont échangées sur la mesure du milieu, tous les morceaux sont au même volume. Le calage est mesuré et corrigé en direct pendant chaque mix. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
+                     : "Fondu simple à puissance constante, sans calage rythmique.")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.dim)
+            }
+        } header: {
+            Text("Enchaînement").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
+    // MARK: Son
+
+    private var soundSection: some View {
+        Section {
+            NavigationLink {
+                EqualizerView()
+            } label: {
+                HStack {
+                    Label("Égaliseur", systemImage: "slider.vertical.3")
+                    Spacer()
+                    Text(player.eqEnabled ? player.eqPresetName : "Désactivé")
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+        } header: {
+            Text("Son").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+
+    // MARK: Lecture
+
+    private var playbackSection: some View {
+        Section {
+            Toggle(isOn: $player.shuffle) {
+                Label("Lecture aléatoire", systemImage: "shuffle")
+            }
+            .tint(Theme.accent)
+
+            Toggle(isOn: $player.autoplay) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lecture continue")
+                        Text("À la fin de la file : même genre, tempo proche")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                } icon: {
+                    Image(systemName: "infinity")
+                }
+            }
+            .tint(Theme.accent)
+
+            Toggle(isOn: $visualizerOn) {
+                Label("Visualiseur audio", systemImage: "waveform")
+            }
+            .tint(Theme.accent)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Stepper(value: $sleepMinutes, in: 0...180, step: 15) {
+                    Label(sleepMinutes == 0 ? "Minuteur : désactivé" : "Minuteur : \(sleepMinutes) min", systemImage: "moon.zzz")
+                }
+                .onChange(of: sleepMinutes) { _, minutes in
+                    player.setSleepTimer(minutes: minutes == 0 ? nil : minutes)
+                }
+                SleepCountdown()
+            }
+        } header: {
+            Text("Lecture").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+    }
+}
+
+/// « Arrêt dans … » : SEULE vue abonnée à l'horloge (publiée 10 fois par seconde).
+private struct SleepCountdown: View {
+    @EnvironmentObject private var clock: PlaybackClock
+
+    var body: some View {
+        if let remaining = clock.sleepRemaining {
+            Text("Arrêt dans \(remaining / 60) min \(String(format: "%02d", remaining % 60)) s")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(Theme.accent)
         }
     }
 }

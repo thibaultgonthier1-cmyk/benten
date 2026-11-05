@@ -28,6 +28,11 @@ struct BentenApp: App {
                   // Lecture continue : le lecteur pioche dans toute la bibliothèque.
                   let library = library
                   player.libraryProvider = { library.tracks }
+                  // Listes et onglets suivent le lecteur via cet état fin (pas via `Player`
+                  // entier) : un play/pause ne redessine plus que les lignes concernées.
+                  NowPlayingState.shared.bind(to: player)
+                  // Moteur haptique prêt dès le lancement : le premier toucher vibre sans retard.
+                  Haptics.warmUp()
                 }
                 .onChange(of: paletteRaw) { value in Theme.apply(Palette(rawValue: value) ?? .or) }
                 .environmentObject(library)

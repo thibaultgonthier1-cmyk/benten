@@ -119,22 +119,28 @@ struct AnimatedBackdrop: View {
 }
 
 /// Halo coloré derrière une pochette : reprend sa teinte dominante (comme le bureau).
+///
+/// Sans `.blur` : un dégradé radial qui s'éteint en transparent est DÉJÀ flou. Le `.blur(10)`
+/// d'avant ajoutait une passe de rendu hors écran par tuile, à chaque image du défilement de la
+/// grille (style Benten) ; le rendu est le même sans.
 struct CoverGlow: View {
     let color: Color
     var intensity: Double = 0.55
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Theme.tileRadius, style: .continuous)
+        // Dégradé ELLIPTIQUE relatif au cadre : il s'éteint exactement au bord, quelle que soit la
+        // taille de la tuile (aucune arête visible).
+        Rectangle()
             .fill(
-                RadialGradient(
-                    colors: [color.opacity(0.55 * intensity), color.opacity(0.18 * intensity), .clear],
+                EllipticalGradient(
+                    colors: [color.opacity(0.55 * intensity), color.opacity(0.22 * intensity), .clear],
                     center: .center,
-                    startRadius: 8,
-                    endRadius: 110
+                    startRadiusFraction: 0.04,
+                    endRadiusFraction: 0.5
                 )
             )
-            .blur(radius: 10)
-            .scaleEffect(1.18)
+            .scaleEffect(1.32)
+            .allowsHitTesting(false)
     }
 }
 

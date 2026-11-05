@@ -1,6 +1,9 @@
+import Combine
+import CoreImage
+import ImageIO
+import Observation
 import SwiftUI
 import UIKit
-import ImageIO
 
 /// Cache d'images de pochettes — redimensionnées et décodées HORS du fil principal.
 ///
@@ -20,6 +23,11 @@ final class ArtworkCache {
     // NSCache est thread-safe : on peut le lire/écrire depuis une tâche d'arrière-plan.
     private let images = NSCache<NSString, UIImage>()
     private let tints = NSCache<NSString, UIColor>()
+    /// Fonds flous PRÉ-CALCULÉS des pochettes non carrées (même clé que la vignette). Avant, le
+    /// flou était un `.blur` SwiftUI en direct : une passe de rendu hors écran par tuile et par
+    /// image pendant le défilement. Ici : 48 px floutés une fois, hors du fil principal.
+    private let backdrops = NSCache<NSString, UIImage>()
+    nonisolated(unsafe) private static let ciContext = CIContext(options: [.cacheIntermediates: false])
 
     /// Tailles demandées par l'interface (en pixels) — sert à oublier toutes les variantes d'une
     /// pochette quand elle change.
@@ -28,12 +36,14 @@ final class ArtworkCache {
     private init() {
         images.countLimit = 220
         images.totalCostLimit = 140 * 1024 * 1024
+        backdrops.countLimit = 400
     }
 
     /// Oublie une pochette précise (toutes tailles) — quand elle vient d'être remplacée.
     func forget(fileName: String) {
         for size in Self.sizes {
             images.removeObject(forKey: "\(fileName)@\(Int(size))" as NSString)
+            backdrops.removeObject(forKey: "\(fileName)@\(Int(size))" as NSString)
         }
         tints.removeObject(forKey: fileName as NSString)
     }
@@ -47,6 +57,18 @@ final class ArtworkCache {
     func cached(for track: Track, maxPixel: CGFloat) -> UIImage? {
         guard let url = track.artworkURL else { return nil }
         return images.object(forKey: key(url, maxPixel))
+    }
+
+    /// Fond flou déjà prêt d'une pochette non carrée (sinon `nil`).
+    func cachedBackdrop(for track: Track, maxPixel: CGFloat) -> UIImage? {
+        guard let url = track.artworkURL else { return nil }
+        return backdrops.object(forKey: key(url, maxPixel))
+    }
+
+    /// Pochette NETTEMENT rectangulaire (16:9…) : affichée entière, sur un fond flou d'elle-même.
+    nonisolated static func isNonSquare(_ image: UIImage) -> Bool {
+        guard image.size.height > 0 else { return false }
+        return abs(image.size.width / image.size.height - 1) > 0.22
     }
 
     /// Teinte dominante si elle est déjà connue (sinon `nil` — jamais de calcul sur le fil principal).
@@ -78,20 +100,49 @@ final class ArtworkCache {
     func load(for track: Track, maxPixel: CGFloat) async -> UIImage? {
         guard let url = track.artworkURL else { return nil }
         let k = key(url, maxPixel)
-        if let hit = images.object(forKey: k) { return hit }
+        if let hit = images.object(forKey: k) {
+            // Vignette en cache mais fond flou oublié (cache plein) : on le refait, hors fil principal.
+            if Self.isNonSquare(hit), backdrops.object(forKey: k) == nil {
+                let backdrop = await Task.detached(priority: .userInitiated) {
+                    ArtworkCache.blurredBackdrop(of: hit)
+                }.value
+                if let backdrop { backdrops.setObject(backdrop, forKey: k) }
+            }
+            return hit
+        }
 
-        let image = await Task.detached(priority: .userInitiated) {
-            ArtworkCache.thumbnail(at: url, maxPixel: maxPixel)
+        // Vignette ET (si besoin) fond flou préparés dans la MÊME tâche de fond : ils arrivent
+        // ensemble à l'écran, sans image intermédiaire.
+        let made = await Task.detached(priority: .userInitiated) { () -> (UIImage, UIImage?)? in
+            guard let image = ArtworkCache.thumbnail(at: url, maxPixel: maxPixel) else { return nil }
+            let backdrop = ArtworkCache.isNonSquare(image) ? ArtworkCache.blurredBackdrop(of: image) : nil
+            return (image, backdrop)
         }.value
-        guard let image else { return nil }
+        guard let made else { return nil }
+        let image = made.0
 
         let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
         images.setObject(image, forKey: k, cost: cost)
+        if let backdrop = made.1 { backdrops.setObject(backdrop, forKey: k) }
         let tintKey = url.lastPathComponent as NSString
         if tints.object(forKey: tintKey) == nil {
             tints.setObject(image.dominantColor, forKey: tintKey)
         }
         return image
+    }
+
+    /// Fond flou d'une pochette : réduite à 48 px puis floutée (Core Image). Agrandie à l'écran,
+    /// elle reste douce — même rendu qu'un gros flou, pour un coût quasi nul et UNE seule fois.
+    nonisolated static func blurredBackdrop(of image: UIImage) -> UIImage? {
+        guard let cg = image.cgImage else { return nil }
+        let source = CIImage(cgImage: cg)
+        let longest = max(source.extent.width, source.extent.height)
+        guard longest > 0 else { return nil }
+        let scale = min(1, 48 / longest)
+        let small = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let blurred = small.clampedToExtent().applyingGaussianBlur(sigma: 2.5).cropped(to: small.extent)
+        guard let output = ciContext.createCGImage(blurred, from: small.extent.integral) else { return nil }
+        return UIImage(cgImage: output)
     }
 
     /// Décode une vignette à la taille demandée (en PIXELS), déjà « aplatie » en bitmap prête à
@@ -182,6 +233,7 @@ final class ArtworkCache {
     func invalidate() {
         images.removeAllObjects()
         tints.removeAllObjects()
+        backdrops.removeAllObjects()
     }
 }
 
@@ -194,4 +246,80 @@ final class ArtworkCache {
 final class AppRouter: ObservableObject {
     enum Tab: Int { case library = 0, favorites = 1, playlists = 2, search = 3, settings = 4 }
     @Published var tab: Tab = .library
+
+    /// Accès SANS abonnement, pour les vues qui ne font que CHANGER d'onglet (bouton Rechercher).
+    /// Un `@EnvironmentObject router` les redessinait entièrement à chaque changement d'onglet —
+    /// pile pendant l'animation de la barre : une des causes du « lag » sur les icônes.
+    private(set) static weak var shared: AppRouter?
+
+    init() { Self.shared = self }
+}
+
+/// Ce que les LISTES ont besoin de savoir du lecteur : quel morceau joue, lecture/pause, historique.
+///
+/// POURQUOI (cause n°1 du manque de fluidité)
+/// `Player` est un `ObservableObject` : chaque `@Published` (morceau, lecture, BPM, tonalité, mix,
+/// historique, ouverture du plein écran, glissé d'une bande d'égaliseur…) redessinait TOUTES les
+/// vues qui l'observaient — les cinq onglets, la grille d'albums entière, la liste des titres…
+/// Un simple « lecture » déclenchait 5 à 6 vagues de recalcul de toute l'interface, et
+/// l'ouverture du lecteur une de plus, pile pendant son animation.
+///
+/// ICI
+/// Objet `@Observable` : SwiftUI suit propriété par propriété QUI lit QUOI. Seules les lignes
+/// VISIBLES qui lisent `currentID` se redessinent quand le morceau change ; seule la ligne en
+/// cours lit `playing`. Les listes parentes ne bougent plus du tout.
+/// Pour AGIR (lire, mélanger…), on passe par `player` — sans abonnement.
+@MainActor
+@Observable
+final class NowPlayingState {
+    static let shared = NowPlayingState()
+
+    private(set) var currentID: UUID?
+    private(set) var playing = false
+    private(set) var history: [UUID] = []
+
+    @ObservationIgnored private(set) weak var player: Player?
+    @ObservationIgnored private var subscriptions: Set<AnyCancellable> = []
+
+    /// Branche l'état sur le lecteur (une fois, au lancement).
+    func bind(to player: Player) {
+        guard self.player !== player else { return }
+        self.player = player
+        subscriptions.removeAll()
+        currentID = player.current?.id
+        playing = player.playing
+        history = player.history
+        // `@Published` émet de façon synchrone, sur le fil principal : la copie est à jour dans
+        // la même transaction que le lecteur (aucun retard d'une image).
+        player.$current
+            .map { $0?.id }
+            .removeDuplicates()
+            .sink { [weak self] id in self?.currentID = id }
+            .store(in: &subscriptions)
+        player.$playing
+            .removeDuplicates()
+            .sink { [weak self] value in self?.playing = value }
+            .store(in: &subscriptions)
+        player.$history
+            .removeDuplicates()
+            .sink { [weak self] value in self?.history = value }
+            .store(in: &subscriptions)
+    }
+
+    // MARK: Actions (sans abonnement aux changements du lecteur)
+
+    func play(_ tracks: [Track], startingAt index: Int) {
+        player?.play(tracks, startingAt: index)
+    }
+
+    /// Lit `tracks` à partir de `track` — index cherché AU TOUCHER, pas à chaque rendu de la liste
+    /// (avant : `Array(list.enumerated())` de 1000+ éléments recréé à chaque rendu).
+    func play(_ tracks: [Track], from track: Track) {
+        let index = tracks.firstIndex(where: { $0.id == track.id }) ?? 0
+        player?.play(tracks, startingAt: index)
+    }
+
+    func playShuffled(_ tracks: [Track]) {
+        player?.playShuffled(tracks)
+    }
 }
