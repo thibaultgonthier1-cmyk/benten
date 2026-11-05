@@ -15,14 +15,14 @@ struct TrackSwipe: ViewModifier {
     func body(content: Content) -> some View {
         content
             .offset(x: offset)
-            .opacity(1 - min(0.45, abs(offset) / 300))
+            .opacity(Double(1 - min(CGFloat(0.45), abs(offset) / CGFloat(300))))
             .simultaneousGesture(
                 DragGesture(minimumDistance: 14)
                     .onChanged { value in
                         let dx = value.translation.width
                         guard abs(dx) > abs(value.translation.height) else { return }
                         // Résistance : plus on tire, moins ça suit (sensation élastique).
-                        offset = dx / (1 + abs(dx) / 260)
+                        offset = dx / (1 + abs(dx) / CGFloat(260))
                     }
                     .onEnded { value in
                         let dx = value.translation.width
