@@ -54,6 +54,7 @@ struct SearchView: View {
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Titres, artistes, albums")
+            .swipeBackEverywhere()
             .navigationTitle("Recherche")
             .toolbarBackground(Theme.ink, for: .navigationBar)
             .deletionConfirmation($deletion)
@@ -95,6 +96,7 @@ struct SettingsView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
+            .swipeBackEverywhere()
             .navigationTitle("Réglages")
             .toolbarBackground(Theme.ink, for: .navigationBar)
             .confirmationDialog("Supprimer tous les morceaux ?", isPresented: $confirmDelete) {
@@ -159,7 +161,7 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text("\(player.mixLength.beats) temps quand le rythme est détecté, \(Int(player.mixLength.seconds)) s sinon.")
+                    Text("\(player.mixLength.beats / 4) mesures (jusqu'au double si l'outro et l'intro sont longues), \(Int(player.mixLength.seconds)) s si le rythme n'est pas détecté.")
                         .font(.caption2)
                         .foregroundStyle(Theme.dim)
                 }
@@ -176,7 +178,7 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.accent)
                 }
                 Text(player.beatMatched
-                     ? "Comme un DJ : le morceau suivant démarre pile sur un temps fort, son tempo est accordé sans changer la voix, les basses sont échangées au milieu pour ne jamais se battre, les silences sont sautés. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
+                     ? "Comme un DJ : la fin du morceau accélère ou ralentit en douceur jusqu'au tempo du suivant, qui démarre pile sur un temps fort, à la fin de son intro, sans être déformé. Le mix se fait sur la fin musicale (outro), les basses sont échangées sur la mesure du milieu, tous les morceaux sont au même volume. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
                      : "Fondu simple à puissance constante, sans calage rythmique.")
                     .font(.caption2)
                     .foregroundStyle(Theme.dim)
@@ -228,32 +230,10 @@ struct SettingsView: View {
             }
             .tint(Theme.accent)
 
-            Toggle(isOn: $player.normalizeVolume) {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Égaliser le volume")
-                        Text("Tous les morceaux au même volume perçu")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.dim)
-                    }
-                } icon: {
-                    Image(systemName: "speaker.wave.2.fill")
-                }
-            }
-            .tint(Theme.accent)
-
             Toggle(isOn: $visualizerOn) {
                 Label("Visualiseur audio", systemImage: "waveform")
             }
             .tint(Theme.accent)
-
-            Picker(selection: $player.repeatMode) {
-                Text("Non").tag(Player.RepeatMode.off)
-                Text("Toute la liste").tag(Player.RepeatMode.all)
-                Text("Ce titre").tag(Player.RepeatMode.one)
-            } label: {
-                Label("Répéter", systemImage: "repeat")
-            }
 
             VStack(alignment: .leading, spacing: 4) {
                 Stepper(value: $sleepMinutes, in: 0...180, step: 15) {
@@ -301,9 +281,14 @@ struct SettingsView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
                 ForEach(Palette.allCases) { palette in
                     Button {
-                        Haptics.choose()
-                        paletteRaw = palette.rawValue
-                        Theme.apply(palette)
+                        guard palette.rawValue != paletteRaw else { return }
+                        let previous = Palette(rawValue: paletteRaw) ?? .or
+                        // Un courant de couleur traverse l'écran de gauche à droite et révèle
+                        // l'interface aux nouvelles couleurs.
+                        ThemeSweep.run(from: previous, to: palette) {
+                            paletteRaw = palette.rawValue
+                            Theme.apply(palette)
+                        }
                     } label: {
                         HStack(spacing: 8) {
                             Circle().fill(palette.swatch).frame(width: 14, height: 14)

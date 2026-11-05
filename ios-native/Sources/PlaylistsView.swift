@@ -49,6 +49,7 @@ struct PlaylistsView: View {
                     }
                 }
             }
+            .swipeBackEverywhere()
             .navigationTitle("Playlists")
             .navigationBarTitleDisplayMode(.large)
             .deletionConfirmation($deletion)

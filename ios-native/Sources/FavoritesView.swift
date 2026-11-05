@@ -41,6 +41,7 @@ struct FavoritesView: View {
                     }
                 }
             }
+            .swipeBackEverywhere()
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
             .deletionConfirmation($deletion)
@@ -140,6 +141,7 @@ struct TrackRow: View {
                     Spacer(minLength: 4)
                 }
                 .padding(.vertical, 5)
+                .frame(height: 58)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle(scale: 0.98))

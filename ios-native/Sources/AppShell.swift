@@ -111,7 +111,64 @@ final class ArtworkCache {
         guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return UIImage(contentsOfFile: url.path)
         }
-        return UIImage(cgImage: cg)
+        return UIImage(cgImage: trimmingLetterbox(cg))
+    }
+
+    /// Retire les bandes NOIRES autour d'une pochette (miniatures vidéo 16:9 avec la vraie
+    /// pochette carrée au milieu) : la pochette est alors affichée entière, en grand, au lieu
+    /// d'un bandeau noir rogné.
+    nonisolated static func trimmingLetterbox(_ image: CGImage) -> CGImage {
+        let width = image.width
+        let height = image.height
+        guard width > 16, height > 16 else { return image }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn: Bool = pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return image }
+
+        // Une ligne (ou colonne) est une bande si TOUS ses points sont presque noirs.
+        func dark(_ x: Int, _ y: Int) -> Bool {
+            let index = (y * width + x) * 4
+            return Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2]) < 3 * 26
+        }
+        func rowDark(_ y: Int) -> Bool {
+            var x = 0
+            while x < width { if !dark(x, y) { return false }; x += 2 }
+            return true
+        }
+        func columnDark(_ x: Int, from top: Int, to bottom: Int) -> Bool {
+            var y = top
+            while y < bottom { if !dark(x, y) { return false }; y += 2 }
+            return true
+        }
+        var top = 0
+        while top < height / 2, rowDark(top) { top += 1 }
+        var bottom = height
+        while bottom > height / 2, rowDark(bottom - 1) { bottom -= 1 }
+        var left = 0
+        while left < width / 2, columnDark(left, from: top, to: bottom) { left += 1 }
+        var right = width
+        while right > width / 2, columnDark(right - 1, from: top, to: bottom) { right -= 1 }
+
+        // Une vraie bande de format (letterbox) est SYMÉTRIQUE et fait ≥ 4 % du côté. Une
+        // pochette simplement sombre d'un seul côté (ciel noir…) n'est jamais recadrée.
+        let horizontal = left >= width / 25 && abs(left - (width - right)) <= max(2, width / 30)
+        let vertical = top >= height / 25 && abs(top - (height - bottom)) <= max(2, height / 30)
+        if !horizontal { left = 0; right = width }
+        if !vertical { top = 0; bottom = height }
+        let cropWidth = right - left
+        let cropHeight = bottom - top
+        guard horizontal || vertical, cropWidth > width / 4, cropHeight > height / 4 else { return image }
+        // Mémoire du contexte et `cropping` : tous deux en lignes de haut en bas.
+        let rect = CGRect(x: left, y: top, width: cropWidth, height: cropHeight)
+        return image.cropping(to: rect) ?? image
     }
 
     /// Vide le cache quand la bibliothèque change (suppression, vidage).

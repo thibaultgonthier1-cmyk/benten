@@ -48,6 +48,42 @@ enum AudioMath {
         return mean.squareRoot()
     }
 
+    /// Basses seules (passe-bas 1 pôle à 150 Hz) : grosse caisse et ligne de basse.
+    static func lowPassed(_ samples: [Float], sampleRate: Double) -> [Float] {
+        let alpha = Float(1 - exp(-2 * Double.pi * 150 / sampleRate))
+        var state: Float = 0
+        var output = [Float](repeating: 0, count: samples.count)
+        for index in samples.indices {
+            state += alpha * (samples[index] - state)
+            output[index] = state
+        }
+        return output
+    }
+
+    /// Énergie (RMS) de chaque mesure d'un extrait, plein spectre et basses.
+    /// `origin` : position (s) du 1er échantillon de l'extrait dans le morceau ;
+    /// `firstBar` : position (s) d'un temps fort ; les mesures suivent toutes les `bar` secondes.
+    static func barEnergies(samples: [Float], rate: Double, origin: Double, firstBar: Double, bar: Double) -> [(time: Double, full: Double, low: Double)] {
+        guard bar > 0.3, rate > 0, !samples.isEmpty else { return [] }
+        let low = lowPassed(samples, sampleRate: rate)
+        var result: [(time: Double, full: Double, low: Double)] = []
+        var time = firstBar
+        while true {
+            let from = Int(((time - origin) * rate).rounded())
+            let to = Int(((time + bar - origin) * rate).rounded())
+            if to > samples.count { break }
+            if from >= 0, to - from > 8 {
+                var full: Float = 0
+                var bass: Float = 0
+                samples.withUnsafeBufferPointer { vDSP_rmsqv($0.baseAddress! + from, 1, &full, vDSP_Length(to - from)) }
+                low.withUnsafeBufferPointer { vDSP_rmsqv($0.baseAddress! + from, 1, &bass, vDSP_Length(to - from)) }
+                result.append((time, Double(full), Double(bass)))
+            }
+            time += bar
+        }
+        return result
+    }
+
     /// Niveau efficace (RMS).
     static func rms(_ samples: [Float]) -> Double {
         guard !samples.isEmpty else { return 0 }
@@ -428,6 +464,18 @@ struct TrackAnalysis: Codable, Sendable {
     var end: Double?
     /// Volume PERÇU (filtré, fenêtré) : sert à mettre tous les morceaux au même volume.
     var loudness: Double?
+    /// Fin de l'INTRO : 1er temps fort où le morceau atteint sa pleine énergie (basses + niveau).
+    /// C'est là que l'entrante doit « arriver » quand la sortante a fini de partir.
+    var introEnd: Double?
+    /// Début de l'OUTRO : 1er temps fort de la dernière section faible (l'énergie retombe).
+    var outroStart: Double?
+    /// Fin MUSICALE : fin de la dernière mesure encore pleine (≥ −10 dB). Après, ce n'est plus
+    /// qu'une queue qui s'éteint : inutile de la faire entendre seule avant la suivante.
+    var mixOut: Double?
+    /// Version des repères de mix (les anciennes analyses sont refaites quand on en a besoin).
+    var cueVersion: Int?
+
+    static let currentCueVersion = 2
 
     static let empty = TrackAnalysis(bpm: nil, confidence: 0, headDownbeat: nil, midDownbeat: nil, tailDownbeat: nil, key: nil, level: 0, start: 0, end: nil, loudness: nil)
 
@@ -458,7 +506,7 @@ actor TrackAnalyzer {
     func allCached() -> [UUID: TrackAnalysis] { cache }
 
     func analysis(of track: Track) -> TrackAnalysis {
-        if let hit = cache[track.id] { return hit }
+        if let hit = cache[track.id], hit.cueVersion == TrackAnalysis.currentCueVersion { return hit }
         let result = Self.analyze(url: track.fileURL)
         cache[track.id] = result
         scheduleSave()
@@ -488,17 +536,19 @@ actor TrackAnalyzer {
 
         // Trois extraits : début (intro + calage d'entrée), milieu (tempo, tonalité, niveau),
         // fin (vraie fin + calage de sortie).
-        let head = readMono(file: file, from: 0, seconds: 30)
+        let head = readMono(file: file, from: 0, seconds: 45)
         let middleStart = min(max(0, total - 45), max(20, total * 0.3))
         let middle = readMono(file: file, from: AVAudioFramePosition(middleStart * rate), seconds: 45)
-        let tailStart = max(0, total - 30)
-        let tail = readMono(file: file, from: AVAudioFramePosition(tailStart * rate), seconds: 30)
+        let tailStart = max(0, total - 45)
+        let tail = readMono(file: file, from: AVAudioFramePosition(tailStart * rate), seconds: 45)
 
         let reference = middle ?? head
         let level = reference.map { AudioMath.rms($0.samples) } ?? 0
+        let lowLevel = reference.map { AudioMath.rms(AudioMath.lowPassed($0.samples, sampleRate: $0.rate)) } ?? 0
         let threshold = Float(max(0.004, level * 0.08))
 
         var result = TrackAnalysis.empty
+        result.cueVersion = TrackAnalysis.currentCueVersion
         result.level = level
         if let reference {
             let perceived = AudioMath.perceivedLoudness(samples: reference.samples, sampleRate: reference.rate)
@@ -552,7 +602,52 @@ actor TrackAnalyzer {
                 }
             }
         }
-        _ = bar
+
+        // REPÈRES DE MIX (comme un DJ) : énergie de chaque mesure, plein spectre et basses,
+        // comparée au cœur du morceau.
+        //  - fin d'intro : 1re mesure qui atteint ≥ 70 % du niveau ET ≥ 55 % des basses du cœur,
+        //    et qui tient sur la mesure suivante (pas un simple coup isolé) ;
+        //  - début d'outro : 1re mesure de la dernière série de mesures faibles (< 55 % du niveau
+        //    ou < 40 % des basses) ;
+        //  - fin musicale : fin de la dernière mesure encore ≥ 30 % du niveau (−10 dB).
+        // Les repères sont recalés sur les phrases de 4 mesures (structure 4/8/16 mesures).
+        let firstDownbeat: Double? = {
+            guard let anchor = result.headDownbeat ?? result.midDownbeat else { return nil }
+            return anchor + ((result.start - 0.05 - anchor) / bar).rounded(.up) * bar
+        }()
+        func snapToPhrase(_ time: Double) -> Double {
+            guard let origin = firstDownbeat else { return time }
+            let bars = (time - origin) / bar
+            let phrase = (bars / 4).rounded() * 4
+            return abs(bars - phrase) <= 1.01 && phrase >= 0 ? origin + phrase * bar : time
+        }
+        if let head, let origin = firstDownbeat, level > 0, lowLevel > 0 {
+            let bars = AudioMath.barEnergies(samples: head.samples, rate: head.rate, origin: 0, firstBar: origin, bar: bar)
+            for index in bars.indices {
+                let full = bars[index].full >= 0.7 * level && bars[index].low >= 0.55 * lowLevel
+                let holds = index + 1 >= bars.count || bars[index + 1].full >= 0.6 * level
+                if full && holds {
+                    result.introEnd = index >= 3 ? snapToPhrase(bars[index].time) : bars[index].time
+                    break
+                }
+            }
+        }
+        if let tail, let anchor = result.tailDownbeat ?? result.midDownbeat, level > 0, lowLevel > 0 {
+            let first = anchor + ((tailStart - anchor) / bar).rounded(.up) * bar
+            let bars = AudioMath.barEnergies(samples: tail.samples, rate: tail.rate, origin: tailStart, firstBar: first, bar: bar)
+                .filter { $0.time + bar <= (result.end ?? total) + bar * 0.5 }
+            if let lastFull = bars.lastIndex(where: { $0.full >= 0.3 * level }) {
+                let candidate = bars[lastFull].time + bar
+                if candidate > total * 0.5 { result.mixOut = min(candidate, result.end ?? total) }
+            }
+            var index = bars.count - 1
+            while index >= 0, bars[index].full < 0.55 * level || bars[index].low < 0.4 * lowLevel { index -= 1 }
+            let weakCount = bars.count - 1 - index
+            if weakCount >= 2, index + 1 < bars.count {
+                let start = snapToPhrase(bars[index + 1].time)
+                if start > total * 0.5 { result.outroStart = start }
+            }
+        }
         return result
     }
 
@@ -591,6 +686,16 @@ actor TrackAnalyzer {
 // MARK: - Planification d'une transition
 
 /// Une transition prête à jouer.
+///
+/// Déroulé d'un mix calé (comme un DJ, et comme les meilleurs AutoMix) :
+/// 1. RAMPE : sur les dernières mesures avant le point de sortie, la SORTANTE accélère ou ralentit
+///    en douceur (courbe en S) jusqu'au tempo de l'entrante — c'est la fin du morceau qui va
+///    chercher le tempo du suivant ;
+/// 2. CHEVAUCHEMENT : l'entrante démarre sur un temps fort, à son tempo NATUREL (jamais étirée,
+///    donc aucun artefact sur le nouveau morceau), basses coupées ; échange des basses pile sur
+///    la mesure du milieu ; la sortante s'efface ;
+/// 3. le chevauchement se termine quand la sortante finit musicalement ET que l'entrante sort de
+///    son intro (alignement « fin d'outro = fin d'intro »).
 struct MixPlan: Sendable {
     enum Style: Sendable {
         /// Mix calé : temps alignés, tempo accordé, bass swap.
@@ -601,9 +706,8 @@ struct MixPlan: Sendable {
         case crossfade
         /// Même album : enchaînement sans aucun blanc, sans fondu (comme Apple).
         case gapless
-        /// Même morceau qui se répète : raccord COURT (≈ 1,5 s) de la vraie fin vers le vrai début,
-        /// calé sur un temps. Un long fondu fin→intro sonnait comme une coupure (l'outro s'efface,
-        /// il ne reste qu'une intro calme) et la barre repartait avant qu'on entende le début.
+        /// Même morceau qui se répète : raccord COURT de la vraie fin vers le vrai début, calé sur
+        /// un temps.
         case loop
     }
 
@@ -614,19 +718,33 @@ struct MixPlan: Sendable {
     var entryAt: Double
     /// Durée du chevauchement (secondes réelles).
     var length: Double
-    /// Vitesse appliquée à l'entrante pendant le mix (hauteur préservée).
-    var tempoRatio: Double
+    /// Vitesse de la SORTANTE pendant le chevauchement (= tempo de l'entrante / tempo de la
+    /// sortante, demi/double tempo compris). L'entrante joue toujours à vitesse 1.
+    var outRate: Double
+    /// Durée réelle (s) de la rampe de tempo de la sortante, qui se TERMINE au point de sortie.
+    var rampLength: Double
     var levelGain: Double
     var bassSwap: Bool
+    /// Nombre de mesures du chevauchement (0 si non calé).
+    var bars: Int
+
+    /// Position de la sortante où commence la rampe (= où l'automix se met en route).
+    /// Vitesse r(t) = 1 + (r − 1)·s(t/D), s(u) = 3u² − 2u³ : la position avance de D·(1 + r)/2.
+    var rampStart: Double { exitAt - rampLength * (1 + outRate) / 2 }
 }
 
 enum MixPlanner {
+    /// Étirement maximal de la sortante avant d'entendre des artefacts (au-delà : fondu filtré).
+    static let maxStretch = 0.07
+
     static func plan(
         out: TrackAnalysis, outDuration: Double,
         into incoming: TrackAnalysis,
         sameAlbum: Bool, sameTrack: Bool = false, beats: Int, seconds: Double, beatMatch: Bool
     ) -> MixPlan {
-        let outEnd = min(outDuration, out.end ?? outDuration)
+        // Fin MUSICALE de la sortante : on ne fait pas entendre seule une queue qui s'éteint.
+        let realEnd = min(outDuration, out.end ?? outDuration)
+        let outEnd = min(realEnd, out.mixOut ?? realEnd)
         let inStart = min(max(0, incoming.start), 8)
 
         if sameTrack {
@@ -649,50 +767,111 @@ enum MixPlanner {
             }
             exit = max(outDuration * 0.5, exit)
             length = max(0.5, min(length, outDuration - exit - 0.02))
-            return MixPlan(style: .loop, exitAt: exit, entryAt: max(0, entry), length: length, tempoRatio: 1, levelGain: 1, bassSwap: false)
+            return MixPlan(style: .loop, exitAt: exit, entryAt: max(0, entry), length: length,
+                           outRate: 1, rampLength: 0, levelGain: 1, bassSwap: false, bars: 0)
         }
 
         if sameAlbum {
-            return MixPlan(style: .gapless, exitAt: outDuration, entryAt: 0, length: 0, tempoRatio: 1, levelGain: 1, bassSwap: false)
+            return MixPlan(style: .gapless, exitAt: outDuration, entryAt: 0, length: 0,
+                           outRate: 1, rampLength: 0, levelGain: 1, bassSwap: false, bars: 0)
         }
         let gain = AudioMath.loudnessGain(outgoing: out.level, incoming: incoming.level)
 
+        // 1er temps fort de l'entrante APRÈS son silence d'intro.
+        func firstDownbeat(_ analysis: TrackAnalysis, bar: Double) -> Double? {
+            guard let anchor = analysis.headDownbeat ?? analysis.midDownbeat else { return nil }
+            let value = anchor + ((inStart - 0.02 - anchor) / bar).rounded(.up) * bar
+            return value >= 0 && value <= inStart + bar ? value : nil
+        }
+
         if beatMatch, let outBPM = out.bpm, let inBPM = incoming.bpm {
-            let ratio = AudioMath.tempoRatio(outgoing: outBPM, incoming: inBPM)
-            let beat = 60 / outBPM
-            if abs(ratio - 1) <= 0.08 {
-                // Tonalités qui se marient mal → transition plus courte.
-                var count = beats
+            // Vitesse de la sortante pour atteindre le tempo de l'entrante (demi/double compris).
+            let outRate = 1 / AudioMath.tempoRatio(outgoing: outBPM, incoming: inBPM)
+            let outBar = 4 * 60 / outBPM
+            let inBar = 4 * 60 / inBPM
+            let entry0 = firstDownbeat(incoming, bar: inBar) ?? inStart
+
+            if abs(log(outRate)) <= maxStretch {
+                // Une mesure, en temps réel, pendant le chevauchement (les deux sont calées).
+                let wallBar = outBar / outRate
+
+                // Longueur : celle choisie (2 / 4 / 8 mesures), allongée jusqu'au double quand
+                // l'outro de la sortante ET l'intro de l'entrante sont longues (blend long).
+                var bars = max(2, beats / 4)
                 if let distance = AudioMath.harmonicDistance(out.key, incoming.key), distance > 1 {
-                    count = max(8, beats / 2)
+                    bars = max(2, bars / 2)   // tonalités qui jurent : on passe plus vite
+                } else if let outro = out.outroStart, let intro = incoming.introEnd {
+                    let outroBars = Int(((outEnd - outro) / outBar).rounded(.down))
+                    let introBars = Int(((intro - entry0) / wallBar).rounded(.down))
+                    let room = min(outroBars, introBars, bars * 2)
+                    if room > bars { bars = room - room % 2 }
                 }
-                let bar = beat * 4
-                var length = min(Double(count) * beat, max(bar * 2, outEnd * 0.3))
-                var exit = outEnd - length
+
+                // SORTIE : le chevauchement finit pile à la fin musicale de la sortante, et
+                // commence sur un temps fort — sur une phrase de 4 mesures si c'est à ≤ 2 mesures.
+                var exit = outEnd - Double(bars) * outBar
                 if let anchor = out.tailDownbeat ?? out.midDownbeat {
-                    exit = anchor + ((exit - anchor) / bar).rounded(.down) * bar
+                    exit = anchor + ((exit - anchor) / outBar).rounded(.down) * outBar
+                    if let phraseOrigin = out.headDownbeat ?? out.midDownbeat {
+                        let fromStart = ((exit - phraseOrigin) / outBar).rounded()
+                        let back = fromStart.truncatingRemainder(dividingBy: 4)
+                        if back > 0, back <= 2 { exit -= back * outBar }
+                    }
                 }
-                exit = max(outDuration * 0.35, exit)
-                length = max(1, min(length, outDuration - exit - 0.05))
+                exit = max(outDuration * 0.4, exit)
+                bars = max(2, min(bars, Int(((outDuration - 0.05 - exit) / outBar).rounded(.down))))
+                let length = Double(bars) * wallBar
 
-                var entry = inStart
-                if let anchor = incoming.headDownbeat ?? incoming.midDownbeat {
-                    let inBar = 4 * 60 / inBPM
-                    let aligned = anchor + ((inStart - 0.02 - anchor) / inBar).rounded(.up) * inBar
-                    if aligned >= 0, aligned <= inStart + inBar { entry = aligned }
+                // ENTRÉE : l'intro de l'entrante se termine quand la sortante a fini de partir.
+                // Sans intro détectée : 1er temps fort après le silence. Jamais plus de 16
+                // mesures sautées (on ne coupe pas un couplet).
+                var entry = entry0
+                if let intro = incoming.introEnd {
+                    let target = intro - length
+                    if target > entry0 {
+                        let snapped = entry0 + ((target - entry0) / inBar).rounded() * inBar
+                        entry = min(snapped, entry0 + 16 * inBar)
+                    }
                 }
-                return MixPlan(style: .beatmix, exitAt: exit, entryAt: max(0, entry), length: length, tempoRatio: ratio, levelGain: gain, bassSwap: true)
-            }
 
-            let length = min(seconds, 6)
-            var exit = outEnd - length
-            if let anchor = out.tailDownbeat ?? out.midDownbeat {
-                exit = anchor + ((exit - anchor) / beat).rounded(.down) * beat
+                // RAMPE de tempo sur la sortante : ~150 s par unité de log-écart (5 % → 7,5 s),
+                // entre 4 et 12 s, et jamais avant 40 % du morceau.
+                let stretch = abs(log(outRate))
+                var ramp = stretch < 0.002 ? 0 : min(12, max(4, stretch * 150))
+                if ramp > 0 {
+                    let earliest = outDuration * 0.4
+                    let span = ramp * (1 + outRate) / 2
+                    if exit - span < earliest { ramp = max(0, (exit - earliest) * 2 / (1 + outRate)) }
+                    if ramp < 2 { ramp = 0 }
+                }
+                // Écart minime ou pas de place pour la rampe : on garde le tempo (dérive < 1/8 de
+                // temps sur tout le chevauchement si l'écart est ≤ 0,2 %).
+                let finalRate = ramp > 0 ? outRate : (stretch < 0.002 ? outRate : 1)
+                if ramp == 0 && stretch >= 0.002 {
+                    // Pas de rampe possible : fondu filtré court, sans calage.
+                    return filterPlan(outEnd: outEnd, outBPM: outBPM, out: out, entry: entry0, seconds: seconds, gain: gain)
+                }
+                return MixPlan(style: .beatmix, exitAt: exit, entryAt: max(0, entry), length: length,
+                               outRate: finalRate, rampLength: ramp, levelGain: gain, bassSwap: true, bars: bars)
             }
-            return MixPlan(style: .filter, exitAt: max(0, exit), entryAt: inStart, length: length, tempoRatio: 1, levelGain: gain, bassSwap: false)
+            return filterPlan(outEnd: outEnd, outBPM: outBPM, out: out, entry: entry0, seconds: seconds, gain: gain)
         }
 
         let length = min(seconds, max(1, outEnd * 0.25))
-        return MixPlan(style: .crossfade, exitAt: max(0, outEnd - length), entryAt: inStart, length: length, tempoRatio: 1, levelGain: gain, bassSwap: true)
+        return MixPlan(style: .crossfade, exitAt: max(0, outEnd - length), entryAt: inStart, length: length,
+                       outRate: 1, rampLength: 0, levelGain: gain, bassSwap: true, bars: 0)
+    }
+
+    /// Tempos trop éloignés : fondu filtré court (≤ 6 s), sortie sur un temps, entrée sur le
+    /// 1er temps fort après le silence.
+    private static func filterPlan(outEnd: Double, outBPM: Double, out: TrackAnalysis, entry: Double, seconds: Double, gain: Double) -> MixPlan {
+        let beat = 60 / outBPM
+        let length = min(seconds, 6)
+        var exit = outEnd - length
+        if let anchor = out.tailDownbeat ?? out.midDownbeat {
+            exit = anchor + ((exit - anchor) / beat).rounded(.down) * beat
+        }
+        return MixPlan(style: .filter, exitAt: max(0, exit), entryAt: max(0, entry), length: length,
+                       outRate: 1, rampLength: 0, levelGain: gain, bassSwap: false, bars: 0)
     }
 }

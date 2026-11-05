@@ -41,17 +41,35 @@ struct LibraryView: View {
                 if library.tracks.isEmpty {
                     emptyState
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            if !Theme.appleStyle { header }
-                            modePicker
-                            content
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 16) {
+                                if !Theme.appleStyle { header }
+                                modePicker
+                                content
+                            }
+                            .padding(.horizontal, layout.pagePadding)
+                            .padding(.trailing, mode == .tracks ? 14 : 0)
+                            .padding(.bottom, 20)
                         }
-                        .padding(.horizontal, layout.pagePadding)
-                        .padding(.bottom, 20)
+                        // Index A–Z sur le bord droit, comme la liste des titres d'Apple Music.
+                        .overlay(alignment: .trailing) {
+                            if mode == .tracks, library.tracks.count > 30 {
+                                let firsts = letterAnchors
+                                AlphabetIndex(letters: firsts.map { $0.letter }) { letter in
+                                    if let id = firsts.first(where: { $0.letter == letter })?.id {
+                                        proxy.scrollTo(id, anchor: .top)
+                                    }
+                                }
+                                .padding(.vertical, 120)
+                                .padding(.trailing, 2)
+                                .transition(.opacity)
+                            }
+                        }
                     }
                 }
             }
+            .swipeBackEverywhere()
             .navigationTitle(Theme.appleStyle ? "Bibliothèque" : "")
             .navigationBarTitleDisplayMode(Theme.appleStyle ? .large : .inline)
             .navigationDestination(for: LibraryRoute.self) { route in
@@ -184,10 +202,23 @@ struct LibraryView: View {
                     .contextMenu {
                         DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
                     }
+                    .id(track.id)
                 }
             }
             .transition(.opacity)
         }
+    }
+
+    /// Premier titre de chaque lettre (pour l'index A–Z).
+    private var letterAnchors: [(letter: String, id: UUID)] {
+        var result: [(letter: String, id: UUID)] = []
+        var seen = Set<String>()
+        for track in library.tracksByTitle {
+            let letter = AlphabetIndex.letter(for: track.title)
+            if seen.insert(letter).inserted { result.append((letter, track.id)) }
+        }
+        // « # » en tête, comme Apple.
+        return result.sorted { ($0.letter == "#" ? "" : $0.letter) < ($1.letter == "#" ? "" : $1.letter) }
     }
 
     /// Étagère « Écoutés récemment » : reprendre en un geste ce qu'on écoutait.
@@ -199,7 +230,9 @@ struct LibraryView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(Theme.ivory)
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: 12) {
+                    // HStack (16 tuiles maximum) : aucune tuile qui « saute » en apparaissant,
+                    // et défilement aimanté tuile par tuile comme les étagères d'Apple Music.
+                    HStack(alignment: .top, spacing: 12) {
                         ForEach(recent) { track in
                             Button {
                                 Haptics.tap()
@@ -232,7 +265,9 @@ struct LibraryView: View {
                             .buttonStyle(PressableStyle())
                         }
                     }
+                    .scrollTargetLayout()
                 }
+                .scrollTargetBehavior(.viewAligned)
                 .scrollClipDisabled()
             }
             .padding(.bottom, 6)
@@ -395,12 +430,32 @@ struct ArtworkView: View {
     @State private var loaded: UIImage?
 
     var body: some View {
-        ZStack {
+        // `Color.clear` prend EXACTEMENT la place proposée : l'image remplit ce cadre sans jamais
+        // l'agrandir. Avant, une image « fill » imposait sa propre taille à la mise en page :
+        // dans la mosaïque des playlists, les pochettes débordaient et se coupaient n'importe où.
+        Color.clear.overlay {
             if let image = loaded ?? ArtworkCache.shared.cached(for: track, maxPixel: maxPixel) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+                let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+                if abs(aspect - 1) > 0.22 {
+                    // Pochette vraiment rectangulaire : affichée ENTIÈRE, sur un fond flouté
+                    // d'elle-même (rien n'est coupé).
+                    ZStack {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .blur(radius: 14)
+                            .opacity(0.75)
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    }
                     .transition(.opacity)
+                } else {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .transition(.opacity)
+                }
             } else {
                 Theme.accentGradient
                     .overlay(
@@ -484,6 +539,12 @@ struct MiniPlayer: View {
             }
             .animation(Motion.spring, value: track.id)
             .animation(Motion.quick, value: player.playing)
+            // Glisser : gauche = suivant, droite = précédent, haut = ouvrir le lecteur.
+            .trackSwipe(
+                onNext: { player.next() },
+                onPrevious: { player.previous(force: true) },
+                onUp: { withAnimation(Motion.sheet) { player.showFullScreen = true } }
+            )
             .padding(.leading, 8)
             .padding(.trailing, 6)
             .padding(.vertical, 7)
@@ -500,14 +561,6 @@ struct MiniPlayer: View {
                 Haptics.tap()
                 withAnimation(Motion.sheet) { player.showFullScreen = true }
             }
-            .gesture(
-                DragGesture(minimumDistance: 12).onEnded { value in
-                    if value.translation.height < -20 {
-                        Haptics.tap()
-                        withAnimation(Motion.sheet) { player.showFullScreen = true }
-                    }
-                }
-            )
         }
     }
 }
@@ -614,6 +667,12 @@ struct MiniPlayerAccessory: View {
         .padding(.leading, 6)
         .padding(.trailing, 4)
         .contentShape(Rectangle())
+        // Comme Apple Music : glisser le mini-lecteur change de morceau ; vers le haut, il s'ouvre.
+        .trackSwipe(
+            onNext: { if player.current != nil { player.next() } },
+            onPrevious: { if player.current != nil { player.previous(force: true) } },
+            onUp: { if player.current != nil { withAnimation(Motion.sheet) { player.showFullScreen = true } } }
+        )
         .onTapGesture {
             guard player.current != nil else { return }
             Haptics.tap()
@@ -697,6 +756,8 @@ struct NowPlayingView: View {
                 if let track = player.current {
                     Spacer(minLength: 10)
                     artwork(track)
+                        // Glisser la pochette : gauche = suivant, droite = précédent.
+                        .trackSwipe(onNext: { player.next() }, onPrevious: { player.previous(force: true) })
                     if visualizerOn {
                         SpectrumBars(tint: tint)
                             .frame(height: 30)
