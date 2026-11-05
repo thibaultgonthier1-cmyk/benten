@@ -365,8 +365,8 @@ private final class SweepAnimator: NSObject {
         let t = min(1, max(0, (link.targetTimestamp - origin) / duration))
         step(t)
         if t >= 1 {
-            link?.invalidate()
-            link = nil
+            self.link?.invalidate()
+            self.link = nil
             done()
         }
     }
