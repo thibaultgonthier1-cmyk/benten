@@ -1,4 +1,20 @@
 import SwiftUI
+import Observation
+
+/// État du thème, OBSERVÉ : chaque vue qui lit une couleur d'accent (même via `Theme.accent`)
+/// est redessinée toute seule quand la palette change — sans reconstruire l'interface, donc sans
+/// perdre la position de défilement, l'onglet ou l'écran ouvert.
+@Observable
+final class ThemeState {
+    var palette: Palette
+    var appleStyle: Bool
+
+    init() {
+        let defaults = UserDefaults.standard
+        palette = Palette(rawValue: defaults.string(forKey: "palette") ?? "") ?? .or
+        appleStyle = (defaults.string(forKey: "design") ?? "apple") == "apple"
+    }
+}
 
 /// Identité visuelle de Benten, portée telle quelle du desktop.
 ///
@@ -17,14 +33,22 @@ enum Theme {
     static let hairline = Color.white.opacity(0.10)
 
     /// Palette active, choisie dans les Réglages. La valeur est aussi persistée par `@AppStorage`.
-    nonisolated(unsafe) static var active: Palette = .or
+    nonisolated(unsafe) static let state = ThemeState()
+
+    static var active: Palette {
+        get { state.palette }
+        set { if state.palette != newValue { state.palette = newValue } }
+    }
 
     /// Style d'interface : l'identité Benten (sérif, halos, disque) ou les conventions
     /// d'Apple Music (SF Pro, tuiles nettes, pochette plein écran, volume).
     ///
     /// Les deux sont proposés parce qu'ils ne servent pas la même chose : Benten pour l'ambiance,
     /// Apple Music pour l'ergonomie qu'on a déjà dans les doigts.
-    nonisolated(unsafe) static var appleStyle = false
+    static var appleStyle: Bool {
+        get { state.appleStyle }
+        set { if state.appleStyle != newValue { state.appleStyle = newValue } }
+    }
 
     /// Rayon des pochettes : 14 (Benten) ou 7 (Apple Music, qui reste très serré).
     static var coverRadius: CGFloat { appleStyle ? 7 : tileRadius }

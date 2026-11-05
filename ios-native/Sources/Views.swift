@@ -725,6 +725,7 @@ struct NowPlayingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("visualizer") private var visualizerOn = true
+    @AppStorage("livingArtwork") private var livingArtwork = true
     @State private var dragOffset: CGFloat = 0
     @State private var previousTaps = 0
     @State private var nextTaps = 0
@@ -740,8 +741,17 @@ struct NowPlayingView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             background
+
+            // Pochette ANIMÉE : bord à bord en haut de l'écran, holographique, qui respire.
+            if living, let track = player.current {
+                LivingArtwork(track: track, playing: player.playing, bpm: player.currentBPM,
+                              height: screen.width + insets.top + 24)
+                    .id(track.id)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
 
             VStack(spacing: 0) {
                 Capsule()
@@ -755,7 +765,7 @@ struct NowPlayingView: View {
 
                 if let track = player.current {
                     Spacer(minLength: 10)
-                    artwork(track)
+                    artworkSlot(track)
                         // Glisser la pochette : gauche = suivant, droite = précédent.
                         .trackSwipe(onNext: { player.next() }, onPrevious: { player.previous(force: true) })
                     if visualizerOn {
@@ -786,6 +796,7 @@ struct NowPlayingView: View {
             .padding(.bottom, max(insets.bottom, 12))
             .animation(Motion.spring, value: player.current?.id)
         }
+        .animation(.easeInOut(duration: 0.6), value: player.current?.id)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: dragOffset > 1 ? 44 : 0, style: .continuous))
         .offset(y: dragOffset)
@@ -838,6 +849,21 @@ struct NowPlayingView: View {
             CoverBackdrop(track: player.current, playing: player.playing, bpm: player.currentBPM)
         } else {
             AnimatedBackdrop()
+        }
+    }
+
+    /// Pochette animée active (style Apple Music + réglage « Pochette animée »).
+    private var living: Bool { livingArtwork && Theme.appleStyle && !reduceMotion }
+
+    /// Emplacement de la pochette : la carte classique, ou un espace vide (touchable pour le
+    /// swipe) quand la pochette animée occupe tout le haut de l'écran.
+    @ViewBuilder private func artworkSlot(_ track: Track) -> some View {
+        if living {
+            Color.clear
+                .frame(height: min(screen.width - 56, 390))
+                .contentShape(Rectangle())
+        } else {
+            artwork(track)
         }
     }
 
@@ -1253,6 +1279,7 @@ struct AlbumDetailView: View {
                             ArtworkView(track: album.artworkTrack, maxPixel: 560)
                                 .frame(width: 250, height: 250)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .holographic()
                                 .shadow(color: .black.opacity(0.55), radius: 24, y: 12)
                                 .padding(.top, 8)
                             VStack(spacing: 3) {
@@ -1338,6 +1365,7 @@ struct ArtistDetailView: View {
                             ArtworkView(track: artist.artworkTrack, maxPixel: 560)
                                 .frame(width: 170, height: 170)
                                 .clipShape(Circle())
+                                .holographic()
                                 .shadow(color: .black.opacity(0.55), radius: 20, y: 10)
                             Text(artist.name)
                                 .font(.system(size: 26, weight: .bold))

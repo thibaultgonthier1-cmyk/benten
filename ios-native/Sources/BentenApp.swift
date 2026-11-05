@@ -20,7 +20,8 @@ struct BentenApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .id("\(paletteRaw)-\(designRaw)")
+                // Plus de reconstruction à chaque changement de couleur : le thème est observé,
+                // l'interface se recolore sur place (on reste où on était).
                 .onAppear {
                   Theme.apply(Palette(rawValue: paletteRaw) ?? .or)
                   Theme.appleStyle = designRaw == "apple"
@@ -67,6 +68,7 @@ struct RootView: View {
                     .zIndex(10)
             }
         }
+        .tint(Theme.accent)
         .animation(Motion.spring, value: player.current == nil)
         .animation(Motion.quick, value: keyboardVisible)
         .onAppear {

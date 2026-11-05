@@ -79,6 +79,7 @@ struct SettingsView: View {
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
     @AppStorage("design") private var designRaw = "apple"
     @AppStorage("visualizer") private var visualizerOn = true
+    @AppStorage("livingArtwork") private var livingArtwork = true
 
     var body: some View {
         NavigationStack {
@@ -266,6 +267,19 @@ struct SettingsView: View {
                 Haptics.choose()
                 Theme.appleStyle = value == "apple"
             }
+            Toggle(isOn: $livingArtwork) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pochette animée")
+                        Text("Plein écran, holographique, suit l'inclinaison du téléphone")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.dim)
+                    }
+                } icon: {
+                    Image(systemName: "sparkles.rectangle.stack")
+                }
+            }
+            .tint(Theme.accent)
             Text(designRaw == "apple"
                  ? "Grandes pochettes, fond animé tiré de la pochette, comme Apple Music."
                  : "Titres en sérif, halos colorés, disque laqué en lecture.")

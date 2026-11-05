@@ -687,15 +687,18 @@ actor TrackAnalyzer {
 
 /// Une transition prête à jouer.
 ///
-/// Déroulé d'un mix calé (comme un DJ, et comme les meilleurs AutoMix) :
-/// 1. RAMPE : sur les dernières mesures avant le point de sortie, la SORTANTE accélère ou ralentit
-///    en douceur (courbe en S) jusqu'au tempo de l'entrante — c'est la fin du morceau qui va
-///    chercher le tempo du suivant ;
-/// 2. CHEVAUCHEMENT : l'entrante démarre sur un temps fort, à son tempo NATUREL (jamais étirée,
-///    donc aucun artefact sur le nouveau morceau), basses coupées ; échange des basses pile sur
-///    la mesure du milieu ; la sortante s'efface ;
-/// 3. le chevauchement se termine quand la sortante finit musicalement ET que l'entrante sort de
-///    son intro (alignement « fin d'outro = fin d'intro »).
+/// Déroulé d'un mix calé (comme AutoMix d'Apple Music et un DJ) :
+/// - les deux morceaux JOUENT ENSEMBLE ; l'un monte pendant que l'autre descend (volume) ;
+/// - CROISEMENT DE TEMPO : pendant tout le chevauchement, un tempo COMMUN glisse en courbe en S
+///   du tempo de la sortante B₁ vers celui de l'entrante B₂ : B(t) = B₁ + (B₂ − B₁)·s(t),
+///   s(u) = 3u² − 2u³. La sortante va de ×1 vers ×B₂/B₁ (elle accélère ou ralentit vers le
+///   suivant) ; l'entrante part à ×B₁/B₂ (calée sur l'autre) et revient à ×1 (son vrai tempo).
+///   À chaque instant, les deux ont le MÊME tempo : leurs temps restent superposés du début à la
+///   fin, jamais de « double frappe ». Chacun n'est étiré que quand il est le plus discret ;
+/// - l'entrante démarre sur un temps fort, basses coupées ; échange des basses pile sur la
+///   mesure du milieu ;
+/// - le chevauchement se termine quand la sortante finit musicalement ET que l'entrante sort de
+///   son intro (alignement « fin d'outro = fin d'intro »).
 struct MixPlan: Sendable {
     enum Style: Sendable {
         /// Mix calé : temps alignés, tempo accordé, bass swap.
@@ -718,8 +721,8 @@ struct MixPlan: Sendable {
     var entryAt: Double
     /// Durée du chevauchement (secondes réelles).
     var length: Double
-    /// Vitesse de la SORTANTE pendant le chevauchement (= tempo de l'entrante / tempo de la
-    /// sortante, demi/double tempo compris). L'entrante joue toujours à vitesse 1.
+    /// R = tempo de l'entrante / tempo de la sortante (demi/double tempo compris) : vitesse
+    /// d'ARRIVÉE de la sortante. Vitesse de l'entrante = vitesse de la sortante / R.
     var outRate: Double
     /// Durée réelle (s) de la rampe de tempo de la sortante, qui se TERMINE au point de sortie.
     var rampLength: Double
@@ -734,8 +737,9 @@ struct MixPlan: Sendable {
 }
 
 enum MixPlanner {
-    /// Étirement maximal de la sortante avant d'entendre des artefacts (au-delà : fondu filtré).
-    static let maxStretch = 0.07
+    /// Écart de tempo maximal (chacun n'est étiré que quand il est le plus discret ; au-delà :
+    /// fondu filtré).
+    static let maxStretch = 0.10
 
     static func plan(
         out: TrackAnalysis, outDuration: Double,
@@ -792,8 +796,8 @@ enum MixPlanner {
             let entry0 = firstDownbeat(incoming, bar: inBar) ?? inStart
 
             if abs(log(outRate)) <= maxStretch {
-                // Une mesure, en temps réel, pendant le chevauchement (les deux sont calées).
-                let wallBar = outBar / outRate
+                // Une mesure de l'ENTRANTE, en secondes de son propre fichier.
+                let inSpanPerBar = outBar / outRate
 
                 // Longueur : celle choisie (2 / 4 / 8 mesures), allongée jusqu'au double quand
                 // l'outro de la sortante ET l'intro de l'entrante sont longues (blend long).
@@ -802,7 +806,7 @@ enum MixPlanner {
                     bars = max(2, bars / 2)   // tonalités qui jurent : on passe plus vite
                 } else if let outro = out.outroStart, let intro = incoming.introEnd {
                     let outroBars = Int(((outEnd - outro) / outBar).rounded(.down))
-                    let introBars = Int(((intro - entry0) / wallBar).rounded(.down))
+                    let introBars = Int(((intro - entry0) / inSpanPerBar).rounded(.down))
                     let room = min(outroBars, introBars, bars * 2)
                     if room > bars { bars = room - room % 2 }
                 }
@@ -820,39 +824,27 @@ enum MixPlanner {
                 }
                 exit = max(outDuration * 0.4, exit)
                 bars = max(2, min(bars, Int(((outDuration - 0.05 - exit) / outBar).rounded(.down))))
-                let length = Double(bars) * wallBar
+                // Durée réelle : le tempo commun vaut en moyenne (B₁ + B₂)/2 sur une courbe en S,
+                // donc L = mesures × mesure₁ × 2 / (1 + R).
+                let length = Double(bars) * outBar * 2 / (1 + outRate)
+                // Ce que l'entrante parcourt de son fichier pendant ce temps : mesures × mesure₂.
+                let inSpan = Double(bars) * inSpanPerBar
 
                 // ENTRÉE : l'intro de l'entrante se termine quand la sortante a fini de partir.
                 // Sans intro détectée : 1er temps fort après le silence. Jamais plus de 16
                 // mesures sautées (on ne coupe pas un couplet).
                 var entry = entry0
                 if let intro = incoming.introEnd {
-                    let target = intro - length
+                    let target = intro - inSpan
                     if target > entry0 {
                         let snapped = entry0 + ((target - entry0) / inBar).rounded() * inBar
                         entry = min(snapped, entry0 + 16 * inBar)
                     }
                 }
 
-                // RAMPE de tempo sur la sortante : ~150 s par unité de log-écart (5 % → 7,5 s),
-                // entre 4 et 12 s, et jamais avant 40 % du morceau.
-                let stretch = abs(log(outRate))
-                var ramp = stretch < 0.002 ? 0 : min(12, max(4, stretch * 150))
-                if ramp > 0 {
-                    let earliest = outDuration * 0.4
-                    let span = ramp * (1 + outRate) / 2
-                    if exit - span < earliest { ramp = max(0, (exit - earliest) * 2 / (1 + outRate)) }
-                    if ramp < 2 { ramp = 0 }
-                }
-                // Écart minime ou pas de place pour la rampe : on garde le tempo (dérive < 1/8 de
-                // temps sur tout le chevauchement si l'écart est ≤ 0,2 %).
-                let finalRate = ramp > 0 ? outRate : (stretch < 0.002 ? outRate : 1)
-                if ramp == 0 && stretch >= 0.002 {
-                    // Pas de rampe possible : fondu filtré court, sans calage.
-                    return filterPlan(outEnd: outEnd, outBPM: outBPM, out: out, entry: entry0, seconds: seconds, gain: gain)
-                }
                 return MixPlan(style: .beatmix, exitAt: exit, entryAt: max(0, entry), length: length,
-                               outRate: finalRate, rampLength: ramp, levelGain: gain, bassSwap: true, bars: bars)
+                               outRate: abs(log(outRate)) < 0.0005 ? 1 : outRate, rampLength: 0,
+                               levelGain: gain, bassSwap: true, bars: bars)
             }
             return filterPlan(outEnd: outEnd, outBPM: outBPM, out: out, entry: entry0, seconds: seconds, gain: gain)
         }

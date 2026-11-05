@@ -179,9 +179,6 @@ enum ThemeSweep {
         let width = bounds.width
         let height = bounds.height
 
-        // Position de défilement de l'écran en cours : la reconstruction de l'interface (nouvelle
-        // couleur) la remet à zéro ; on la restaure AVANT de découvrir l'écran → aucun saut.
-        let savedOffset = ScrollMemory.capture(in: window)
 
         let container = UIView(frame: bounds)
         container.isUserInteractionEnabled = true   // pas de toucher pendant la vague
@@ -286,11 +283,10 @@ enum ThemeSweep {
         render(0)
         Haptics.choose()
         apply()
-        // On laisse SwiftUI reconstruire l'interface (sous la capture), on restaure le défilement,
-        // puis la vague part.
+        // On laisse SwiftUI recolorer l'interface SUR PLACE (sous la capture : rien ne bouge, on
+        // reste au même endroit), puis la vague part.
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 80_000_000)
-            ScrollMemory.restore(savedOffset, in: window)
             let animator = SweepAnimator(duration: 1.05, step: render) {
                 container.removeFromSuperview()
                 running = nil
@@ -331,42 +327,5 @@ private final class SweepAnimator: NSObject {
             link = nil
             done()
         }
-    }
-}
-
-/// Mémorise la position de défilement de l'écran visible (la plus grande liste verticale) et la
-/// remet après une reconstruction de l'interface.
-@MainActor
-enum ScrollMemory {
-    static func capture(in window: UIWindow) -> CGPoint? {
-        largestScrollView(in: window).map(\.contentOffset)
-    }
-
-    static func restore(_ offset: CGPoint?, in window: UIWindow) {
-        guard let offset, let scroll = largestScrollView(in: window) else { return }
-        scroll.layoutIfNeeded()
-        let maxY = max(-scroll.adjustedContentInset.top,
-                       scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
-        scroll.setContentOffset(CGPoint(x: offset.x, y: min(offset.y, maxY)), animated: false)
-    }
-
-    private static func largestScrollView(in view: UIView) -> UIScrollView? {
-        var best: UIScrollView?
-        var bestArea: CGFloat = 0
-        func visit(_ view: UIView) {
-            guard !view.isHidden, view.alpha > 0.01, view.window != nil else { return }
-            if let scroll = view as? UIScrollView, scroll.contentSize.height > scroll.bounds.height {
-                let frame = scroll.convert(scroll.bounds, to: nil)
-                let visible = frame.intersection(view.window?.bounds ?? .zero)
-                let area = visible.width * visible.height
-                if area > bestArea {
-                    bestArea = area
-                    best = scroll
-                }
-            }
-            for child in view.subviews { visit(child) }
-        }
-        visit(view)
-        return best
     }
 }

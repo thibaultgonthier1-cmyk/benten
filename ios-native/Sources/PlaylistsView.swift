@@ -158,6 +158,7 @@ struct PlaylistDetailView: View {
                         VStack(spacing: 14) {
                             PlaylistMosaicView(tracks: tracks, cornerRadius: 14, maxPixel: 560)
                                 .frame(width: 230, height: 230)
+                                .holographic()
                                 .shadow(color: .black.opacity(0.5), radius: 22, y: 12)
                                 .padding(.top, 8)
                             VStack(spacing: 4) {
