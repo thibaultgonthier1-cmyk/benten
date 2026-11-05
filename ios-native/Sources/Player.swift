@@ -372,6 +372,15 @@ final class Player: NSObject, ObservableObject {
     /// Automate des transitions : tourne sur son propre fil temps réel (5 ms), plus jamais sur le
     /// fil de l'interface (avant, un défilement ou une animation faisait « sauter » les fondus).
     private let automator = MixAutomator()
+    /// Correction de calage en cours (rattrapage « jog » de l'entrante), lue par l'automate.
+    private let nudge = NudgeBox()
+    /// Mesure du calage réel pendant le mix en cours.
+    private var probe: PhaseProbe?
+    /// Décalage propre à CET appareil entre les deux platines au démarrage de l'entrante
+    /// (latence interne du module de tempo), appris mix après mix et compensé d'avance.
+    private var syncCalibration: Double = UserDefaults.standard.double(forKey: "mix.syncCalibration") {
+        didSet { UserDefaults.standard.set(syncCalibration, forKey: "mix.syncCalibration") }
+    }
     /// Retour progressif au tempo d'origine après un mix (calcul exact de la position).
     /// Rampe de tempo en cours (sortante qui va chercher le tempo du suivant) : vitesse
     /// `from` → `to` en courbe en S sur `length` secondes, à partir de l'heure `host`.
@@ -1314,10 +1323,16 @@ final class Player: NSObject, ObservableObject {
             let delta = max(0, plan.exitAt - livePosition())
             startHost = nowHost + AVAudioTime.hostTime(forSeconds: delta)
         }
-        let earliest = nowHost + AVAudioTime.hostTime(forSeconds: 0.03)
+        let earliest = nowHost + AVAudioTime.hostTime(forSeconds: 0.15)
         if startHost < earliest { startHost = earliest }
-        incoming.play(at: AVAudioTime(hostTime: startHost))
         let start = AVAudioTime.seconds(forHostTime: startHost)
+        // Compensation apprise : l'entrante part un poil plus tôt (ou plus tard) pour que ses
+        // temps SORTENT pile en même temps que ceux de la sortante.
+        let compensation = plan.style == .gapless ? 0 : syncCalibration
+        let incomingStart = start - compensation
+        incoming.play(at: AVAudioTime(hostTime: AVAudioTime.hostTime(forSeconds: incomingStart)))
+        nudge.clear()
+        if plan.style == .beatmix { startProbe(token: token, start: start, length: plan.length) }
 
         // Horloge d'affichage de la sortante : vitesse 1 jusqu'au point de sortie, puis
         // 1 → R en courbe en S (intégrale exacte), jusqu'à la bascule.
@@ -1332,14 +1347,74 @@ final class Player: NSObject, ObservableObject {
 
         diag("mix \(plan.style) → « \(incomingTrack.title) » : sortie \(String(format: "%.1f", plan.exitAt)) s, entrée \(String(format: "%.1f", plan.entryAt)) s, \(plan.bars > 0 ? "\(plan.bars) mesures, " : "")\(String(format: "%.1f", plan.length)) s, tempo ×1,000 → ×\(String(format: "%.3f", r)) (sortante) / ×\(String(format: "%.3f", 1 / r)) → ×1,000 (entrante)")
         runMix(plan: plan, token: token, outgoing: outgoing, incoming: incoming,
-               track: incomingTrack, file: file, index: nextIndex, start: start)
+               track: incomingTrack, file: file, index: nextIndex, start: start, incomingStart: incomingStart)
+    }
+
+    // MARK: Calage mesuré en direct (boucle fermée)
+
+    /// Écoute les deux platines (sorties du module de tempo) pendant le début du chevauchement,
+    /// mesure leur décalage réel par corrélation des attaques, puis :
+    /// 1. rattrape l'entrante en douceur (vitesse ±2 % le temps qu'il faut, comme un DJ au jog) ;
+    /// 2. apprend la compensation de cet iPhone pour les mix suivants.
+    private func startProbe(token: Int, start: Double, length: Double) {
+        stopProbe()
+        let window = min(3.2, length * 0.42)
+        guard window >= 1.4 else { return }
+        let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let probe = PhaseProbe(sampleRate: rate > 0 ? rate : 48_000, seconds: window + 1.5)
+        self.probe = probe
+        for (index, node) in [pitchA, pitchB].enumerated() {
+            let format = node.outputFormat(forBus: 0)
+            node.installTap(onBus: 0, bufferSize: 2048, format: format, block: Player.probeTap(probe, deck: index))
+        }
+        let outgoingDeck = activeDeck === deckB ? 1 : 0
+        Task { @MainActor [weak self] in
+            let wait = max(0, start + window + 0.2 - hostNow())
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard let self, self.probe === probe else { return }
+            self.stopProbe()
+            guard token == self.fadeToken else { return }
+            guard let measure = probe.offset(outgoing: outgoingDeck, incoming: 1 - outgoingDeck) else {
+                diag("calage : pas assez d'attaques pour mesurer (intro sans rythme)")
+                return
+            }
+            let offset = measure.seconds
+            diag("calage mesuré : entrante \(offset >= 0 ? "en retard" : "en avance") de \(String(format: "%.1f", abs(offset) * 1000)) ms (confiance \(String(format: "%.2f", measure.confidence)))")
+            // Apprentissage : la compensation suit le décalage résiduel (moyenne glissante).
+            self.syncCalibration = max(-0.12, min(0.12, self.syncCalibration + 0.8 * offset))
+            // Rattrapage en direct si l'écart s'entend (> 4 ms).
+            guard abs(offset) > 0.004 else { return }
+            let remaining = start + length * 0.9 - hostNow()
+            guard remaining > 0.4 else { return }
+            var amount = 0.02
+            var duration = abs(offset) / amount
+            if duration > remaining * 0.8 {
+                amount = min(0.04, abs(offset) / (remaining * 0.8))
+                duration = abs(offset) / amount
+            }
+            // En retard → l'entrante accélère un instant ; en avance → elle ralentit.
+            self.nudge.set(start: hostNow() + 0.02, duration: duration, factor: offset > 0 ? 1 + amount : 1 - amount)
+            diag("calage : rattrapage de \(String(format: "%.1f", abs(offset) * 1000)) ms en \(String(format: "%.1f", duration)) s (vitesse ×\(String(format: "%.3f", offset > 0 ? 1 + amount : 1 - amount)))")
+        }
+    }
+
+    private func stopProbe() {
+        guard probe != nil else { return }
+        pitchA.removeTap(onBus: 0)
+        pitchB.removeTap(onBus: 0)
+        probe = nil
+    }
+
+    nonisolated private static func probeTap(_ probe: PhaseProbe, deck: Int) -> AVAudioNodeTapBlock {
+        { buffer, when in probe.feed(deck: deck, buffer: buffer, when: when) }
     }
 
     /// Exécute la transition. Les courbes (volumes, bass swap, filtre) sont appliquées toutes les
     /// 5 ms par l'automate, sur un fil temps réel : rien ne peut les faire hoqueter (défilement,
     /// animation, écran verrouillé). Le fil principal ne fait que basculer l'affichage au milieu.
     private func runMix(plan: MixPlan, token: Int, outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode,
-                        track: Track, file: AVAudioFile, index: Int, start: Double) {
+                        track: Track, file: AVAudioFile, index: Int, start: Double, incomingStart: Double) {
+        let nudge = self.nudge
         let outFX = fx(for: outgoing)
         let inFX = fx(for: incoming)
         let gain = normalizeVolume ? 1 : plan.levelGain
@@ -1373,17 +1448,18 @@ final class Player: NSObject, ObservableObject {
             switchAt: switchAt,
             apply: { t in
                 Player.applyCurves(style: style, t: t, gain: gain, mid: mid, swapWidth: swapWidth, outgoing: outgoing, incoming: incoming, outFX: outFX, inFX: inFX)
-                if r != 1 {
+                if style == .beatmix {
                     // Tempo commun B(t) = B₁·(1 + (R − 1)·s(t)) : appliqué aux DEUX platines dans
                     // le même pas de 5 ms → leurs temps restent superposés en permanence.
+                    // + rattrapage de calage éventuel sur l'entrante (boucle fermée).
                     let common = 1 + (r - 1) * (t * t * (3 - 2 * t))
                     outPitch.rate = Float(common)
-                    inPitch.rate = Float(common / r)
+                    inPitch.rate = Float(common / r * nudge.factor(at: AVAudioTime.seconds(forHostTime: mach_absolute_time())))
                 }
             },
             onSwitch: { [weak self] in
                 guard let self, token == self.fadeToken else { return }
-                self.switchToIncoming(plan: plan, incoming: incoming, file: file, track: track, index: index, start: start)
+                self.switchToIncoming(plan: plan, incoming: incoming, file: file, track: track, index: index, start: incomingStart)
             },
             onDone: { [weak self] in
                 guard let self, token == self.fadeToken else { return }
@@ -1491,6 +1567,8 @@ final class Player: NSObject, ObservableObject {
     private func cancelFade() {
         fadeToken += 1
         automator.cancel()
+        stopProbe()
+        nudge.clear()
         if mixingInto != nil { mixingInto = nil }
         guard fading else { return }
         diag("mix interrompu (action manuelle ou relance)")
@@ -1585,6 +1663,129 @@ final class MixAutomator: @unchecked Sendable {
             timer?.cancel()
             timer = nil
         }
+    }
+}
+
+// MARK: - Calage en boucle fermée
+
+/// Rattrapage de calage partagé avec l'automate (fil temps réel) : facteur de vitesse appliqué
+/// à l'entrante pendant une courte fenêtre.
+final class NudgeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var start = 0.0
+    private var end = 0.0
+    private var value = 1.0
+
+    func set(start: Double, duration: Double, factor: Double) {
+        lock.lock(); defer { lock.unlock() }
+        self.start = start
+        end = start + duration
+        value = factor
+    }
+
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        end = 0
+        value = 1
+    }
+
+    /// Facteur à l'instant `now` (secondes d'horloge système), avec entrée/sortie adoucies.
+    func factor(at now: Double) -> Double {
+        lock.lock(); defer { lock.unlock() }
+        guard now > start, now < end, value != 1 else { return 1 }
+        return value
+    }
+}
+
+/// Mesure le décalage réel entre les deux platines : enveloppe des ATTAQUES (énergie de la
+/// dérivée, pas de 2 ms) de chaque sortie, alignées à l'échantillon près sur l'horloge du moteur,
+/// puis corrélation croisée sur ±60 ms (affinée par interpolation parabolique).
+final class PhaseProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private let hop: Int64
+    private let limit: Int
+    private let sampleRate: Double
+    private var base: [Int: Int64] = [:]
+    private var energy: [Int: [Float]] = [:]
+    private var last: [Int: Float] = [:]
+
+    init(sampleRate: Double, seconds: Double) {
+        self.sampleRate = sampleRate
+        hop = Int64(max(32, Int(sampleRate * 0.002)))
+        limit = Int(seconds / 0.002)
+    }
+
+    func feed(deck: Int, buffer: AVAudioPCMBuffer, when: AVAudioTime) {
+        guard when.isSampleTimeValid, let data = buffer.floatChannelData?[0] else { return }
+        let count = Int(buffer.frameLength)
+        lock.lock(); defer { lock.unlock() }
+        if base[deck] == nil { base[deck] = when.sampleTime / hop }
+        guard let origin = base[deck] else { return }
+        var frames = energy[deck] ?? []
+        var previous = last[deck] ?? 0
+        for index in 0..<count {
+            let frame = Int((when.sampleTime + Int64(index)) / hop - origin)
+            guard frame >= 0 else { continue }
+            if frame >= limit { break }
+            while frames.count <= frame { frames.append(0) }
+            let x = data[index]
+            let d = x - previous
+            previous = x
+            frames[frame] += d * d
+        }
+        energy[deck] = frames
+        last[deck] = previous
+    }
+
+    /// Décalage (s) de l'entrante par rapport à la sortante : > 0 = en retard.
+    func offset(outgoing: Int, incoming: Int) -> (seconds: Double, confidence: Double)? {
+        lock.lock()
+        let a = energy[outgoing] ?? []
+        let b = energy[incoming] ?? []
+        let baseA = base[outgoing] ?? 0
+        let baseB = base[incoming] ?? 0
+        lock.unlock()
+        guard !a.isEmpty, !b.isEmpty else { return nil }
+        // Début utile : 1re trame où l'entrante a du son (+ 50 ms).
+        let level = b.max() ?? 0
+        guard level > 0, let firstSound = b.firstIndex(where: { $0 > level * 0.01 }) else { return nil }
+        let startAbs = max(baseA, baseB + Int64(firstSound) + 25)
+        let endAbs = min(baseA + Int64(a.count), baseB + Int64(b.count)) - 32
+        let length = Int(endAbs - startAbs)
+        guard length > 500 else { return nil }
+        // Enveloppes d'attaques (racine de l'énergie, hausse seulement), moyenne retirée.
+        func novelty(_ source: [Float], _ offset: Int64) -> [Double] {
+            var output = [Double](repeating: 0, count: length + 64)
+            var previous = 0.0
+            for k in 0..<(length + 64) {
+                let index = Int(startAbs - 32 + Int64(k) - offset)
+                let value = index >= 0 && index < source.count ? Double(source[index]).squareRoot() : 0
+                output[k] = max(0, value - previous)
+                previous = value
+            }
+            let mean = output.reduce(0, +) / Double(output.count)
+            return output.map { $0 - mean }
+        }
+        let na = novelty(a, baseA)
+        let nb = novelty(b, baseB)
+        let maxLag = 30
+        var scores = [Double](repeating: 0, count: 2 * maxLag + 1)
+        for lag in -maxLag...maxLag {
+            var sum = 0.0
+            for k in 32..<(length + 32) { sum += na[k] * nb[k + lag] }
+            scores[lag + maxLag] = sum
+        }
+        guard let bestIndex = scores.indices.max(by: { scores[$0] < scores[$1] }) else { return nil }
+        let energyA = na[32..<(length + 32)].reduce(0) { $0 + $1 * $1 }
+        let energyB = nb[32..<(length + 32)].reduce(0) { $0 + $1 * $1 }
+        let confidence = scores[bestIndex] / max(1e-12, (energyA * energyB).squareRoot())
+        guard confidence > 0.2, bestIndex > 0, bestIndex < scores.count - 1 else { return nil }
+        // Interpolation parabolique autour du pic.
+        let y0 = scores[bestIndex - 1], y1 = scores[bestIndex], y2 = scores[bestIndex + 1]
+        let denominator = y0 - 2 * y1 + y2
+        let refine = abs(denominator) > 1e-12 ? 0.5 * (y0 - y2) / denominator : 0
+        let lag = Double(bestIndex - maxLag) + max(-0.5, min(0.5, refine))
+        return (lag * Double(hop) / sampleRate, confidence)
     }
 }
 

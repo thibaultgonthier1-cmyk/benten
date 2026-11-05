@@ -216,16 +216,25 @@ enum DemoMode {
         let screen = value("demoScreen") ?? "player"
         let trackIndex = Int(value("demoTrack") ?? "0") ?? 0
         diag("DÉMO : scénario \(screen), morceau \(trackIndex)")
+        for track in main {
+            if let url = track.artworkURL, let image = ArtworkCache.thumbnail(at: url, maxPixel: 560) {
+                diag("DÉMO : pochette « \(track.title) » vignette \(Int(image.size.width))×\(Int(image.size.height))")
+            }
+        }
 
         if arguments.contains("-demoMix") {
             // Vrai mix A (124 BPM) → B (128 BPM), platines enregistrées séparément.
             player.shuffle = false
-            player.play([main[0], main[1]], startingAt: 0)
+            // Deux mix d'affilée : le 2e profite de la compensation apprise au 1er.
+            player.play([main[0], main[1], main[0]], startingAt: 0)
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
                 player.seek(to: max(0, player.duration - 34))
-                player.demoRecordDecks(seconds: 40, directory: documents)
-                for _ in 0..<12 {
+                player.demoRecordDecks(seconds: 80, directory: documents)
+                try? await Task.sleep(nanoseconds: 28_000_000_000)
+                // Pendant le morceau B : on avance juste avant SA sortie pour le 2e mix.
+                player.seek(to: max(0, player.duration - 26))
+                for _ in 0..<14 {
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                     try? DiagnosticsLog.shared.exportText.write(to: documents.appendingPathComponent("diag.txt"), atomically: true, encoding: .utf8)
                 }

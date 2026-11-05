@@ -755,8 +755,11 @@ struct NowPlayingView: View {
 
             // Pochette ANIMÉE : bord à bord en haut de l'écran, holographique, qui respire.
             if living, let track = player.current {
+                // Carrée, pleine largeur, juste sous la barre d'état : la pochette ENTIÈRE est
+                // visible, bord à bord ; le fond (pochette floutée) la prolonge tout autour.
                 LivingArtwork(track: track, playing: player.playing, bpm: player.currentBPM,
-                              height: screen.width + insets.top * 0.6)
+                              height: screen.width)
+                    .padding(.top, insets.top + 2)
                     .offset(x: artSwipe)
                     .opacity(1 - min(0.4, Double(abs(artSwipe)) / 400))
                     .id(track.id)

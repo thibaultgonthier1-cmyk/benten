@@ -179,7 +179,7 @@ struct SettingsView: View {
                     .foregroundStyle(Theme.accent)
                 }
                 Text(player.beatMatched
-                     ? "Comme un DJ : la fin du morceau accélère ou ralentit en douceur jusqu'au tempo du suivant, qui démarre pile sur un temps fort, à la fin de son intro, sans être déformé. Le mix se fait sur la fin musicale (outro), les basses sont échangées sur la mesure du milieu, tous les morceaux sont au même volume. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
+                     ? "Comme un DJ : les deux morceaux jouent ensemble, l'un monte pendant que l'autre descend, et leurs tempos glissent ensemble de l'un vers l'autre en restant sur les mêmes temps. Le suivant démarre sur un temps fort, calé sur la fin de son intro ; le mix se fait sur la fin musicale (outro), les basses sont échangées sur la mesure du milieu, tous les morceaux sont au même volume. Le calage est mesuré et corrigé en direct pendant chaque mix. Tonalités qui jurent → transition plus courte ; tempos trop éloignés → fondu filtré ; même album → enchaînement sans blanc."
                      : "Fondu simple à puissance constante, sans calage rythmique.")
                     .font(.caption2)
                     .foregroundStyle(Theme.dim)

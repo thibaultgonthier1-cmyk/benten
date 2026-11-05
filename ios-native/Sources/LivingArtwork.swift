@@ -187,15 +187,16 @@ struct LivingArtwork: View {
         let width = UIScreen.main.bounds.width
         TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !playing || reduceMotion)) { context in
             let t = elapsedBeforePause + (resumedAt.map { context.date.timeIntervalSince($0) } ?? 0)
-            let zoom = 1.11 + 0.025 * sin(t * 2 * .pi / 21)
+            // Zoom TRÈS léger (2 à 5 %) : on voit toujours la pochette entière, elle respire.
+            let zoom = 1.035 + 0.015 * sin(t * 2 * .pi / 21)
             let beat = 60 / max(60, min(180, bpm ?? 100))
             let phase = (Date.timeIntervalSinceReferenceDate).truncatingRemainder(dividingBy: beat) / beat
             let pulse = playing ? 0.01 * pow(max(0, cos(phase * 2 * .pi)), 4) : 0
             // Marge disponible de chaque côté grâce au zoom : le déplacement ne la dépasse jamais.
             let roomX = (zoom - 1) * width / 2 - 1
             let roomY = (zoom - 1) * height / 2 - 1
-            let dx = max(-roomX, min(roomX, 9 * sin(t * 2 * .pi / 17) + tilt.x * 12))
-            let dy = max(-roomY, min(roomY, 7 * cos(t * 2 * .pi / 23) + tilt.y * 9))
+            let dx = max(-roomX, min(roomX, 4 * sin(t * 2 * .pi / 17) + tilt.x * 6))
+            let dy = max(-roomY, min(roomY, 3 * cos(t * 2 * .pi / 23) + tilt.y * 5))
             ZStack {
                 ArtworkView(track: track, maxPixel: 1000)
                     .frame(width: width, height: height)
@@ -211,8 +212,8 @@ struct LivingArtwork: View {
             LinearGradient(
                 stops: [
                     .init(color: .black, location: 0),
-                    .init(color: .black, location: 0.7),
-                    .init(color: .black.opacity(0.55), location: 0.86),
+                    .init(color: .black, location: 0.84),
+                    .init(color: .black.opacity(0.6), location: 0.93),
                     .init(color: .clear, location: 1)
                 ],
                 startPoint: .top,

@@ -132,7 +132,7 @@ private struct PlaylistRow: View {
                             .foregroundStyle(Theme.accent)
                     }
                 }
-                Text(isAuto ? "Automatique · \(tracks.count) titres" : "\(tracks.count) titre\(tracks.count > 1 ? "s" : "")")
+                Text("\(isAuto ? "Automatique · " : "")\(tracks.count) titre\(tracks.count > 1 ? "s" : "")")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.dim)
             }

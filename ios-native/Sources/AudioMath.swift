@@ -475,7 +475,7 @@ struct TrackAnalysis: Codable, Sendable {
     /// Version des repères de mix (les anciennes analyses sont refaites quand on en a besoin).
     var cueVersion: Int?
 
-    static let currentCueVersion = 2
+    static let currentCueVersion = 3
 
     static let empty = TrackAnalysis(bpm: nil, confidence: 0, headDownbeat: nil, midDownbeat: nil, tailDownbeat: nil, key: nil, level: 0, start: 0, end: nil, loudness: nil)
 
@@ -592,13 +592,24 @@ actor TrackAnalyzer {
             result.tailDownbeat = downbeat(in: tailEnv, phase: local.phase, origin: tailStart)
         }
         // Les temps forts locaux doivent rester cohérents avec la grille du milieu (± un temps) ;
-        // sinon on garde la grille du milieu, plus fiable.
+        // sinon on garde la grille du milieu, plus fiable. Et le « 1 » de la mesure est UNIQUE
+        // pour tout le morceau : celui du cœur (45 s de refrain/couplet, le plus fiable). Avant,
+        // début, milieu et fin pouvaient choisir chacun un « 1 » différent (jusqu'à 3 temps
+        // d'écart) : l'entrée et la sortie se calaient alors sur des mesures décalées.
         if let mid = result.midDownbeat {
+            let beat = 60 / tempo.bpm
             for keyPath in [\TrackAnalysis.headDownbeat, \TrackAnalysis.tailDownbeat] {
                 if let local = result[keyPath: keyPath] {
-                    let offset = (local - mid).truncatingRemainder(dividingBy: 60 / tempo.bpm)
-                    let wrapped = min(abs(offset), 60 / tempo.bpm - abs(offset))
-                    if wrapped > 0.06 { result[keyPath: keyPath] = nil }
+                    let offset = (local - mid).truncatingRemainder(dividingBy: beat)
+                    let wrapped = min(abs(offset), beat - abs(offset))
+                    if wrapped > 0.06 {
+                        result[keyPath: keyPath] = nil
+                    } else {
+                        // Même temps que la grille du cœur : on ramène sur le « 1 » le plus proche.
+                        let beats = ((local - mid) / beat).rounded()
+                        let misplaced = beats - (beats / 4).rounded() * 4
+                        result[keyPath: keyPath] = local - misplaced * beat
+                    }
                 }
             }
         }

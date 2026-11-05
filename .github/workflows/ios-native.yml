@@ -155,7 +155,7 @@ jobs:
           xcrun simctl launch "$UDID" $BID -BentenDemo -demoMix -palette or
           sleep 30
           xcrun simctl io "$UDID" screenshot "qa/pendant_mix.png"
-          sleep 45
+          sleep 62
           C=$(xcrun simctl get_app_container "$UDID" $BID data)
           ls -la "$C/Documents" "$C/Library/Caches" || true
           cp "$C"/Documents/deck*.* qa/ 2>/dev/null || true
