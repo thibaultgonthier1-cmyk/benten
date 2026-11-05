@@ -19,7 +19,8 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-15 : Xcode 26 (SDK iOS 26) -> barre d'onglets en verre et mini-lecteur systeme, comme Apple Music.
+    runs-on: macos-15
     timeout-minutes: 40
 
     steps:
@@ -38,7 +39,8 @@ jobs:
         run: |
           # Le projet genere peut etre au format d'un Xcode recent ; on selectionne le plus
           # recent installe sur le runner pour pouvoir le lire.
-          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          ls -d /Applications/Xcode_*.app
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE "beta|release_candidate|_rc" | sort -V | tail -1)
           echo "Xcode choisi : $LATEST"
           if [ -n "$LATEST" ]; then sudo xcode-select -s "$LATEST"; fi
           xcodebuild -version

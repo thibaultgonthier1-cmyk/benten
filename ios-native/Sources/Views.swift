@@ -519,11 +519,111 @@ struct MiniPlayerSpacer: ViewModifier {
     @EnvironmentObject private var player: Player
 
     func body(content: Content) -> some View {
+        // iOS 26 : le système réserve lui-même la place de la barre et du mini-lecteur.
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: player.current == nil ? 0 : 70)
+            Color.clear.frame(height: player.current == nil || ShellStyle.systemAccessory ? 0 : 70)
         }
     }
 }
+
+enum ShellStyle {
+    /// Vrai quand la barre d'onglets d'iOS 26 (verre, mini-lecteur intégré) est utilisée.
+    static var systemAccessory: Bool {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) { return true }
+        #endif
+        return false
+    }
+}
+
+#if compiler(>=6.2)
+/// Mini-lecteur d'iOS 26, intégré à la barre d'onglets comme dans Apple Music : le système le
+/// place, l'anime, et le replie à côté des onglets quand on fait défiler vers le bas.
+@available(iOS 26.0, *)
+struct MiniPlayerAccessory: View {
+    @EnvironmentObject private var player: Player
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    @State private var nextTaps = 0
+
+    var body: some View {
+        let inline = placement == .inline
+        HStack(spacing: 10) {
+            Group {
+                if let track = player.current {
+                    ArtworkView(track: track, maxPixel: 180)
+                } else {
+                    ZStack {
+                        Color.white.opacity(0.08)
+                        Image(systemName: "music.note")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.dim)
+                    }
+                }
+            }
+            .frame(width: inline ? 26 : 32, height: inline ? 26 : 32)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(player.current?.title ?? "Aucune lecture")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.ivory)
+                    .lineLimit(1)
+                if !inline, let artist = player.current?.artist {
+                    Text(artist)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.dim)
+                        .lineLimit(1)
+                }
+            }
+            .id(player.current?.id)
+            .transition(.opacity)
+
+            Spacer(minLength: 4)
+
+            Button {
+                Haptics.press()
+                player.toggle()
+            } label: {
+                Image(systemName: player.playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.ivory)
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(player.current == nil)
+
+            if !inline {
+                Button {
+                    Haptics.tap()
+                    nextTaps += 1
+                    player.next()
+                } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.ivory)
+                        .symbolEffect(.bounce, value: nextTaps)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(player.current == nil)
+            }
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard player.current != nil else { return }
+            Haptics.tap()
+            withAnimation(Motion.sheet) { player.showFullScreen = true }
+        }
+        .animation(Motion.quick, value: player.current?.id)
+        .animation(Motion.quick, value: player.playing)
+    }
+}
+#endif
 
 extension View {
     func miniPlayerSpacer() -> some View { modifier(MiniPlayerSpacer()) }

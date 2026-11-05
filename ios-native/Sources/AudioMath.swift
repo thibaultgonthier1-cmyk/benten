@@ -453,6 +453,10 @@ actor TrackAnalyzer {
 
     func cached(_ track: Track) -> TrackAnalysis? { cache[track.id] }
 
+    /// Toutes les analyses déjà faites (sauvegardées) : le choix du morceau suivant connaît
+    /// immédiatement le BPM et la tonalité de tout ce qui a déjà été analysé.
+    func allCached() -> [UUID: TrackAnalysis] { cache }
+
     func analysis(of track: Track) -> TrackAnalysis {
         if let hit = cache[track.id] { return hit }
         let result = Self.analyze(url: track.fileURL)

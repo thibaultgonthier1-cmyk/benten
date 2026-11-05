@@ -59,48 +59,7 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $router.tab) {
-                // Chaque onglet réserve en bas la place du mini-lecteur (posé une seule fois,
-                // plus bas) : la barre d'onglets reste toujours accessible, réglages compris.
-                LibraryView()
-                    .miniPlayerSpacer()
-                    .tabItem { Label("Bibliothèque", systemImage: "square.stack.fill") }
-                    .tag(AppRouter.Tab.library)
-
-                FavoritesView()
-                    .miniPlayerSpacer()
-                    .tabItem { Label("Favoris", systemImage: "heart.fill") }
-                    .tag(AppRouter.Tab.favorites)
-
-                PlaylistsView()
-                    .miniPlayerSpacer()
-                    .tabItem { Label("Playlists", systemImage: "music.note.list") }
-                    .tag(AppRouter.Tab.playlists)
-
-                SearchView()
-                    .miniPlayerSpacer()
-                    .tabItem { Label("Recherche", systemImage: "magnifyingglass") }
-                    .tag(AppRouter.Tab.search)
-
-                SettingsView()
-                    .miniPlayerSpacer()
-                    .tabItem { Label("Réglages", systemImage: "gearshape.fill") }
-                    .tag(AppRouter.Tab.settings)
-            }
-            .tint(Theme.accent)
-            .onChange(of: router.tab) { _, _ in Haptics.choose() }
-
-            // UN SEUL mini-lecteur, permanent, posé juste au-dessus de la barre d'onglets : il ne
-            // se recrée plus à chaque navigation (avant, un exemplaire par onglet apparaissait
-            // avant le reste de l'écran). Caché quand le clavier est ouvert.
-            // Il RESTE affiché sous le lecteur plein écran (qui le recouvre) : à la fermeture, le
-            // plein écran redescend et découvre le mini-lecteur déjà en place — plus de saut.
-            if player.current != nil && !keyboardVisible {
-                MiniPlayer()
-                    .padding(.bottom, tabBarHeight + 6)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(5)
-            }
+            shell
 
             if player.current != nil && player.showFullScreen {
                 NowPlayingView()
@@ -139,6 +98,71 @@ struct RootView: View {
             playlists.prune(keeping: library.tracks)
             playlists.buildGenrePlaylists(library: library)
         }
+    }
+
+    /// iOS 26 : la VRAIE barre d'Apple Music — barre d'onglets en verre (Liquid Glass) qui se
+    /// réduit quand on fait défiler, et mini-lecteur intégré au-dessus d'elle par le système
+    /// (placement, animation et défilement gérés par iOS : plus aucun décalage ni saut).
+    /// iOS 17–18 : mini-lecteur maison posé au-dessus des onglets.
+    @ViewBuilder private var shell: some View {
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            tabs
+                .tabBarMinimizeBehavior(.onScrollDown)
+                .tabViewBottomAccessory { MiniPlayerAccessory() }
+        } else {
+            legacyShell
+        }
+        #else
+        legacyShell
+        #endif
+    }
+
+    @ViewBuilder private var legacyShell: some View {
+        ZStack(alignment: .bottom) {
+            tabs
+            // UN SEUL mini-lecteur, permanent, posé juste au-dessus de la barre d'onglets.
+            // Il RESTE affiché sous le lecteur plein écran : à la fermeture, plus de saut.
+            if player.current != nil && !keyboardVisible {
+                MiniPlayer()
+                    .padding(.bottom, tabBarHeight + 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(5)
+            }
+        }
+    }
+
+    private var tabs: some View {
+            TabView(selection: $router.tab) {
+                // Chaque onglet réserve en bas la place du mini-lecteur (posé une seule fois,
+                // plus bas) : la barre d'onglets reste toujours accessible, réglages compris.
+                LibraryView()
+                    .miniPlayerSpacer()
+                    .tabItem { Label("Bibliothèque", systemImage: "square.stack.fill") }
+                    .tag(AppRouter.Tab.library)
+
+                FavoritesView()
+                    .miniPlayerSpacer()
+                    .tabItem { Label("Favoris", systemImage: "heart.fill") }
+                    .tag(AppRouter.Tab.favorites)
+
+                PlaylistsView()
+                    .miniPlayerSpacer()
+                    .tabItem { Label("Playlists", systemImage: "music.note.list") }
+                    .tag(AppRouter.Tab.playlists)
+
+                SearchView()
+                    .miniPlayerSpacer()
+                    .tabItem { Label("Recherche", systemImage: "magnifyingglass") }
+                    .tag(AppRouter.Tab.search)
+
+                SettingsView()
+                    .miniPlayerSpacer()
+                    .tabItem { Label("Réglages", systemImage: "gearshape.fill") }
+                    .tag(AppRouter.Tab.settings)
+            }
+            .tint(Theme.accent)
+            .onChange(of: router.tab) { _, _ in Haptics.choose() }
     }
 }
 

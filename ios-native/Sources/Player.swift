@@ -363,6 +363,19 @@ final class Player: NSObject, ObservableObject {
     private var tapInstalled = false
     private var stalledTicks = 0
 
+    /// À partir de cette place dans `order`, le lecteur CHOISIT LUI-MÊME l'ordre (aléatoire, ou
+    /// morceaux ajoutés par la lecture continue) : le suivant est celui qui se mixe le mieux.
+    /// Avant, une file jouée dans l'ordre (album, playlist) n'est jamais réordonnée.
+    private var freeOrderFrom = Int.max
+    /// Place dans `queue` où commencent les morceaux ajoutés par la lecture continue.
+    private var extendedFrom: Int?
+    /// Automate des transitions : tourne sur son propre fil temps réel (5 ms), plus jamais sur le
+    /// fil de l'interface (avant, un défilement ou une animation faisait « sauter » les fondus).
+    private let automator = MixAutomator()
+    /// Retour progressif au tempo d'origine après un mix (calcul exact de la position).
+    private var glide: (host: Double, from: Double, length: Double)?
+    private static let glideLength = 6.0
+
     override init() {
         super.init()
         configureEngine()
@@ -376,6 +389,15 @@ final class Player: NSObject, ObservableObject {
         // Mode .common : le minuteur tourne aussi PENDANT un défilement.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+
+        let analyzer = self.analyzer
+        Task { [weak self] in
+            let stored = await analyzer.allCached()
+            guard let self else { return }
+            for (id, analysis) in stored where self.analyses[id] == nil { self.analyses[id] = analysis }
+            self.pickSmartNext()
+            self.refreshPlan()
+        }
     }
 
     private func configureEngine() {
@@ -639,9 +661,106 @@ final class Player: NSObject, ObservableObject {
         if shuffle {
             indices.shuffle()
             if let at = indices.firstIndex(of: queuePosition), at != 0 { indices.swapAt(0, at) }
+            freeOrderFrom = 0
+        } else {
+            freeOrderFrom = extendedFrom ?? Int.max
         }
         order = indices
+        pickSmartNext()
         refreshPlan()
+    }
+
+    // MARK: - Choix du morceau suivant (aléatoire / lecture continue)
+
+    /// Note de compatibilité de mix entre deux morceaux (0…1), comme un DJ la ferait :
+    /// tempo (±5 % idéal, demi/double tempo compris), tonalité (roue Camelot : même tonalité ou
+    /// voisine = parfait), et énergie (volume perçu proche).
+    nonisolated static func mixScore(from a: TrackAnalysis?, to b: TrackAnalysis?) -> Double {
+        var score = 0.0
+        if let x = a?.bpm, let y = b?.bpm, x > 0, y > 0 {
+            let distance = abs(log(AudioMath.tempoRatio(outgoing: x, incoming: y)))
+            score += 0.5 * exp(-pow(distance / 0.05, 2))
+        } else {
+            score += 0.5 * 0.3
+        }
+        if let harmonic = AudioMath.harmonicDistance(a?.key, b?.key) {
+            let table: [Double] = [1.0, 0.9, 0.5, 0.3, 0.2, 0.12, 0.08]
+            score += 0.3 * table[min(harmonic, table.count - 1)]
+        } else {
+            score += 0.3 * 0.4
+        }
+        if let la = a?.loudness, let lb = b?.loudness, la > 0, lb > 0 {
+            let decibels = abs(20 * log10(lb / la))
+            score += 0.2 * exp(-pow(decibels / 6, 2))
+        } else {
+            score += 0.2 * 0.5
+        }
+        return score
+    }
+
+    /// En aléatoire et en lecture continue, le SUIVANT n'est plus tiré au hasard : parmi les
+    /// morceaux pas encore joués, on prend l'un des meilleurs pour le mix (BPM, tonalité, énergie,
+    /// même genre, artiste différent), avec une part de hasard entre les meilleurs pour ne jamais
+    /// tourner en rond. Jamais modifié quand la transition est imminente.
+    private func pickSmartNext() {
+        guard repeatMode != .one, !fading, let current,
+              let at = order.firstIndex(of: queuePosition),
+              at + 1 < order.count, at + 1 >= freeOrderFrom else { return }
+        if let plan, planTrackID == current.id, livePosition() > plan.exitAt - 12 { return }
+
+        let from = analyses[current.id]
+        let prepared = PlaylistStore.preparedGenreIDs
+        let currentIsGenre = PlaylistStore.isGenreTrack(current, prepared: prepared)
+        let recentIDs = Set(history.prefix(4))
+        let recentArtists = Set(queue.filter { recentIDs.contains($0.id) }.map(\.artist))
+
+        var scored: [(position: Int, score: Double)] = []
+        for offset in 0..<min(400, order.count - at - 1) {
+            let position = at + 1 + offset
+            let index = order[position]
+            guard queue.indices.contains(index) else { continue }
+            let track = queue[index]
+            guard track.id != current.id else { continue }
+            var score = Self.mixScore(from: from, to: analyses[track.id])
+            if track.artist == current.artist {
+                score *= 0.8
+            } else if recentArtists.contains(track.artist) {
+                score *= 0.9
+            }
+            if PlaylistStore.isGenreTrack(track, prepared: prepared) != currentIsGenre { score *= 0.75 }
+            if recentIDs.contains(track.id) { score *= 0.5 }
+            scored.append((position, score))
+        }
+        guard let best = scored.max(by: { $0.score < $1.score }) else { return }
+        let finalists = scored.filter { $0.score >= best.score * 0.9 }.sorted { $0.score > $1.score }.prefix(4)
+        let total = finalists.reduce(0) { $0 + $1.score * $1.score }
+        var roll = Double.random(in: 0..<max(total, 1e-9))
+        var chosen = best.position
+        for item in finalists {
+            roll -= item.score * item.score
+            if roll <= 0 {
+                chosen = item.position
+                break
+            }
+        }
+        if chosen != at + 1 { order.swapAt(at + 1, chosen) }
+    }
+
+    /// Morceaux de la zone libre pas encore analysés (on en analyse quelques-uns à chaque titre,
+    /// en tâche de fond : le choix devient de plus en plus juste, et c'est gardé pour toujours).
+    private func candidatesToAnalyze(limit: Int, excluding: Set<UUID>) -> [Track] {
+        guard repeatMode != .one, let at = order.firstIndex(of: queuePosition),
+              at + 1 < order.count, at + 1 >= freeOrderFrom else { return [] }
+        var result: [Track] = []
+        for position in order[(at + 1)...].shuffled() {
+            guard queue.indices.contains(position) else { continue }
+            let track = queue[position]
+            if analyses[track.id] == nil, !excluding.contains(track.id) {
+                result.append(track)
+                if result.count >= limit { break }
+            }
+        }
+        return result
     }
 
     /// Prochain morceau que jouera l'automix. En « répéter ce titre », c'est le morceau lui-même :
@@ -675,6 +794,7 @@ final class Player: NSObject, ObservableObject {
     func play(_ tracks: [Track], startingAt startIndex: Int) {
         guard !tracks.isEmpty else { return }
         queue = tracks
+        extendedFrom = nil
         queuePosition = min(max(0, startIndex), tracks.count - 1)
         failedLoads = 0
         rebuildOrder()
@@ -684,6 +804,7 @@ final class Player: NSObject, ObservableObject {
     func playShuffled(_ tracks: [Track]) {
         guard !tracks.isEmpty else { return }
         queue = tracks
+        extendedFrom = nil
         queuePosition = Int.random(in: 0..<tracks.count)
         failedLoads = 0
         if shuffle { rebuildOrder() } else { shuffle = true }
@@ -732,6 +853,7 @@ final class Player: NSObject, ObservableObject {
         clock.duration = duration
         remember(track)
         extendQueueIfNeeded()
+        pickSmartNext()
         updateNowPlaying()
         refreshPlan()
         analyzeAhead()
@@ -756,15 +878,18 @@ final class Player: NSObject, ObservableObject {
             if sameGenre.count >= 5 { pool = sameGenre }
         }
         pool.shuffle()
-        var picks = Array(pool.prefix(12))
-        if let bpm = analyses[current.id]?.bpm {
-            func distance(_ track: Track) -> Double {
-                guard let other = analyses[track.id]?.bpm else { return 0.5 }
-                return abs(log(AudioMath.tempoRatio(outgoing: bpm, incoming: other)))
-            }
-            picks.sort { distance($0) < distance($1) }
+        // Les 16 qui se mixent le mieux avec le morceau en cours (BPM, tonalité, énergie) + 8 au
+        // hasard pour la découverte. L'ordre exact est ensuite choisi titre après titre.
+        let from = analyses[current.id]
+        let ranked = pool.prefix(600).sorted {
+            Self.mixScore(from: from, to: analyses[$0.id]) > Self.mixScore(from: from, to: analyses[$1.id])
         }
+        var picks = Array(ranked.prefix(16))
+        let chosen = Set(picks.map(\.id))
+        picks += pool.filter { !chosen.contains($0.id) }.prefix(8)
         let base = queue.count
+        if extendedFrom == nil { extendedFrom = base }
+        freeOrderFrom = min(freeOrderFrom, order.count)
         queue.append(contentsOf: picks)
         order.append(contentsOf: base..<queue.count)
     }
@@ -782,9 +907,11 @@ final class Player: NSObject, ObservableObject {
     private func analyzeAhead() {
         guard let current else { return }
         let chain = [current] + upcoming(5)
+        let candidates = candidatesToAnalyze(limit: 10, excluding: Set(chain.map(\.id)))
         let analyzer = self.analyzer
         analysisTask?.cancel()
-        analysisTask = Task { [weak self] in
+        // Priorité « utilitaire » : l'analyse ne prend jamais la main sur l'interface.
+        analysisTask = Task(priority: .utility) { [weak self] in
             for (index, track) in chain.enumerated() {
                 if Task.isCancelled { return }
                 let result = await analyzer.analysis(of: track)
@@ -803,6 +930,30 @@ final class Player: NSObject, ObservableObject {
                     for size in [CGFloat(180), 260, 1000] {
                         _ = await ArtworkCache.shared.load(for: track, maxPixel: size)
                     }
+                }
+            }
+
+            // Aléatoire / lecture continue : on apprend de nouveaux morceaux, puis on re-choisit
+            // le suivant si un meilleur raccord existe (jamais quand le mix est imminent).
+            guard !candidates.isEmpty else { return }
+            for track in candidates {
+                if Task.isCancelled { return }
+                let result = await analyzer.analysis(of: track)
+                guard let self else { return }
+                self.analyses[track.id] = result
+            }
+            guard let self, !Task.isCancelled else { return }
+            let before = self.upcomingTrack?.id
+            self.pickSmartNext()
+            if let next = self.upcomingTrack, next.id != before {
+                self.refreshPlan()
+                diag("suivant choisi pour le mix : « \(next.title) » (\(self.analyses[next.id]?.bpm.map { String(format: "%.1f BPM", $0) } ?? "BPM ?"))")
+                if self.analyses[next.id] == nil {
+                    self.analyses[next.id] = await analyzer.analysis(of: next)
+                    self.refreshPlan()
+                }
+                for size in [CGFloat(180), 260, 1000] {
+                    _ = await ArtworkCache.shared.load(for: next, maxPixel: size)
                 }
             }
         }
@@ -870,6 +1021,7 @@ final class Player: NSObject, ObservableObject {
                 var indices = Array(queue.indices)
                 indices.shuffle()
                 order = indices
+                freeOrderFrom = 0
             }
             queuePosition = order.first ?? 0
         } else {
@@ -1018,11 +1170,25 @@ final class Player: NSObject, ObservableObject {
         anchorHost = hostNow()
         anchorPosition = position
         anchorRate = rate
+        glide = nil
     }
 
     private func livePosition() -> Double {
         if !playing { return pausedPosition ?? clock.position }
-        return min(duration, max(0, anchorPosition + (hostNow() - anchorHost) * anchorRate))
+        let elapsed = max(0, hostNow() - anchorHost)
+        var advanced = elapsed * anchorRate
+        if let glide, glide.host == anchorHost {
+            // Vitesse r → 1 en courbe douce s(u) = 3u² − 2u³ : position = intégrale exacte.
+            let length = glide.length
+            let r = glide.from
+            if elapsed < length {
+                let u = elapsed / length
+                advanced = r * elapsed + (1 - r) * length * (u * u * u - u * u * u * u / 2)
+            } else {
+                advanced = r * length + (1 - r) * length * 0.5 + (elapsed - length)
+            }
+        }
+        return min(duration, max(0, anchorPosition + advanced))
     }
 
     /// Position EXACTE d'une platine, lue sur l'horloge de rendu du moteur, avec l'heure système
@@ -1124,105 +1290,121 @@ final class Player: NSObject, ObservableObject {
 
         mixingInto = incomingTrack
         diag("mix \(plan.style) → « \(incomingTrack.title) » : sortie \(String(format: "%.1f", plan.exitAt)) s, entrée \(String(format: "%.1f", plan.entryAt)) s, \(String(format: "%.1f", plan.length)) s, tempo ×\(String(format: "%.3f", plan.tempoRatio))")
-        Task {
-            await runMix(plan: plan, token: token, outgoing: outgoing, incoming: incoming,
-                         track: incomingTrack, file: file, index: nextIndex,
-                         start: AVAudioTime.seconds(forHostTime: startHost))
-        }
+        runMix(plan: plan, token: token, outgoing: outgoing, incoming: incoming,
+               track: incomingTrack, file: file, index: nextIndex,
+               start: AVAudioTime.seconds(forHostTime: startHost))
     }
 
-    /// Exécute les courbes de la transition (volumes, bass swap, filtre), bascule l'état sur le
-    /// nouveau morceau au milieu, puis ramène tempo et niveau à la normale en douceur.
+    /// Exécute la transition. Les courbes (volumes, bass swap, filtre) sont appliquées toutes les
+    /// 5 ms par l'automate, sur un fil temps réel : rien ne peut les faire hoqueter (défilement,
+    /// animation, écran verrouillé). Le fil principal ne fait que basculer l'affichage au milieu.
     private func runMix(plan: MixPlan, token: Int, outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode,
-                        track: Track, file: AVAudioFile, index: Int, start: Double) async {
-        let length = max(0.001, plan.length)
+                        track: Track, file: AVAudioFile, index: Int, start: Double) {
         let outFX = fx(for: outgoing)
         let inFX = fx(for: incoming)
-        var switched = false
-
-        while true {
-            guard token == fadeToken else { return }
-            let elapsed = hostNow() - start
-            let t = elapsed / length
-            if elapsed >= 0 {
-                if plan.style != .gapless {
-                    applyCurves(plan, t: min(1, t), outgoing: outgoing, incoming: incoming, outFX: outFX, inFX: inFX)
-                }
-                // Mix entre deux morceaux : bascule au milieu. Boucle / enchaînement sans blanc :
-                // bascule DÈS que le début se fait entendre (la barre repart pile avec le son).
-                if !switched && (plan.style == .gapless || plan.style == .loop || t >= 0.5) {
-                    switched = true
-                    activeDeck = incoming
-                    activeFile = file
-                    current = track
-                    queuePosition = index
-                    setAnchor(plan.entryAt + max(0, elapsed) * plan.tempoRatio, rate: plan.tempoRatio)
-                    pausedPosition = nil
-                    currentBPM = analyses[track.id]?.bpm
-                    currentKey = analyses[track.id]?.key
-                    diag("bascule sur « \(track.title) »")
-                    clock.duration = duration
-                    clock.position = livePosition()
-                    remember(track)
-                    extendQueueIfNeeded()
-                    updateNowPlaying()
-                }
-                if plan.style == .gapless || t >= 1 { break }
+        let gain = normalizeVolume ? 1 : plan.levelGain
+        let style = plan.style
+        // Mix entre deux morceaux : bascule au milieu. Boucle / enchaînement sans blanc : bascule
+        // DÈS que le début se fait entendre (la barre repart pile avec le son).
+        let switchAt: Double = (style == .gapless || style == .loop) ? 0 : 0.5
+        automator.run(
+            start: start,
+            length: style == .gapless ? 0 : max(0.001, plan.length),
+            switchAt: switchAt,
+            apply: { t in
+                Player.applyCurves(style: style, t: t, gain: gain, outgoing: outgoing, incoming: incoming, outFX: outFX, inFX: inFX)
+            },
+            onSwitch: { [weak self] in
+                guard let self, token == self.fadeToken else { return }
+                self.switchToIncoming(plan: plan, incoming: incoming, file: file, track: track, index: index, start: start)
+            },
+            onDone: { [weak self] in
+                guard let self, token == self.fadeToken else { return }
+                self.finishMix(plan: plan, token: token, outgoing: outgoing, incoming: incoming)
             }
-            try? await Task.sleep(nanoseconds: 12_000_000)
-        }
-        guard token == fadeToken else { return }
+        )
+    }
 
-        if plan.style != .gapless {
-            outgoing.stop()
-        }
+    /// Bascule l'état du lecteur sur le morceau entrant (titre, pochette, barre, écran verrouillé).
+    private func switchToIncoming(plan: MixPlan, incoming: AVAudioPlayerNode, file: AVAudioFile,
+                                  track: Track, index: Int, start: Double) {
+        let elapsed = max(0, hostNow() - start)
+        activeDeck = incoming
+        activeFile = file
+        current = track
+        queuePosition = index
+        setAnchor(plan.entryAt + elapsed * plan.tempoRatio, rate: plan.tempoRatio)
+        pausedPosition = nil
+        currentBPM = analyses[track.id]?.bpm
+        currentKey = analyses[track.id]?.key
+        diag("bascule sur « \(track.title) »")
+        clock.duration = duration
+        clock.position = livePosition()
+        remember(track)
+        extendQueueIfNeeded()
+        updateNowPlaying()
+    }
+
+    /// Fin du chevauchement : la sortante s'arrête, puis l'entrante revient en douceur (6 s) à
+    /// son tempo d'origine — sur l'automate aussi, avec une position calculée exactement.
+    private func finishMix(plan: MixPlan, token: Int, outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode) {
+        if plan.style != .gapless { outgoing.stop() }
         outgoing.volume = 0
-        resetFX(outFX)
+        resetFX(fx(for: outgoing))
         pitch(for: outgoing).rate = 1
+        let inFX = fx(for: incoming)
         inFX.bands[0].gain = 0
         inFX.bands[1].bypass = true
 
-        // Retour progressif au tempo d'origine et au niveau propre de l'entrante (6 s, courbe douce).
         let ratio = plan.tempoRatio
-        // Volume déjà égalisé par morceau → aucun réajustement après le mix (avant, l'entrante
-        // remontait à son volume d'origine et pouvait « prendre le dessus »).
+        // Volume déjà égalisé par morceau → aucun réajustement après le mix.
         let gain = (plan.style == .gapless || normalizeVolume) ? 1 : plan.levelGain
-        if abs(ratio - 1) > 0.0005 || abs(gain - 1) > 0.01 {
-            let glideStart = hostNow()
-            while true {
-                guard token == fadeToken else { return }
-                let u = min(1, (hostNow() - glideStart) / 6)
-                let smooth = u * u * (3 - 2 * u)
-                let rate = ratio + (1 - ratio) * smooth
-                let position = livePosition()
-                pitch(for: incoming).rate = Float(rate)
-                setAnchor(position, rate: rate)
-                incoming.volume = Float(gain + (1 - gain) * smooth)
-                if u >= 1 { break }
-                try? await Task.sleep(nanoseconds: 30_000_000)
-            }
+        guard abs(ratio - 1) > 0.0005 || abs(gain - 1) > 0.01 else {
+            completeMix(incoming: incoming)
+            return
         }
-        guard token == fadeToken else { return }
+        setAnchor(livePosition(), rate: ratio)
+        glide = (anchorHost, ratio, Self.glideLength)
+        let pitchUnit = pitch(for: incoming)
+        automator.run(
+            start: anchorHost,
+            length: Self.glideLength,
+            switchAt: 2,
+            apply: { u in
+                let smooth = u * u * (3 - 2 * u)
+                pitchUnit.rate = Float(ratio + (1 - ratio) * smooth)
+                incoming.volume = Float(gain + (1 - gain) * smooth)
+            },
+            onSwitch: {},
+            onDone: { [weak self] in
+                guard let self, token == self.fadeToken else { return }
+                self.completeMix(incoming: incoming)
+            }
+        )
+    }
+
+    private func completeMix(incoming: AVAudioPlayerNode) {
         incoming.volume = 1
         pitch(for: incoming).rate = 1
         setAnchor(livePosition(), rate: 1)
         fading = false
         mixingInto = nil
         diag("mix terminé")
+        pickSmartNext()
         refreshPlan()
         analyzeAhead()
     }
 
-    /// Courbes de transition, selon le style.
-    private func applyCurves(_ plan: MixPlan, t: Double, outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode,
-                             outFX: AVAudioUnitEQ, inFX: AVAudioUnitEQ) {
-        let gain = normalizeVolume ? 1 : plan.levelGain
-        switch plan.style {
+    /// Courbes de transition, selon le style. Appelée par l'automate (hors fil principal).
+    nonisolated private static func applyCurves(style: MixPlan.Style, t: Double, gain: Double,
+                                                outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode,
+                                                outFX: AVAudioUnitEQ, inFX: AVAudioUnitEQ) {
+        switch style {
         case .beatmix:
             // 1re moitié : l'entrante monte (basses coupées), la sortante cède un peu de place.
-            // Milieu : BASS SWAP, les deux à 0,82 (volume total ≈ +1 dB seulement, contre ~+3 dB
-            // avant). 2nde moitié : la sortante s'efface, l'entrante prend toute la place.
-            // Jamais deux grosses caisses à la fois, jamais un morceau qui écrase l'autre.
+            // Milieu : BASS SWAP, les deux à 0,82 (volume total ≈ +1 dB seulement). 2nde moitié :
+            // la sortante s'efface, l'entrante prend toute la place. Jamais deux grosses caisses
+            // à la fois, jamais un morceau qui écrase l'autre.
             if t < 0.5 {
                 let rise = t / 0.5
                 incoming.volume = Float(0.82 * sin(rise * .pi / 2) * gain)
@@ -1259,6 +1441,7 @@ final class Player: NSObject, ObservableObject {
     /// Arrête net une transition : l'autre platine se tait, la platine active repart à plein.
     private func cancelFade() {
         fadeToken += 1
+        automator.cancel()
         if mixingInto != nil { mixingInto = nil }
         guard fading else { return }
         diag("mix interrompu (action manuelle ou relance)")
@@ -1293,6 +1476,67 @@ final class Player: NSObject, ObservableObject {
     }
 
     var progress: Double { clock.progress }
+}
+
+// MARK: - Automate des transitions (fil temps réel)
+
+/// Applique une courbe de transition toutes les 5 ms sur une file dédiée haute priorité, avec
+/// l'horloge système (la même que celle du moteur audio). Les événements « bascule » et « fin »
+/// sont renvoyés au fil principal, dans l'ordre. `cancel()` est synchrone : après son retour,
+/// plus aucune courbe n'est appliquée.
+final class MixAutomator: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "benten.mix.automation", qos: .userInteractive)
+    private var timer: DispatchSourceTimer?
+    private var generation = 0
+
+    func run(start: Double, length: Double, switchAt: Double,
+             apply: @escaping @Sendable (Double) -> Void,
+             onSwitch: @escaping @MainActor () -> Void,
+             onDone: @escaping @MainActor () -> Void) {
+        queue.sync {
+            timer?.cancel()
+            generation += 1
+            let current = generation
+            var switched = false
+            let source = DispatchSource.makeTimerSource(flags: .strict, queue: queue)
+            source.schedule(deadline: .now(), repeating: .milliseconds(5), leeway: .milliseconds(1))
+            source.setEventHandler { [weak self] in
+                guard let self, self.generation == current else { return }
+                let elapsed = AVAudioTime.seconds(forHostTime: mach_absolute_time()) - start
+                guard elapsed >= 0 else { return }
+                let t = length > 0 ? min(1, elapsed / length) : 1
+                apply(t)
+                var events: [@MainActor () -> Void] = []
+                if !switched && t >= switchAt {
+                    switched = true
+                    events.append(onSwitch)
+                }
+                if t >= 1 {
+                    self.timer?.cancel()
+                    self.timer = nil
+                    self.generation += 1
+                    events.append(onDone)
+                }
+                if !events.isEmpty {
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            for event in events { event() }
+                        }
+                    }
+                }
+            }
+            timer = source
+            source.resume()
+        }
+    }
+
+    func cancel() {
+        queue.sync {
+            generation += 1
+            timer?.cancel()
+            timer = nil
+        }
+    }
 }
 
 // MARK: - Analyse de spectre (fil audio)
