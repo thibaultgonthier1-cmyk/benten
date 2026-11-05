@@ -1256,11 +1256,33 @@ final class Player: NSObject, ObservableObject {
 
     // MARK: - Transition
 
-    private func startMix(_ plan: MixPlan) {
+    private func startMix(_ original: MixPlan) {
         guard let nextIndex = nextIndexInOrder, queue.indices.contains(nextIndex),
               let outgoing = activeDeck else { return }
         let incomingTrack = queue[nextIndex]
         guard let file = try? AVAudioFile(forReading: incomingTrack.fileURL) else { return }
+
+        // Position RÉELLE de la sortante (horloge de rendu du moteur).
+        let render = renderPosition(of: outgoing)
+        let position = render.map { $0.position + max(0, hostNow() - AVAudioTime.seconds(forHostTime: $0.host)) } ?? livePosition()
+        var plan = original
+        if plan.style == .beatmix, position > plan.exitAt - 0.04 {
+            // Démarrage en RETARD (analyse finie tard, reprise, seek) : on ne lance jamais
+            // l'entrante à contretemps. Sortie repoussée au PROCHAIN temps fort de mesure s'il reste
+            // la place ; sinon fondu filtré court, sans calage.
+            let shift = plan.outBar > 0 ? ((position + 0.08 - plan.exitAt) / plan.outBar).rounded(.up) * plan.outBar : .infinity
+            if shift.isFinite, plan.exitAt + shift + Double(plan.bars) * plan.outBar <= duration - 0.05 {
+                plan.exitAt += shift
+                diag("mix en retard : sortie repoussée de \(Int((shift / plan.outBar).rounded())) mesure(s), toujours sur un temps fort")
+            } else {
+                plan.style = .filter
+                plan.outRate = 1
+                plan.bassSwap = false
+                plan.bars = 0
+                plan.length = min(plan.length, 6)
+                diag("mix en retard : plus de place pour un mix calé → fondu filtré")
+            }
+        }
 
         fadeToken += 1
         let token = fadeToken
@@ -1285,7 +1307,7 @@ final class Player: NSObject, ObservableObject {
         // Heure exacte où la sortante atteint le point de sortie (horloge de rendu du moteur).
         let nowHost = mach_absolute_time()
         var startHost: UInt64
-        if let render = renderPosition(of: outgoing) {
+        if let render {
             let delta = max(0, plan.exitAt - render.position)
             startHost = render.host + AVAudioTime.hostTime(forSeconds: delta)
         } else {
@@ -1299,7 +1321,9 @@ final class Player: NSObject, ObservableObject {
 
         // Horloge d'affichage de la sortante : vitesse 1 jusqu'au point de sortie, puis
         // 1 → R en courbe en S (intégrale exacte), jusqu'à la bascule.
-        let exitPosition = start - hostNow() + livePosition()
+        // Recalée sur la position RÉELLE du moteur (aucune dérive d'affichage reportée).
+        let exitPosition = render.map { $0.position + (start - AVAudioTime.seconds(forHostTime: $0.host)) }
+            ?? (start - hostNow() + livePosition())
         anchorHost = start
         anchorPosition = exitPosition
         anchorRate = 1
@@ -1322,11 +1346,25 @@ final class Player: NSObject, ObservableObject {
         let style = plan.style
         // Mix entre deux morceaux : bascule au milieu. Boucle / enchaînement sans blanc : bascule
         // DÈS que le début se fait entendre (la barre repart pile avec le son).
-        let switchAt: Double = (style == .gapless || style == .loop) ? 0 : 0.5
+        let r = style == .beatmix ? plan.outRate : 1
+        // MILIEU MUSICAL du mix : l'instant où la sortante a joué la MOITIÉ des mesures. Avec un
+        // tempo qui glisse, ce n'est pas la moitié du temps : on résout (Newton)
+        //   u + (R − 1)·(u³ − u⁴/2) = (1 + R)/4.
+        var mid = 0.5
+        if r != 1 {
+            var u = 0.5
+            let target = (1 + r) / 4
+            for _ in 0..<8 {
+                let f = u + (r - 1) * (u * u * u - u * u * u * u / 2) - target
+                let d = 1 + (r - 1) * (3 * u * u - 2 * u * u * u)
+                u -= f / d
+            }
+            mid = min(0.9, max(0.1, u))
+        }
+        let switchAt: Double = (style == .gapless || style == .loop) ? 0 : mid
         // Échange des basses sur le DERNIER temps avant la mesure du milieu : les basses de
         // l'entrante arrivent pile sur le temps fort (un swap à côté du temps sonne comme un raté).
         let swapWidth = plan.bars > 0 ? 1 / Double(4 * plan.bars) : 0.12
-        let r = style == .beatmix ? plan.outRate : 1
         let outPitch = pitch(for: outgoing)
         let inPitch = pitch(for: incoming)
         automator.run(
@@ -1334,7 +1372,7 @@ final class Player: NSObject, ObservableObject {
             length: style == .gapless ? 0 : max(0.001, plan.length),
             switchAt: switchAt,
             apply: { t in
-                Player.applyCurves(style: style, t: t, gain: gain, swapWidth: swapWidth, outgoing: outgoing, incoming: incoming, outFX: outFX, inFX: inFX)
+                Player.applyCurves(style: style, t: t, gain: gain, mid: mid, swapWidth: swapWidth, outgoing: outgoing, incoming: incoming, outFX: outFX, inFX: inFX)
                 if r != 1 {
                     // Tempo commun B(t) = B₁·(1 + (R − 1)·s(t)) : appliqué aux DEUX platines dans
                     // le même pas de 5 ms → leurs temps restent superposés en permanence.
@@ -1400,13 +1438,14 @@ final class Player: NSObject, ObservableObject {
         fading = false
         mixingInto = nil
         diag("mix terminé")
+        updateNowPlaying()
         pickSmartNext()
         refreshPlan()
         analyzeAhead()
     }
 
     /// Courbes de transition, selon le style. Appelée par l'automate (hors fil principal).
-    nonisolated private static func applyCurves(style: MixPlan.Style, t: Double, gain: Double, swapWidth: Double,
+    nonisolated private static func applyCurves(style: MixPlan.Style, t: Double, gain: Double, mid: Double, swapWidth: Double,
                                                 outgoing: AVAudioPlayerNode, incoming: AVAudioPlayerNode,
                                                 outFX: AVAudioUnitEQ, inFX: AVAudioUnitEQ) {
         switch style {
@@ -1415,16 +1454,16 @@ final class Player: NSObject, ObservableObject {
             // Milieu : BASS SWAP, les deux à 0,82 (volume total ≈ +1 dB seulement). 2nde moitié :
             // la sortante s'efface, l'entrante prend toute la place. Jamais deux grosses caisses
             // à la fois, jamais un morceau qui écrase l'autre.
-            if t < 0.5 {
-                let rise = t / 0.5
+            if t < mid {
+                let rise = t / mid
                 incoming.volume = Float(0.82 * sin(rise * .pi / 2) * gain)
                 outgoing.volume = Float(1 - 0.18 * rise)
             } else {
-                let fall = (t - 0.5) / 0.5
+                let fall = (t - mid) / (1 - mid)
                 incoming.volume = Float((0.82 + 0.18 * fall) * gain)
                 outgoing.volume = Float(0.82 * cos(fall * .pi / 2))
             }
-            let swap = min(1, max(0, (t - (0.5 - swapWidth)) / swapWidth))
+            let swap = min(1, max(0, (t - (mid - swapWidth)) / swapWidth))
             inFX.bands[0].gain = Float(-26 * (1 - swap))
             outFX.bands[0].gain = Float(-26 * swap)
         case .filter:

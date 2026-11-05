@@ -105,7 +105,33 @@ struct HoloSheen: View {
     }
 }
 
-/// Ajoute le reflet holographique + une légère inclinaison 3D qui suit le téléphone.
+/// Abonnement au capteur d'inclinaison : actif SEULEMENT si la vue est affichée, l'app au premier
+/// plan et `wanted` vrai. En arrière-plan (écran verrouillé, musique qui tourne), le capteur est
+/// coupé : zéro batterie gaspillée.
+struct TiltSubscription: ViewModifier {
+    let wanted: Bool
+    @Environment(\.scenePhase) private var phase
+    @State private var visible = false
+    @State private var holding = false
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { visible = true; sync() }
+            .onDisappear { visible = false; sync() }
+            .onChange(of: phase) { _, _ in sync() }
+            .onChange(of: wanted) { _, _ in sync() }
+    }
+
+    private func sync() {
+        let should = visible && wanted && phase == .active
+        guard should != holding else { return }
+        holding = should
+        if should { TiltModel.shared.retain() } else { TiltModel.shared.release() }
+    }
+}
+
+/// Ajoute le reflet holographique + une légère inclinaison 3D qui suit le téléphone. Le reflet
+/// est découpé EXACTEMENT à la forme de la pochette (carré arrondi, rond…) : rien ne déborde.
 struct HolographicModifier: ViewModifier {
     @ObservedObject private var tilt = TiltModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -119,11 +145,11 @@ struct HolographicModifier: ViewModifier {
                         HoloSheen(time: context.date.timeIntervalSinceReferenceDate,
                                   tiltX: tilt.x, tiltY: tilt.y, strength: 0.8)
                     }
+                    .mask(content)
                 }
                 .rotation3DEffect(.degrees(tilt.x * 7), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
                 .rotation3DEffect(.degrees(-tilt.y * 5), axis: (x: 1, y: 0, z: 0), perspective: 0.6)
-                .onAppear { tilt.retain() }
-                .onDisappear { tilt.release() }
+                .modifier(TiltSubscription(wanted: true))
         } else {
             content
         }
@@ -143,7 +169,8 @@ extension View {
 /// - parallaxe : elle glisse légèrement quand on incline le téléphone ;
 /// - reflet holographique irisé qui tourne et suit l'inclinaison ;
 /// - pulsation discrète sur le tempo du morceau.
-/// En pause, tout se fige en douceur.
+/// Le mouvement est TOUJOURS borné par le zoom : jamais de bord vide qui apparaît. En pause,
+/// tout se fige et repart exactement d'où il s'était arrêté (horloge propre, sans saut).
 struct LivingArtwork: View {
     let track: Track
     let playing: Bool
@@ -152,17 +179,23 @@ struct LivingArtwork: View {
 
     @ObservedObject private var tilt = TiltModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Horloge de l'animation : n'avance QUE pendant la lecture.
+    @State private var elapsedBeforePause: Double = 0
+    @State private var resumedAt: Date?
 
     var body: some View {
         let width = UIScreen.main.bounds.width
         TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !playing || reduceMotion)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            let zoom = 1.09 + 0.045 * sin(t * 2 * .pi / 21)
+            let t = elapsedBeforePause + (resumedAt.map { context.date.timeIntervalSince($0) } ?? 0)
+            let zoom = 1.11 + 0.025 * sin(t * 2 * .pi / 21)
             let beat = 60 / max(60, min(180, bpm ?? 100))
-            let phase = t.truncatingRemainder(dividingBy: beat) / beat
-            let pulse = playing ? 0.012 * pow(max(0, cos(phase * 2 * .pi)), 4) : 0
-            let dx = 12 * sin(t * 2 * .pi / 17) + tilt.x * 18
-            let dy = 9 * cos(t * 2 * .pi / 23) + tilt.y * 12
+            let phase = (Date.timeIntervalSinceReferenceDate).truncatingRemainder(dividingBy: beat) / beat
+            let pulse = playing ? 0.01 * pow(max(0, cos(phase * 2 * .pi)), 4) : 0
+            // Marge disponible de chaque côté grâce au zoom : le déplacement ne la dépasse jamais.
+            let roomX = (zoom - 1) * width / 2 - 1
+            let roomY = (zoom - 1) * height / 2 - 1
+            let dx = max(-roomX, min(roomX, 9 * sin(t * 2 * .pi / 17) + tilt.x * 12))
+            let dy = max(-roomY, min(roomY, 7 * cos(t * 2 * .pi / 23) + tilt.y * 9))
             ZStack {
                 ArtworkView(track: track, maxPixel: 1000)
                     .frame(width: width, height: height)
@@ -178,8 +211,8 @@ struct LivingArtwork: View {
             LinearGradient(
                 stops: [
                     .init(color: .black, location: 0),
-                    .init(color: .black, location: 0.68),
-                    .init(color: .black.opacity(0.55), location: 0.84),
+                    .init(color: .black, location: 0.7),
+                    .init(color: .black.opacity(0.55), location: 0.86),
                     .init(color: .clear, location: 1)
                 ],
                 startPoint: .top,
@@ -188,7 +221,15 @@ struct LivingArtwork: View {
         )
         .saturation(playing ? 1 : 0.85)
         .animation(.easeInOut(duration: 0.6), value: playing)
-        .onAppear { tilt.retain() }
-        .onDisappear { tilt.release() }
+        .modifier(TiltSubscription(wanted: playing && !reduceMotion))
+        .onAppear { if playing { resumedAt = Date() } }
+        .onChange(of: playing) { _, isPlaying in
+            if isPlaying {
+                resumedAt = Date()
+            } else if let since = resumedAt {
+                elapsedBeforePause += Date().timeIntervalSince(since)
+                resumedAt = nil
+            }
+        }
     }
 }

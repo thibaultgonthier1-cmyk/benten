@@ -121,6 +121,10 @@ final class ArtworkCache {
         let width = image.width
         let height = image.height
         guard width > 16, height > 16 else { return image }
+        // Uniquement les images NETTEMENT non carrées (miniatures vidéo 16:9…) : une pochette
+        // carrée sombre n'est jamais recadrée.
+        let sourceAspect = Double(width) / Double(height)
+        guard abs(sourceAspect - 1) > 0.15 else { return image }
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let drawn: Bool = pixels.withUnsafeMutableBytes { buffer in
             guard let context = CGContext(
@@ -136,7 +140,7 @@ final class ArtworkCache {
         // Une ligne (ou colonne) est une bande si TOUS ses points sont presque noirs.
         func dark(_ x: Int, _ y: Int) -> Bool {
             let index = (y * width + x) * 4
-            return Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2]) < 3 * 26
+            return Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2]) < 3 * 18
         }
         func rowDark(_ y: Int) -> Bool {
             var x = 0
@@ -166,6 +170,9 @@ final class ArtworkCache {
         let cropWidth = right - left
         let cropHeight = bottom - top
         guard horizontal || vertical, cropWidth > width / 4, cropHeight > height / 4 else { return image }
+        // Le résultat doit être (presque) carré : c'est la vraie pochette au milieu des bandes.
+        let cropAspect = Double(cropWidth) / Double(cropHeight)
+        guard cropAspect > 0.85, cropAspect < 1.18 else { return image }
         // Mémoire du contexte et `cropping` : tous deux en lignes de haut en bas.
         let rect = CGRect(x: left, y: top, width: cropWidth, height: cropHeight)
         return image.cropping(to: rect) ?? image

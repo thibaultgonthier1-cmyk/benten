@@ -10,6 +10,10 @@ struct TrackSwipe: ViewModifier {
     let onNext: () -> Void
     let onPrevious: () -> Void
     var onUp: (() -> Void)?
+    /// Suivi du doigt (translation) et relâchement (translation, projection) : permet au lecteur
+    /// plein écran de garder « tirer vers le bas pour fermer » sur la pochette.
+    var onDrag: ((CGSize) -> Void)?
+    var onRelease: ((CGSize, CGSize) -> Void)?
     @State private var offset: CGFloat = 0
 
     func body(content: Content) -> some View {
@@ -19,6 +23,7 @@ struct TrackSwipe: ViewModifier {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 14)
                     .onChanged { value in
+                        onDrag?(value.translation)
                         let dx = value.translation.width
                         guard abs(dx) > abs(value.translation.height) else { return }
                         // Résistance : plus on tire, moins ça suit (sensation élastique).
@@ -39,6 +44,7 @@ struct TrackSwipe: ViewModifier {
                             Haptics.tap()
                             onUp()
                         }
+                        onRelease?(value.translation, value.predictedEndTranslation)
                         withAnimation(Motion.spring) { offset = 0 }
                     }
             )
@@ -46,8 +52,9 @@ struct TrackSwipe: ViewModifier {
 }
 
 extension View {
-    func trackSwipe(onNext: @escaping () -> Void, onPrevious: @escaping () -> Void, onUp: (() -> Void)? = nil) -> some View {
-        modifier(TrackSwipe(onNext: onNext, onPrevious: onPrevious, onUp: onUp))
+    func trackSwipe(onNext: @escaping () -> Void, onPrevious: @escaping () -> Void, onUp: (() -> Void)? = nil,
+                    onDrag: ((CGSize) -> Void)? = nil, onRelease: ((CGSize, CGSize) -> Void)? = nil) -> some View {
+        modifier(TrackSwipe(onNext: onNext, onPrevious: onPrevious, onUp: onUp, onDrag: onDrag, onRelease: onRelease))
     }
 
     /// Retour par glissement depuis N'IMPORTE OÙ dans l'écran (iOS 26), et toujours actif depuis
@@ -164,9 +171,10 @@ struct AlphabetIndex: View {
 @MainActor
 enum ThemeSweep {
     private static var running: SweepAnimator?
+    private static var busy = false
 
     static func run(from old: Palette, to new: Palette, apply: @escaping () -> Void) {
-        guard running == nil,
+        guard !busy, running == nil,
               let window = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
                 .flatMap(\.windows)
@@ -280,6 +288,7 @@ enum ThemeSweep {
             CATransaction.commit()
         }
 
+        busy = true
         render(0)
         Haptics.choose()
         apply()
@@ -290,6 +299,7 @@ enum ThemeSweep {
             let animator = SweepAnimator(duration: 1.05, step: render) {
                 container.removeFromSuperview()
                 running = nil
+                busy = false
                 Haptics.press()
             }
             running = animator

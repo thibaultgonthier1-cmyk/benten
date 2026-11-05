@@ -730,6 +730,9 @@ struct MixPlan: Sendable {
     var bassSwap: Bool
     /// Nombre de mesures du chevauchement (0 si non calé).
     var bars: Int
+    /// Durée d'une mesure de la sortante (s) : sert à décaler la sortie d'un nombre entier de
+    /// mesures si l'automix démarre en retard (0 = inconnue).
+    var outBar: Double = 0
 
     /// Position de la sortante où commence la rampe (= où l'automix se met en route).
     /// Vitesse r(t) = 1 + (r − 1)·s(t/D), s(u) = 3u² − 2u³ : la position avance de D·(1 + r)/2.
@@ -752,14 +755,15 @@ enum MixPlanner {
         let inStart = min(max(0, incoming.start), 8)
 
         if sameTrack {
+            // Répéter ce titre : on garde TOUTE la fin (même une coda douce) avant de reboucler.
             var length = 1.5
-            var exit = outEnd - length
+            var exit = realEnd - length
             var entry = inStart
             if beatMatch, let bpm = out.bpm {
                 let beat = 60 / bpm
                 // Raccord de 4 temps maximum, sortie sur un temps, entrée sur un temps fort.
                 length = min(max(beat * 2, 1.0), beat * 4)
-                exit = outEnd - length
+                exit = realEnd - length
                 if let anchor = out.tailDownbeat ?? out.midDownbeat {
                     exit = anchor + ((exit - anchor) / beat).rounded(.down) * beat
                 }
@@ -844,7 +848,7 @@ enum MixPlanner {
 
                 return MixPlan(style: .beatmix, exitAt: exit, entryAt: max(0, entry), length: length,
                                outRate: abs(log(outRate)) < 0.0005 ? 1 : outRate, rampLength: 0,
-                               levelGain: gain, bassSwap: true, bars: bars)
+                               levelGain: gain, bassSwap: true, bars: bars, outBar: outBar)
             }
             return filterPlan(outEnd: outEnd, outBPM: outBPM, out: out, entry: entry0, seconds: seconds, gain: gain)
         }

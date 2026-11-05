@@ -450,7 +450,7 @@ struct ArtworkView: View {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFill()
-                            .blur(radius: 14)
+                            .blur(radius: 14, opaque: true)
                             .opacity(0.75)
                         Image(uiImage: image)
                             .resizable()
@@ -734,6 +734,8 @@ struct NowPlayingView: View {
     @AppStorage("visualizer") private var visualizerOn = true
     @AppStorage("livingArtwork") private var livingArtwork = true
     @State private var dragOffset: CGFloat = 0
+    /// Suivi horizontal du doigt sur la pochette animée (retour visuel du swipe).
+    @State private var artSwipe: CGFloat = 0
     @State private var previousTaps = 0
     @State private var nextTaps = 0
     /// Couleur du morceau en cours (tirée de la pochette).
@@ -754,7 +756,9 @@ struct NowPlayingView: View {
             // Pochette ANIMÉE : bord à bord en haut de l'écran, holographique, qui respire.
             if living, let track = player.current {
                 LivingArtwork(track: track, playing: player.playing, bpm: player.currentBPM,
-                              height: screen.width + insets.top + 24)
+                              height: screen.width + insets.top * 0.6)
+                    .offset(x: artSwipe)
+                    .opacity(1 - min(0.4, Double(abs(artSwipe)) / 400))
                     .id(track.id)
                     .transition(.opacity)
                     .allowsHitTesting(false)
@@ -774,7 +778,27 @@ struct NowPlayingView: View {
                     Spacer(minLength: 10)
                     artworkSlot(track)
                         // Glisser la pochette : gauche = suivant, droite = précédent.
-                        .trackSwipe(onNext: { player.next() }, onPrevious: { player.previous(force: true) })
+                        .trackSwipe(
+                            onNext: { player.next() },
+                            onPrevious: { player.previous(force: true) },
+                            onDrag: { translation in
+                                if translation.height > 0, translation.height > abs(translation.width) {
+                                    dragOffset = translation.height
+                                } else if abs(translation.width) > abs(translation.height) {
+                                    artSwipe = translation.width / (1 + abs(translation.width) / 260)
+                                }
+                            },
+                            onRelease: { translation, projected in
+                                if translation.height > 0, translation.height > abs(translation.width) {
+                                    if translation.height > 130 || projected.height > 420 {
+                                        dismissFromDrag()
+                                    } else {
+                                        withAnimation(Motion.sheet) { dragOffset = 0 }
+                                    }
+                                }
+                                withAnimation(Motion.spring) { artSwipe = 0 }
+                            }
+                        )
                     if visualizerOn {
                         SpectrumBars(tint: tint)
                             .frame(height: 30)
