@@ -222,6 +222,23 @@ enum DemoMode {
             }
         }
 
+        if arguments.contains("-demoLoop") {
+            // « Répéter ce titre » : le morceau se mixe sur son propre début, platines enregistrées.
+            player.shuffle = false
+            player.repeatMode = .one
+            player.play([main[0]], startingAt: 0)
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                player.seek(to: max(0, player.duration - 22))
+                player.demoRecordDecks(seconds: 34, directory: documents)
+                for _ in 0..<10 {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    try? DiagnosticsLog.shared.exportText.write(to: documents.appendingPathComponent("diag.txt"), atomically: true, encoding: .utf8)
+                }
+            }
+            return
+        }
+
         if arguments.contains("-demoMix") {
             // Vrai mix A (124 BPM) → B (128 BPM), platines enregistrées séparément.
             player.shuffle = false

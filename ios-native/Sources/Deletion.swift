@@ -6,10 +6,10 @@ import SwiftUI
 /// suivant. Favoris et playlists se nettoient ensuite tout seuls.
 @MainActor
 enum TrackDeletion {
-    static func delete(_ ids: Set<UUID>, library: Library, player: Player) {
+    static func delete(_ ids: Set<UUID>, library: Library, player: Player?) {
         guard !ids.isEmpty else { return }
         Haptics.press()
-        player.removeTracks(ids)
+        player?.removeTracks(ids)
         withAnimation(Motion.spring) { library.delete(ids: ids) }
     }
 }
@@ -42,8 +42,9 @@ struct DeletionRequest: Identifiable {
 struct DeletionConfirmation: ViewModifier {
     @Binding var request: DeletionRequest?
     var onDone: () -> Void
+    // Pas d'abonnement au lecteur : ce modificateur est posé sur chaque page ; il était
+    // réévalué à chaque changement du lecteur. Le lecteur n'est lu qu'au moment de supprimer.
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
 
     func body(content: Content) -> some View {
         content.confirmationDialog(
@@ -53,7 +54,7 @@ struct DeletionConfirmation: ViewModifier {
             presenting: request
         ) { pending in
             Button("Supprimer de l'iPhone", role: .destructive) {
-                TrackDeletion.delete(pending.ids, library: library, player: player)
+                TrackDeletion.delete(pending.ids, library: library, player: NowPlayingState.shared.player)
                 request = nil
                 onDone()
             }

@@ -161,8 +161,15 @@ jobs:
           cp "$C"/Documents/deck*.* qa/ 2>/dev/null || true
           cp "$C"/Documents/diag.txt qa/ 2>/dev/null || true
           cp "$C"/Library/Caches/benten-analysis-v4.json qa/ 2>/dev/null || true
+          # Répéter ce titre : le morceau se mixe sur son propre début.
+          mkdir -p qa/boucle
+          xcrun simctl terminate "$UDID" $BID 2>/dev/null || true
+          xcrun simctl launch "$UDID" $BID -BentenDemo -demoLoop
+          sleep 44
+          cp "$C"/Documents/deck*.* qa/boucle/ 2>/dev/null || true
+          cp "$C"/Documents/diag.txt qa/boucle/ 2>/dev/null || true
           cp ~/Library/Logs/DiagnosticReports/Benten* qa/ 2>/dev/null || true
-          ls -la qa
+          ls -la qa qa/boucle
 
       - uses: actions/upload-artifact@v4
         if: always()

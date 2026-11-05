@@ -15,17 +15,24 @@ struct TrackSwipe: ViewModifier {
     var onDrag: ((CGSize) -> Void)?
     var onRelease: ((CGSize, CGSize) -> Void)?
     @State private var offset: CGFloat = 0
+    /// Axe VERROUILLÉ dès que le doigt a parcouru 10 pt (WWDC18 « Designing Fluid Interfaces ») :
+    /// un glissé horizontal qui dérive un peu vers le haut ne bascule plus en « ouvrir le
+    /// lecteur », et inversement. `nil` tant qu'aucun glissé n'est en cours.
+    @State private var axis: Axis?
 
     func body(content: Content) -> some View {
         content
             .offset(x: offset)
             .opacity(Double(1 - min(CGFloat(0.45), abs(offset) / CGFloat(300))))
             .simultaneousGesture(
-                DragGesture(minimumDistance: 14)
+                // 10 pt (au lieu de 14) : le contenu colle au doigt plus tôt.
+                DragGesture(minimumDistance: 10)
                     .onChanged { value in
                         onDrag?(value.translation)
                         let dx = value.translation.width
-                        guard abs(dx) > abs(value.translation.height) else { return }
+                        let dy = value.translation.height
+                        if axis == nil { axis = abs(dx) > abs(dy) ? .horizontal : .vertical }
+                        guard axis == .horizontal else { return }
                         // Résistance : plus on tire, moins ça suit (sensation élastique).
                         offset = dx / (1 + abs(dx) / CGFloat(260))
                     }
@@ -33,21 +40,34 @@ struct TrackSwipe: ViewModifier {
                         let dx = value.translation.width
                         let dy = value.translation.height
                         let projected = value.predictedEndTranslation.width
-                        let horizontal = abs(dx) > abs(dy)
+                        let horizontal = (axis ?? (abs(dx) > abs(dy) ? .horizontal : .vertical)) == .horizontal
+                        axis = nil
                         if horizontal, dx < -56 || projected < -170 {
-                            Haptics.tap()
+                            // Changement de morceau : « sélection » sèche, comme le mini-lecteur
+                            // d'Apple Music (iOS 26.1).
+                            Haptics.choose()
                             onNext()
                         } else if horizontal, dx > 56 || projected > 170 {
-                            Haptics.tap()
+                            Haptics.choose()
                             onPrevious()
                         } else if let onUp, !horizontal, dy < -22 {
                             Haptics.tap()
                             onUp()
                         }
                         onRelease?(value.translation, value.predictedEndTranslation)
-                        withAnimation(Motion.spring) { offset = 0 }
+                        // Retour en ressort qui PART à la vitesse du doigt (pas d'arrêt net puis
+                        // redémarrage) : continuité de vitesse = mouvement « physique ».
+                        withAnimation(Self.settle(from: offset, velocity: value.velocity.width)) { offset = 0 }
                     }
             )
+    }
+
+    /// Ressort de retour à 0, sans dépassement visible (amorti ≈ 0,9, réponse ≈ 0,31 s), lancé avec
+    /// la vitesse du geste. `initialVelocity` est RELATIVE à la distance à parcourir.
+    private static func settle(from offset: CGFloat, velocity: CGFloat) -> Animation {
+        guard abs(offset) > 0.5 else { return Motion.quick }
+        let relative = Double(max(-30, min(30, -velocity / offset)))
+        return .interpolatingSpring(mass: 1, stiffness: 400, damping: 36, initialVelocity: relative)
     }
 }
 
@@ -151,7 +171,8 @@ struct AlphabetIndex: View {
     }
 
     /// Lettre d'index d'un titre : A–Z (accents retirés), « # » pour le reste.
-    static func letter(for title: String) -> String {
+    /// `nonisolated` : appelée par la bibliothèque HORS du fil principal (ancres pré-calculées).
+    nonisolated static func letter(for title: String) -> String {
         let folded = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
         guard let first = folded.unicodeScalars.first(where: { !CharacterSet.whitespaces.contains($0) }) else { return "#" }
         let upper = String(first).uppercased()
@@ -167,7 +188,8 @@ struct AlphabetIndex: View {
 ///
 /// Mécanique : capture de l'écran → la nouvelle couleur est appliquée dessous → un masque en
 /// forme de vague (bord sinusoïdal qui ondule) découvre la nouvelle interface, porté par une
-/// bande lumineuse aux couleurs des deux palettes. 1,05 s, courbe ease-in-out cubique, 120 Hz.
+/// bande lumineuse aux couleurs des deux palettes. 0,95 s, départ franc (ease-out), 120 Hz,
+/// cadencée sur l'instant d'affichage de chaque image (`targetTimestamp`).
 @MainActor
 enum ThemeSweep {
     private static var running: SweepAnimator?
@@ -256,8 +278,10 @@ enum ThemeSweep {
         }
 
         func render(_ t: Double) {
-            // Ease-in-out cubique : départ et arrivée en douceur, traversée franche.
-            let p = t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+            // Départ FRANC, arrivée en douceur (courbe « ease-out », comme un ressort amorti).
+            // L'ancienne ease-in-out cubique ne bougeait quasiment pas pendant ~150 ms : le
+            // toucher semblait ne rien déclencher. Ici la vague entre dès la première image.
+            let p = 1 - pow(1 - t, 2.6)
             let base = -amplitude + CGFloat(p) * travel
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -292,11 +316,12 @@ enum ThemeSweep {
         render(0)
         Haptics.choose()
         apply()
-        // On laisse SwiftUI recolorer l'interface SUR PLACE (sous la capture : rien ne bouge, on
-        // reste au même endroit), puis la vague part.
+        // SwiftUI recolore l'interface SUR PLACE, sous la capture, à la fin de CE tour de boucle
+        // (rien ne bouge à l'écran). La vague part au tour SUIVANT — donc juste après ce recalcul,
+        // au lieu d'une attente fixe de 80 ms — et son horloge démarre à sa PREMIÈRE image : même
+        // si le recoloriage a pris du temps, la vague ne « saute » jamais une partie du trajet.
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 80_000_000)
-            let animator = SweepAnimator(duration: 1.05, step: render) {
+            let animator = SweepAnimator(duration: 0.95, step: render) {
                 container.removeFromSuperview()
                 running = nil
                 busy = false
@@ -312,7 +337,8 @@ private final class SweepAnimator: NSObject {
     private let duration: Double
     private let step: (Double) -> Void
     private let done: () -> Void
-    private var start: CFTimeInterval = 0
+    /// Instant d'AFFICHAGE de la première image (nil avant le premier rappel).
+    private var start: CFTimeInterval?
     private var link: CADisplayLink?
 
     init(duration: Double, step: @escaping (Double) -> Void, done: @escaping () -> Void) {
@@ -322,15 +348,21 @@ private final class SweepAnimator: NSObject {
     }
 
     func begin() {
-        start = CACurrentMediaTime()
-        let link = CADisplayLink(target: self, selector: #selector(frame))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        // 80–120 Hz : on demande la cadence ProMotion maximale (Info.plist :
+        // CADisableMinimumFrameDurationOnPhone).
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         self.link = link
     }
 
-    @objc private func frame() {
-        let t = min(1, (CACurrentMediaTime() - start) / duration)
+    @objc private func frame(_ link: CADisplayLink) {
+        // On calcule l'état pour l'instant où l'image SERA affichée (`targetTimestamp`), pas pour
+        // l'instant du rappel (qui varie selon la charge du fil principal) : pas régulier à
+        // chaque image, donc mouvement parfaitement lisse à 120 Hz.
+        let origin = start ?? link.timestamp
+        if start == nil { start = origin }
+        let t = min(1, max(0, (link.targetTimestamp - origin) / duration))
         step(t)
         if t >= 1 {
             link?.invalidate()

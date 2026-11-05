@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Onglet Playlists : création, contenu, lecture. « Phonk / Funk » se remplit toute seule.
 struct PlaylistsView: View {
+    // Pas d'abonnement au lecteur (voir `NowPlayingState`).
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
     @EnvironmentObject private var playlists: PlaylistStore
     @State private var newName = ""
     @State private var creating = false
@@ -31,10 +31,10 @@ struct PlaylistsView: View {
                                 .buttonStyle(PressableStyle(scale: 0.98))
                                 .contextMenu {
                                     Button {
-                                        player.play(playlists.tracks(of: playlist, in: library), startingAt: 0)
+                                        NowPlayingState.shared.play(playlists.tracks(of: playlist, in: library), startingAt: 0)
                                     } label: { Label("Lire", systemImage: "play.fill") }
                                     Button {
-                                        player.playShuffled(playlists.tracks(of: playlist, in: library))
+                                        NowPlayingState.shared.playShuffled(playlists.tracks(of: playlist, in: library))
                                     } label: { Label("Aléatoire", systemImage: "shuffle") }
                                     Button(role: .destructive) {
                                         withAnimation(Motion.spring) { playlists.delete(playlist.id) }
@@ -150,7 +150,6 @@ private struct PlaylistRow: View {
 struct PlaylistDetailView: View {
     let playlistID: UUID
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
     @EnvironmentObject private var playlists: PlaylistStore
     @Environment(\.dismiss) private var dismiss
     @State private var deletion: DeletionRequest?
@@ -179,8 +178,8 @@ struct PlaylistDetailView: View {
                                     .foregroundStyle(Theme.dim)
                             }
                             HStack(spacing: 10) {
-                                bigButton("Lecture", icon: "play.fill") { player.play(tracks, startingAt: 0) }
-                                bigButton("Aléatoire", icon: "shuffle") { player.playShuffled(tracks) }
+                                bigButton("Lecture", icon: "play.fill") { NowPlayingState.shared.play(tracks, startingAt: 0) }
+                                bigButton("Aléatoire", icon: "shuffle") { NowPlayingState.shared.playShuffled(tracks) }
                             }
                             .disabled(tracks.isEmpty)
                         }
@@ -194,24 +193,19 @@ struct PlaylistDetailView: View {
                                 .padding(.top, 20)
                         }
 
-                        ForEach(Array(tracks.enumerated()), id: \.element.id) { offset, track in
-                            TrackRow(
-                                track: track,
-                                isCurrent: player.current?.id == track.id,
-                                isPlaying: player.playing,
-                                onPlay: { player.play(tracks, startingAt: offset) }
-                            )
-                            .contextMenu {
-                                Button {
-                                    withAnimation(Motion.spring) { playlists.remove(track.id, from: playlist.id) }
-                                } label: {
-                                    Label("Retirer de la playlist", systemImage: "minus.circle")
+                        ForEach(tracks) { track in
+                            TrackRow(track: track, onPlay: { NowPlayingState.shared.play(tracks, from: track) })
+                                .contextMenu {
+                                    Button {
+                                        withAnimation(Motion.spring) { playlists.remove(track.id, from: playlist.id) }
+                                    } label: {
+                                        Label("Retirer de la playlist", systemImage: "minus.circle")
+                                    }
+                                    DeleteFromDeviceButton {
+                                        deletePlaylistAfter = false
+                                        deletion = DeletionRequest(track: track)
+                                    }
                                 }
-                                DeleteFromDeviceButton {
-                                    deletePlaylistAfter = false
-                                    deletion = DeletionRequest(track: track)
-                                }
-                            }
                         }
                     }
                     .padding(.horizontal, 14)

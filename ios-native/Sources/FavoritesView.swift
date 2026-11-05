@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Onglet Favoris : les morceaux marqués d'un cœur, prêts à être lus.
 struct FavoritesView: View {
+    // Pas d'abonnement au lecteur : l'onglet ne se recalcule plus à chaque play/pause.
     @EnvironmentObject private var library: Library
-    @EnvironmentObject private var player: Player
     @EnvironmentObject private var favorites: FavoritesStore
     @State private var deletion: DeletionRequest?
 
@@ -19,13 +19,11 @@ struct FavoritesView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 2) {
                             header(tracks)
-                            ForEach(Array(tracks.enumerated()), id: \.element.id) { offset, track in
+                            ForEach(tracks) { track in
                                 TrackRow(
                                     track: track,
-                                    isCurrent: player.current?.id == track.id,
-                                    isPlaying: player.playing,
                                     isFavorite: true,
-                                    onPlay: { player.play(tracks, startingAt: offset) },
+                                    onPlay: { NowPlayingState.shared.play(tracks, from: track) },
                                     onToggleFavorite: {
                                         withAnimation(Motion.spring) { favorites.toggle(track.id) }
                                     }
@@ -53,7 +51,7 @@ struct FavoritesView: View {
         HStack(spacing: 10) {
             Button {
                 Haptics.press()
-                player.play(tracks, startingAt: 0)
+                NowPlayingState.shared.play(tracks, startingAt: 0)
             } label: {
                 Label("Lecture", systemImage: "play.fill")
                     .font(.system(size: 15, weight: .semibold))
@@ -65,7 +63,7 @@ struct FavoritesView: View {
             .buttonStyle(PressableStyle())
             Button {
                 Haptics.press()
-                player.playShuffled(tracks)
+                NowPlayingState.shared.playShuffled(tracks)
             } label: {
                 Label("Aléatoire", systemImage: "shuffle")
                     .font(.system(size: 15, weight: .semibold))
@@ -100,16 +98,18 @@ struct FavoritesView: View {
 /// Une ligne de morceau, réutilisable (favoris, playlists, recherche, titres).
 ///
 /// Le morceau en cours affiche des barres animées à la place de la pochette, comme Apple Music.
+///
+/// La ligne lit ELLE-MÊME « en cours » (`NowPlayingState`) : quand le morceau change, seules les
+/// deux lignes concernées (l'ancienne et la nouvelle) se redessinent — plus la liste entière.
 struct TrackRow: View {
     let track: Track
-    let isCurrent: Bool
-    var isPlaying: Bool = false
     /// `nil` : pas de bouton cœur.
     var isFavorite: Bool? = nil
     let onPlay: () -> Void
     var onToggleFavorite: () -> Void = {}
 
     var body: some View {
+        let isCurrent = NowPlayingState.shared.currentID == track.id
         HStack(spacing: 12) {
             Button {
                 Haptics.tap()
@@ -124,7 +124,7 @@ struct TrackRow: View {
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
                                 .fill(Color.black.opacity(0.45))
                                 .frame(width: 48, height: 48)
-                            NowPlayingBars(animating: isPlaying)
+                            LiveNowPlayingBars()
                                 .frame(width: 18, height: 16)
                         }
                     }

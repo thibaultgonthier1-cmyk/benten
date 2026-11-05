@@ -50,6 +50,9 @@ final class Library: ObservableObject {
     @Published private(set) var albums: [AlbumGroup] = []
     @Published private(set) var artists: [ArtistGroup] = []
     @Published private(set) var tracksByTitle: [Track] = []
+    /// Premier titre de chaque lettre (index A–Z), calculé avec `tracksByTitle` hors du fil
+    /// principal. Avant : 1000+ titres « repliés » (accents, casse) à CHAQUE rendu de la liste.
+    @Published private(set) var letterAnchors: [LetterAnchor] = []
     /// Accès direct par identifiant (playlists, favoris) au lieu d'une recherche linéaire.
     private(set) var byID: [UUID: Track] = [:]
     private var remoteIDs: Set<Int> = []
@@ -93,12 +96,20 @@ final class Library: ObservableObject {
         albums = derived.albums
         artists = derived.artists
         tracksByTitle = derived.byTitle
+        letterAnchors = derived.anchors
     }
 
     struct Derived: Sendable {
         let albums: [AlbumGroup]
         let artists: [ArtistGroup]
         let byTitle: [Track]
+        let anchors: [LetterAnchor]
+    }
+
+    /// Entrée de l'index alphabétique : une lettre et le premier titre qui commence par elle.
+    struct LetterAnchor: Sendable, Equatable {
+        let letter: String
+        let id: UUID
     }
 
     /// Calcule albums, artistes et titres triés. Fonction pure, appelée hors du fil principal.
@@ -123,7 +134,16 @@ final class Library: ObservableObject {
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
         let byTitle = tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-        return Derived(albums: albums, artists: artists, byTitle: byTitle)
+
+        var anchors: [LetterAnchor] = []
+        var seen = Set<String>()
+        for track in byTitle {
+            let letter = AlphabetIndex.letter(for: track.title)
+            if seen.insert(letter).inserted { anchors.append(LetterAnchor(letter: letter, id: track.id)) }
+        }
+        // « # » en tête, comme Apple.
+        anchors.sort { ($0.letter == "#" ? "" : $0.letter) < ($1.letter == "#" ? "" : $1.letter) }
+        return Derived(albums: albums, artists: artists, byTitle: byTitle, anchors: anchors)
     }
 
     private func createDirectories() {

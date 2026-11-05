@@ -1,5 +1,6 @@
 import CoreMotion
 import SwiftUI
+import UIKit
 
 // MARK: - Inclinaison de l'iPhone (pour l'effet holographique)
 
@@ -26,9 +27,10 @@ final class TiltModel: ObservableObject {
         users = max(0, users - 1)
         guard users == 0 else { return }
         manager.stopDeviceMotionUpdates()
+        // On GARDE la dernière inclinaison : à la reprise, la nouvelle position neutre la ramène
+        // en douceur vers 0 (lissage). Remettre x/y à 0 ici faisait sauter le reflet et la
+        // parallaxe à chaque pause / reprise.
         referenceRoll = nil
-        x = 0
-        y = 0
     }
 
     private func start() {
@@ -61,11 +63,79 @@ final class TiltModel: ObservableObject {
     }
 }
 
+// MARK: - Autorisation des animations d'ambiance
+
+/// Les mêmes garde-fous qu'Apple pour ses pochettes animées : en mode Économie d'énergie, quand
+/// l'iPhone chauffe (état thermique « sérieux » ou pire) ou quand « Lecture auto. des aperçus
+/// vidéo » est désactivée, la pochette et le fond restent IMMOBILES (image fixe, zéro calcul).
+/// « Réduire les animations » est géré à part, par l'environnement SwiftUI.
+@MainActor
+final class AmbientMotion: ObservableObject {
+    static let shared = AmbientMotion()
+
+    @Published private(set) var allowed = true
+    private var observers: [NSObjectProtocol] = []
+
+    private init() {
+        refresh()
+        let center = NotificationCenter.default
+        let names: [Notification.Name] = [
+            .NSProcessInfoPowerStateDidChange,
+            ProcessInfo.thermalStateDidChangeNotification,
+            UIAccessibility.videoAutoplayStatusDidChangeNotification
+        ]
+        for name in names {
+            // Ces notifications peuvent arriver sur n'importe quel fil : on repasse sur le principal.
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+            observers.append(token)
+        }
+    }
+
+    private func refresh() {
+        let info = ProcessInfo.processInfo
+        let hot = info.thermalState == .serious || info.thermalState == .critical
+        let next = !info.isLowPowerModeEnabled && !hot && UIAccessibility.isVideoAutoplayEnabled
+        if next != allowed { allowed = next }
+    }
+}
+
+// MARK: - Horloge d'animation
+
+/// Horloge qui n'avance QUE pendant la lecture : en pause tout se fige, et à la reprise le
+/// mouvement repart exactement d'où il s'était arrêté (aucun saut).
+struct MotionClock {
+    private var elapsed: Double = 0
+    private var resumedAt: Date?
+
+    func time(at date: Date) -> Double {
+        guard let resumedAt else { return elapsed }
+        return elapsed + max(0, date.timeIntervalSince(resumedAt))
+    }
+
+    mutating func set(running: Bool, at date: Date = Date()) {
+        if running {
+            if resumedAt == nil { resumedAt = date }
+        } else if let since = resumedAt {
+            elapsed += max(0, date.timeIntervalSince(since))
+            resumedAt = nil
+        }
+    }
+}
+
 // MARK: - Reflet holographique
 
-/// Reflet irisé (cyan → violet → rose → or) qui tourne lentement et suit l'inclinaison, plus un
-/// point de lumière qui glisse sur la pochette : la pochette reste la même, mais elle « vit »
+/// Reflet irisé (cyan → violet → rose → or) qui tourne lentement et suit l'inclinaison, plus une
+/// fine bande de lumière qui glisse sur la pochette : la pochette reste la même, mais elle « vit »
 /// comme une carte holographique.
+///
+/// SANS ARTEFACT :
+/// - l'irisation est en `softLight` : elle teinte les tons moyens sans jamais brûler les clairs
+///   (l'ancien `colorDodge` faisait exploser les pochettes claires en blanc) ni griser les noirs ;
+/// - la lumière est en `screen` : elle ne peut jamais dépasser le blanc ;
+/// - dégradés à nombreux arrêts et pente marquée : pas de marches visibles (banding) ;
+/// - découpé par l'appelant à la forme exacte de la pochette.
 struct HoloSheen: View {
     let time: Double
     let tiltX: Double
@@ -73,33 +143,42 @@ struct HoloSheen: View {
     var strength: Double = 1
 
     var body: some View {
-        let angle = time * 0.22 + tiltX * 1.3
+        let angle = time * 0.18 + tiltX * 1.1
         let c = cos(angle)
         let s = sin(angle)
+        // Position de la bande de lumière (0…1 le long de la diagonale), toujours dans le cadre.
+        let glint = CGFloat(min(0.82, max(0.18, 0.5 + 0.32 * tiltX + 0.14 * sin(time * 0.21))))
         ZStack {
             LinearGradient(
-                colors: [
-                    .clear,
-                    Color(red: 0.30, green: 1.00, blue: 0.95).opacity(0.22),
-                    Color(red: 0.62, green: 0.42, blue: 1.00).opacity(0.20),
-                    Color(red: 1.00, green: 0.42, blue: 0.76).opacity(0.18),
-                    Color(red: 1.00, green: 0.88, blue: 0.40).opacity(0.16),
-                    .clear
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: Color(red: 0.30, green: 1.00, blue: 0.95).opacity(0.55), location: 0.22),
+                    .init(color: Color(red: 0.62, green: 0.42, blue: 1.00).opacity(0.55), location: 0.40),
+                    .init(color: Color(red: 1.00, green: 0.42, blue: 0.76).opacity(0.50), location: 0.58),
+                    .init(color: Color(red: 1.00, green: 0.88, blue: 0.40).opacity(0.45), location: 0.76),
+                    .init(color: .clear, location: 1)
                 ],
-                startPoint: UnitPoint(x: 0.5 - c * 0.85, y: 0.5 - s * 0.85),
-                endPoint: UnitPoint(x: 0.5 + c * 0.85, y: 0.5 + s * 0.85)
-            )
-            .blendMode(.colorDodge)
-            .opacity(0.6 * strength)
-
-            RadialGradient(
-                colors: [Color.white.opacity(0.30 * strength), .clear],
-                center: UnitPoint(x: 0.5 + tiltX * 0.45 + 0.18 * sin(time * 0.37),
-                                  y: 0.38 + tiltY * 0.35 + 0.08 * cos(time * 0.29)),
-                startRadius: 0,
-                endRadius: 280
+                startPoint: UnitPoint(x: 0.5 - c * 0.8, y: 0.5 - s * 0.8),
+                endPoint: UnitPoint(x: 0.5 + c * 0.8, y: 0.5 + s * 0.8)
             )
             .blendMode(.softLight)
+            .opacity(0.7 * strength)
+
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: glint - 0.16),
+                    .init(color: .white.opacity(0.05), location: glint - 0.07),
+                    .init(color: .white.opacity(0.13), location: glint),
+                    .init(color: .white.opacity(0.05), location: glint + 0.07),
+                    .init(color: .clear, location: glint + 0.16),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: UnitPoint(x: 0, y: 0.15 + tiltY * 0.1),
+                endPoint: UnitPoint(x: 1, y: 0.85 - tiltY * 0.1)
+            )
+            .blendMode(.screen)
+            .opacity(strength)
         }
         .allowsHitTesting(false)
     }
@@ -108,6 +187,9 @@ struct HoloSheen: View {
 /// Abonnement au capteur d'inclinaison : actif SEULEMENT si la vue est affichée, l'app au premier
 /// plan et `wanted` vrai. En arrière-plan (écran verrouillé, musique qui tourne), le capteur est
 /// coupé : zéro batterie gaspillée.
+///
+/// Le capteur démarre 0,45 s APRÈS l'apparition : son démarrage (quelques ms sur le fil principal)
+/// ne tombe jamais pendant l'animation d'ouverture du lecteur.
 struct TiltSubscription: ViewModifier {
     let wanted: Bool
     @Environment(\.scenePhase) private var phase
@@ -116,7 +198,12 @@ struct TiltSubscription: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onAppear { visible = true; sync() }
+            .task {
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                guard !Task.isCancelled else { return }
+                visible = true
+                sync()
+            }
             .onDisappear { visible = false; sync() }
             .onChange(of: phase) { _, _ in sync() }
             .onChange(of: wanted) { _, _ in sync() }
@@ -134,6 +221,7 @@ struct TiltSubscription: ViewModifier {
 /// est découpé EXACTEMENT à la forme de la pochette (carré arrondi, rond…) : rien ne déborde.
 struct HolographicModifier: ViewModifier {
     @ObservedObject private var tilt = TiltModel.shared
+    @ObservedObject private var ambient = AmbientMotion.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("livingArtwork") private var enabled = true
 
@@ -141,15 +229,17 @@ struct HolographicModifier: ViewModifier {
         if enabled && !reduceMotion {
             content
                 .overlay {
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !ambient.allowed)) { context in
                         HoloSheen(time: context.date.timeIntervalSinceReferenceDate,
                                   tiltX: tilt.x, tiltY: tilt.y, strength: 0.8)
                     }
                     .mask(content)
                 }
+                // Les modes de fusion du reflet ne s'appliquent qu'à la pochette, jamais au décor.
+                .compositingGroup()
                 .rotation3DEffect(.degrees(tilt.x * 7), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
                 .rotation3DEffect(.degrees(-tilt.y * 5), axis: (x: 1, y: 0, z: 0), perspective: 0.6)
-                .modifier(TiltSubscription(wanted: true))
+                .modifier(TiltSubscription(wanted: ambient.allowed))
         } else {
             content
         }
@@ -162,75 +252,331 @@ extension View {
 
 // MARK: - Pochette animée plein écran
 
-/// Pochette ANIMÉE du lecteur (comme les pochettes animées d'Apple Music) : la pochette du
-/// morceau prend toute la largeur en haut de l'écran, bord à bord, et se fond dans le fond.
-/// Elle reste la même image, mais elle vit :
-/// - zoom lent et dérive en ellipse (≈ 20 s), comme une caméra qui respire ;
-/// - parallaxe : elle glisse légèrement quand on incline le téléphone ;
+/// Image prête à dessiner pour un morceau (pochette nette + version floutée).
+struct ArtFace {
+    let id: UUID
+    let image: UIImage?
+    let blurred: UIImage?
+
+    /// Largeur / hauteur de la pochette (1 si inconnue).
+    var aspect: CGFloat {
+        guard let image, image.size.height > 0 else { return 1 }
+        return image.size.width / image.size.height
+    }
+
+    /// Vignette nette déjà en mémoire (aucun décodage) : la plus grande disponible.
+    static func cachedImage(_ track: Track) -> UIImage? {
+        let cache = ArtworkCache.shared
+        return cache.cached(for: track, maxPixel: 1000)
+            ?? cache.cached(for: track, maxPixel: 700)
+            ?? cache.cached(for: track, maxPixel: 560)
+    }
+
+    static func cached(_ track: Track) -> ArtFace? {
+        guard let image = cachedImage(track) else { return nil }
+        return ArtFace(id: track.id, image: image, blurred: BlurredArtwork.cached(track))
+    }
+}
+
+/// Pochette ANIMÉE du lecteur (comme les pochettes animées d'Apple Music) : même image, mais
+/// vivante.
+///
+/// Deux présentations :
+/// - BORD À BORD (`fullBleed`) : pleine largeur, ENTIÈRE, juste sous la barre d'état ; au-dessus,
+///   la pochette se prolonge en miroir flouté jusqu'en haut de l'écran (sans couture), et son bas
+///   se fond dans le fond du lecteur. La hauteur suit le format de la pochette (une pochette 16:9
+///   occupe 16:9, sans bandes) ;
+/// - CARTE (petits écrans, iPad) : carré arrondi centré, ombre douce.
+///
+/// Mouvement (toujours borné : jamais de bord vide, la pochette reste visible à ≥ 98 %) :
+/// - respiration lente et dérive en ellipse (≈ 20 s) ;
+/// - parallaxe discrète quand on incline le téléphone ;
 /// - reflet holographique irisé qui tourne et suit l'inclinaison ;
-/// - pulsation discrète sur le tempo du morceau.
-/// Le mouvement est TOUJOURS borné par le zoom : jamais de bord vide qui apparaît. En pause,
-/// tout se fige et repart exactement d'où il s'était arrêté (horloge propre, sans saut).
+/// - pulsation légère sur le tempo du morceau.
+/// En pause, en mode Économie d'énergie ou si l'iPhone chauffe : tout se fige, puis repart
+/// exactement d'où il s'était arrêté.
+///
+/// Changement de morceau : fondu enchaîné INTERNE (la nouvelle pochette se pose sur l'ancienne,
+/// le mouvement continue sans redémarrer) — aucun passage par le fond.
 struct LivingArtwork: View {
     let track: Track
     let playing: Bool
     let bpm: Double?
-    let height: CGFloat
+    /// Taille de la pochette elle-même (hors prolongement du haut).
+    let size: CGSize
+    var fullBleed: Bool = true
+    /// Hauteur du prolongement en miroir au-dessus de la pochette (zone de la barre d'état).
+    var topBleed: CGFloat = 0
+    var cornerRadius: CGFloat = 0
+    /// Format de la pochette affichée, remonté au lecteur pour sa mise en page.
+    @Binding var aspect: CGFloat?
 
-    @ObservedObject private var tilt = TiltModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Horloge de l'animation : n'avance QUE pendant la lecture.
-    @State private var elapsedBeforePause: Double = 0
-    @State private var resumedAt: Date?
+    @ObservedObject private var ambient = AmbientMotion.shared
+    @State private var base: ArtFace?
+    @State private var incoming: ArtFace?
+    @State private var clock = MotionClock()
+
+    init(track: Track, playing: Bool, bpm: Double?, size: CGSize, fullBleed: Bool = true,
+         topBleed: CGFloat = 0, cornerRadius: CGFloat = 0, aspect: Binding<CGFloat?>) {
+        self.track = track
+        self.playing = playing
+        self.bpm = bpm
+        self.size = size
+        self.fullBleed = fullBleed
+        self.topBleed = topBleed
+        self.cornerRadius = cornerRadius
+        _aspect = aspect
+        // Pochette déjà décodée (préparée dès le début du morceau) : visible dès la première
+        // image de l'ouverture, sans fondu ni attente.
+        _base = State(initialValue: ArtFace.cached(track))
+    }
+
+    /// Format de la pochette en mémoire, sans décodage (pour la mise en page du lecteur).
+    static func cachedAspect(_ track: Track?) -> CGFloat? {
+        guard let track, let image = ArtFace.cachedImage(track), image.size.height > 0 else { return nil }
+        return image.size.width / image.size.height
+    }
+
+    private var animating: Bool { playing && !reduceMotion && ambient.allowed }
 
     var body: some View {
-        let width = UIScreen.main.bounds.width
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !playing || reduceMotion)) { context in
-            let t = elapsedBeforePause + (resumedAt.map { context.date.timeIntervalSince($0) } ?? 0)
-            // Zoom TRÈS léger (2 à 5 %) : on voit toujours la pochette entière, elle respire.
-            let zoom = 1.035 + 0.015 * sin(t * 2 * .pi / 21)
-            let beat = 60 / max(60, min(180, bpm ?? 100))
-            let phase = (Date.timeIntervalSinceReferenceDate).truncatingRemainder(dividingBy: beat) / beat
-            let pulse = playing ? 0.01 * pow(max(0, cos(phase * 2 * .pi)), 4) : 0
-            // Marge disponible de chaque côté grâce au zoom : le déplacement ne la dépasse jamais.
-            let roomX = (zoom - 1) * width / 2 - 1
-            let roomY = (zoom - 1) * height / 2 - 1
-            let dx = max(-roomX, min(roomX, 4 * sin(t * 2 * .pi / 17) + tilt.x * 6))
-            let dy = max(-roomY, min(roomY, 3 * cos(t * 2 * .pi / 23) + tilt.y * 5))
-            ZStack {
-                ArtworkView(track: track, maxPixel: 1000)
-                    .frame(width: width, height: height)
-                    .scaleEffect(zoom + pulse)
-                    .offset(x: dx, y: dy)
-                HoloSheen(time: t, tiltX: tilt.x, tiltY: tilt.y)
+        let bleed = fullBleed ? max(0, topBleed) : 0
+        let total = CGSize(width: size.width, height: size.height + bleed)
+        // Ambiance lente : 60 images/s suffisent (et suivent l'inclinaison sans retard) ; les
+        // 120 Hz restent réservés aux gestes (glisser, fermer).
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !animating)) { context in
+            let t = clock.time(at: context.date)
+            // Dernière inclinaison connue, gardée telle quelle en pause : rien ne saute.
+            let tiltX = TiltModel.shared.x
+            let tiltY = TiltModel.shared.y
+            let motion = ArtMotion(t: t, date: context.date, pulsing: animating, bpm: bpm,
+                                   tiltX: tiltX, tiltY: tiltY, size: size)
+            ZStack(alignment: .top) {
+                if let base {
+                    faceStack(base, bleed: bleed, motion: motion)
+                        .id(base.id)
+                }
+                if let incoming {
+                    faceStack(incoming, bleed: bleed, motion: motion)
+                        .id(incoming.id)
+                        .transition(.opacity)
+                }
+                if base == nil && incoming == nil {
+                    placeholder
+                        .frame(width: size.width, height: size.height)
+                        .padding(.top, bleed)
+                }
+                // Reflet holographique, sur la pochette seulement (pas sur le prolongement).
+                HoloSheen(time: t, tiltX: tiltX, tiltY: tiltY, strength: fullBleed ? 0.9 : 0.8)
+                    .frame(width: size.width, height: size.height)
+                    .padding(.top, bleed)
             }
+            .frame(width: total.width, height: total.height, alignment: .top)
         }
-        .frame(width: width, height: height)
-        .clipped()
-        // Fondu vers le bas : la pochette se prolonge dans le fond, sans bord.
-        .mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .black, location: 0),
-                    .init(color: .black, location: 0.84),
-                    .init(color: .black.opacity(0.6), location: 0.93),
-                    .init(color: .clear, location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .frame(width: total.width, height: total.height)
+        // Le reflet ne se fond qu'avec la pochette, puis tout est découpé à la forme exacte.
+        .compositingGroup()
+        .clipShape(RoundedRectangle(cornerRadius: fullBleed ? 0 : cornerRadius, style: .continuous))
+        .mask { fadeMask(bleed: bleed, total: total.height) }
         .saturation(playing ? 1 : 0.85)
         .animation(.easeInOut(duration: 0.6), value: playing)
-        .modifier(TiltSubscription(wanted: playing && !reduceMotion))
-        .onAppear { if playing { resumedAt = Date() } }
-        .onChange(of: playing) { _, isPlaying in
-            if isPlaying {
-                resumedAt = Date()
-            } else if let since = resumedAt {
-                elapsedBeforePause += Date().timeIntervalSince(since)
-                resumedAt = nil
+        .modifier(TiltSubscription(wanted: animating))
+        .onAppear {
+            clock.set(running: animating)
+            if let shown = incoming ?? base, aspect != shown.aspect { aspect = shown.aspect }
+        }
+        // L'horloge n'avance que lorsque la pochette bouge vraiment : aucun saut à la reprise.
+        .onChange(of: animating) { _, moving in clock.set(running: moving) }
+        .task(id: track.id) { await present(track) }
+    }
+
+    // MARK: Dessin
+
+    /// Une pochette complète : prolongement en miroir (bord à bord) + pochette animée.
+    private func faceStack(_ face: ArtFace, bleed: CGFloat, motion: ArtMotion) -> some View {
+        VStack(spacing: 0) {
+            if bleed > 0 {
+                mirror(face, height: bleed)
+            }
+            cover(face, motion: motion)
+                .frame(width: size.width, height: size.height)
+                .clipped()
+        }
+        .background(Theme.ink)
+    }
+
+    /// La pochette, animée À L'INTÉRIEUR de son cadre (zoom ≥ 1, déplacement borné par la marge
+    /// du zoom) : aucun bord ne peut apparaître.
+    @ViewBuilder
+    private func cover(_ face: ArtFace, motion: ArtMotion) -> some View {
+        Group {
+            if let image = face.image {
+                let frameAspect = size.width / max(1, size.height)
+                if abs(face.aspect - frameAspect) <= frameAspect * 0.04 {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    // Format inhabituel (portrait, très large) : pochette ENTIÈRE sur sa propre
+                    // version floutée — jamais de bandes noires, rien de coupé.
+                    ZStack {
+                        Image(uiImage: face.blurred ?? image)
+                            .resizable()
+                            .scaledToFill()
+                            .opacity(face.blurred == nil ? 0.5 : 1)
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                    }
+                }
+            } else {
+                placeholder
             }
         }
+        .frame(width: size.width, height: size.height)
+        .scaleEffect(motion.scale)
+        .offset(x: motion.dx, y: motion.dy)
+    }
+
+    /// Prolongement au-dessus de la pochette : son haut, retourné en miroir et flouté. Le bord du
+    /// miroir touche EXACTEMENT le bord de la pochette : la couleur continue sans couture jusqu'en
+    /// haut de l'écran. Un léger voile garde la barre d'état lisible sur une pochette claire.
+    private func mirror(_ face: ArtFace, height: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            if let source = face.blurred ?? face.image {
+                Image(uiImage: source)
+                    .resizable()
+                    .frame(width: size.width, height: size.height)
+                    .scaleEffect(x: 1, y: -1)
+                    .frame(width: size.width, height: height, alignment: .bottom)
+                    .clipped()
+                    .opacity(face.blurred == nil ? 0.6 : 1)
+            }
+            LinearGradient(colors: [.black.opacity(0.32), .black.opacity(0.06)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+        .frame(width: size.width, height: height)
+        .clipped()
+    }
+
+    private var placeholder: some View {
+        Theme.accentGradient
+            .overlay(
+                Image(systemName: "music.note")
+                    .font(.system(size: 64, weight: .light))
+                    .foregroundStyle(Theme.ink.opacity(0.55))
+            )
+    }
+
+    /// Bord à bord : le bas de la pochette se fond dans le fond du lecteur. Carte : aucun fondu.
+    private func fadeMask(bleed: CGFloat, total: CGFloat) -> some View {
+        let height = max(1, total)
+        let fadeStart = min(0.97, max(0.5, (bleed + size.height * 0.88) / height))
+        let fadeMid = min(0.99, fadeStart + (1 - fadeStart) * 0.55)
+        return LinearGradient(
+            stops: fullBleed
+                ? [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: fadeStart),
+                    .init(color: .black.opacity(0.55), location: fadeMid),
+                    .init(color: .clear, location: 1)
+                ]
+                : [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 1)
+                ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    // MARK: Changement de pochette
+
+    /// Charge (ou reprend du cache) la pochette du morceau, puis l'affiche en fondu enchaîné.
+    private func present(_ track: Track) async {
+        let shown = incoming ?? base
+        if let shown, shown.id == track.id, shown.image != nil, shown.blurred != nil { return }
+
+        let image: UIImage?
+        if let hit = ArtFace.cachedImage(track) {
+            image = hit
+        } else {
+            image = await ArtworkCache.shared.load(for: track, maxPixel: 1000)
+        }
+        let blurred: UIImage?
+        if let hit = BlurredArtwork.cached(track) {
+            blurred = hit
+        } else {
+            blurred = await BlurredArtwork.make(track)
+        }
+        guard !Task.isCancelled else { return }
+        let face = ArtFace(id: track.id, image: image, blurred: blurred)
+
+        let current = incoming ?? base
+        if let current, current.id == face.id {
+            // Même morceau, données complétées (flou arrivé après coup) : sur place, sans fondu.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                if incoming != nil { incoming = face } else { base = face }
+                aspect = face.aspect
+            }
+            return
+        }
+        show(face)
+    }
+
+    private func show(_ face: ArtFace) {
+        if let pending = incoming {
+            // Un fondu était en cours : il devient la base (déjà presque entièrement visible).
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                base = pending
+                incoming = nil
+            }
+        }
+        if base == nil {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                base = face
+                aspect = face.aspect
+            }
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.55)) {
+            incoming = face
+            aspect = face.aspect
+        } completion: {
+            guard incoming?.id == face.id else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                base = face
+                incoming = nil
+            }
+        }
+    }
+}
+
+/// Valeurs d'animation d'une image de la pochette : zoom TRÈS léger (0,6 à 2,4 %), dérive et
+/// parallaxe TOUJOURS contenues dans la marge du zoom.
+private struct ArtMotion {
+    let scale: CGFloat
+    let dx: CGFloat
+    let dy: CGFloat
+
+    init(t: Double, date: Date, pulsing: Bool, bpm: Double?, tiltX: Double, tiltY: Double, size: CGSize) {
+        let beat: Double = 60 / max(60, min(180, bpm ?? 100))
+        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: beat) / beat
+        let pulse: Double = pulsing ? 0.006 * pow(max(0, cos(phase * 2 * .pi)), 4) : 0
+        let zoom: Double = 1.012 + 0.006 * sin(t * 2 * .pi / 21) + pulse
+        let roomX = max(0, (zoom - 1) * Double(size.width) / 2 - 0.5)
+        let roomY = max(0, (zoom - 1) * Double(size.height) / 2 - 0.5)
+        let rawX = 3 * sin(t * 2 * .pi / 17) + tiltX * 4
+        let rawY = 2 * cos(t * 2 * .pi / 23) + tiltY * 3
+        scale = CGFloat(zoom)
+        dx = CGFloat(max(-roomX, min(roomX, rawX)))
+        dy = CGFloat(max(-roomY, min(roomY, rawY)))
     }
 }

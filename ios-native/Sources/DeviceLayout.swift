@@ -61,6 +61,25 @@ struct DeviceLayout {
 }
 
 extension DeviceLayout {
+    /// Fenêtre réellement affichée (fenêtre clé de la scène au premier plan). Sur iPad en écran
+    /// partagé, elle est plus petite que l'écran : c'est elle qui compte, pas `UIScreen`.
+    @MainActor static var window: UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let active = scenes.filter { $0.activationState == .foregroundActive }
+        let windows = (active.isEmpty ? scenes : active).flatMap(\.windows)
+        return windows.first(where: \.isKeyWindow) ?? windows.first
+    }
+
+    /// Marges de sécurité réelles (Dynamic Island, barre d'accueil) de la fenêtre affichée.
+    @MainActor static var windowSafeInsets: UIEdgeInsets {
+        window?.safeAreaInsets ?? .zero
+    }
+
+    /// Taille de la fenêtre affichée (repli : l'écran).
+    @MainActor static var windowSize: CGSize {
+        window?.bounds.size ?? UIScreen.main.bounds.size
+    }
+
     /// Colonnes prêtes pour `LazyVGrid`.
     var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: gridColumns)
