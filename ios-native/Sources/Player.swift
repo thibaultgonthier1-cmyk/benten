@@ -361,6 +361,7 @@ final class Player: NSObject, ObservableObject {
 
     private let spectrumAnalyzer = SpectrumAnalyzer(bandCount: 28)
     private var tapInstalled = false
+    private var stalledTicks = 0
 
     override init() {
         super.init()
@@ -423,9 +424,17 @@ final class Player: NSObject, ObservableObject {
     }
 
     private func ensureEngineRunning() {
-        if !engine.isRunning {
-            try? AVAudioSession.sharedInstance().setActive(true)
-            try? engine.start()
+        guard !engine.isRunning else { return }
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            diag("session audio : activation refusée (\(error.localizedDescription))")
+        }
+        do {
+            try engine.start()
+            diag("moteur audio démarré")
+        } catch {
+            diag("moteur audio : démarrage impossible (\(error.localizedDescription))")
         }
     }
 
@@ -448,10 +457,12 @@ final class Player: NSObject, ObservableObject {
                 guard let self, let typeRaw, let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
                 switch type {
                 case .began:
+                    diag("interruption (appel, Siri, alarme…) : pause")
                     self.wasPlayingBeforeInterruption = self.playing
                     self.pause()
                 case .ended:
                     let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
+                    diag("fin d'interruption (reprise autorisée : \(options.contains(.shouldResume)))")
                     if self.wasPlayingBeforeInterruption && options.contains(.shouldResume) {
                         self.resume()
                     }
@@ -466,12 +477,16 @@ final class Player: NSObject, ObservableObject {
             let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             Task { @MainActor in
                 guard let self, let reasonRaw, let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
+                diag("sortie audio changée (raison \(reasonRaw))")
                 if reason == .oldDeviceUnavailable { self.pause() }
             }
         }
 
         center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.recoverEngine() }
+            Task { @MainActor in
+                diag("moteur audio reconfiguré par iOS → relance")
+                self?.recoverEngine()
+            }
         }
 
         center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
@@ -499,7 +514,9 @@ final class Player: NSObject, ObservableObject {
             pausedPosition = resumeAt
         }
         clock.position = resumeAt
+        diag("relance à \(String(format: "%.1f", resumeAt)) s (lecture : \(wasPlaying))")
         if tapInstalled {
+            engine.mainMixerNode.removeTap(onBus: 0)
             tapInstalled = false
             setVisualizer(active: true)
         }
@@ -523,7 +540,8 @@ final class Player: NSObject, ObservableObject {
         let mixer = engine.mainMixerNode
         if active, !tapInstalled {
             let format = mixer.outputFormat(forBus: 0)
-            guard format.sampleRate > 0 else { return }
+            guard format.sampleRate > 0, format.channelCount > 0 else { return }
+            mixer.removeTap(onBus: 0)
             mixer.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.makeTap(spectrumAnalyzer, spectrum))
             tapInstalled = true
         } else if !active, tapInstalled {
@@ -675,6 +693,7 @@ final class Player: NSObject, ObservableObject {
     private func load(track: Track, at seconds: Double = 0) {
         cancelFade()
         guard let file = try? AVAudioFile(forReading: track.fileURL) else {
+            diag("fichier illisible : « \(track.title) » → suivant")
             failedLoads += 1
             if failedLoads < max(1, queue.count) {
                 advance(manual: true)
@@ -698,6 +717,7 @@ final class Player: NSObject, ObservableObject {
         activeFile = file
         current = track
         currentBPM = analyses[track.id]?.bpm
+        diag("lecture : « \(track.title) »")
         currentKey = analyses[track.id]?.key
         loudnessRampTask?.cancel()
         fxA.globalGain = loudnessGain(for: track)
@@ -1026,7 +1046,26 @@ final class Player: NSObject, ObservableObject {
             }
         }
 
-        guard playing else { return }
+        guard playing else {
+            stalledTicks = 0
+            return
+        }
+
+        // SURVEILLANCE : la lecture est censée tourner mais le moteur est arrêté (coupure
+        // système, sortie changée sans prévenir…). Avant, la barre continuait d'avancer en
+        // silence. Après 0,3 s de silence anormal, on relance au bon endroit.
+        if !fading, !engine.isRunning || activeDeck?.isPlaying == false {
+            stalledTicks += 1
+            if stalledTicks >= 3 {
+                stalledTicks = -20   // 2 s de répit avant une nouvelle tentative
+                diag("SURVEILLANCE : moteur arrêté pendant la lecture → relance automatique")
+                recoverEngine()
+                return
+            }
+        } else {
+            stalledTicks = 0
+        }
+
         let now = livePosition()
         if abs(clock.position - now) > 0.04 { clock.position = now }
         let total = duration
@@ -1084,6 +1123,7 @@ final class Player: NSObject, ObservableObject {
         incoming.play(at: AVAudioTime(hostTime: startHost))
 
         mixingInto = incomingTrack
+        diag("mix \(plan.style) → « \(incomingTrack.title) » : sortie \(String(format: "%.1f", plan.exitAt)) s, entrée \(String(format: "%.1f", plan.entryAt)) s, \(String(format: "%.1f", plan.length)) s, tempo ×\(String(format: "%.3f", plan.tempoRatio))")
         Task {
             await runMix(plan: plan, token: token, outgoing: outgoing, incoming: incoming,
                          track: incomingTrack, file: file, index: nextIndex,
@@ -1120,6 +1160,7 @@ final class Player: NSObject, ObservableObject {
                     pausedPosition = nil
                     currentBPM = analyses[track.id]?.bpm
                     currentKey = analyses[track.id]?.key
+                    diag("bascule sur « \(track.title) »")
                     clock.duration = duration
                     clock.position = livePosition()
                     remember(track)
@@ -1167,6 +1208,7 @@ final class Player: NSObject, ObservableObject {
         setAnchor(livePosition(), rate: 1)
         fading = false
         mixingInto = nil
+        diag("mix terminé")
         refreshPlan()
         analyzeAhead()
     }
@@ -1219,6 +1261,7 @@ final class Player: NSObject, ObservableObject {
         fadeToken += 1
         if mixingInto != nil { mixingInto = nil }
         guard fading else { return }
+        diag("mix interrompu (action manuelle ou relance)")
         fading = false
         let position = livePosition()
         let silent = other(than: activeDeck)

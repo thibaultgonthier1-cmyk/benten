@@ -93,7 +93,9 @@ struct RootView: View {
             // UN SEUL mini-lecteur, permanent, posé juste au-dessus de la barre d'onglets : il ne
             // se recrée plus à chaque navigation (avant, un exemplaire par onglet apparaissait
             // avant le reste de l'écran). Caché quand le clavier est ouvert.
-            if player.current != nil && !player.showFullScreen && !keyboardVisible {
+            // Il RESTE affiché sous le lecteur plein écran (qui le recouvre) : à la fermeture, le
+            // plein écran redescend et découvre le mini-lecteur déjà en place — plus de saut.
+            if player.current != nil && !keyboardVisible {
                 MiniPlayer()
                     .padding(.bottom, tabBarHeight + 6)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -112,6 +114,13 @@ struct RootView: View {
             tabBarHeight = TabBarMetrics.height()
             // La barre UIKit n'est mesurable qu'une fois affichée : seconde lecture juste après.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { tabBarHeight = TabBarMetrics.height() }
+        }
+        // Préparation du plein écran dès qu'un morceau démarre (fond flouté + grande pochette) :
+        // l'ouverture du lecteur est instantanée, sans à-coup.
+        .task(id: player.current?.id) {
+            guard let track = player.current else { return }
+            _ = await ArtworkCache.shared.load(for: track, maxPixel: 1000)
+            if BlurredArtwork.cached(track) == nil { _ = await BlurredArtwork.make(track) }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             keyboardVisible = true

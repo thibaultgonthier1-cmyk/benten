@@ -396,6 +396,11 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section {
             LabeledContent("Version", value: Bundle.main.appVersion)
+            NavigationLink {
+                DiagnosticsView()
+            } label: {
+                Label("Diagnostic (journal du lecteur)", systemImage: "stethoscope")
+            }
             LabeledContent("Appareil", value: DeviceLayout.current.deviceName)
             Text("Benten lit tes morceaux hors-ligne, écran verrouillé compris. Les morceaux viennent de Fichiers, d'iCloud, ou du PC par synchronisation.")
                 .font(.caption2)

@@ -657,7 +657,12 @@ struct NowPlayingView: View {
             withAnimation(.easeInOut(duration: 0.6)) { tint = resolved }
         }
         // Visualiseur branché seulement quand on le voit (vue ouverte + app au premier plan).
-        .onAppear { player.setVisualizer(active: visualizerOn) }
+        // Visualiseur branché APRÈS l'animation d'ouverture (0,5 s) : l'ouverture reste fluide.
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if player.showFullScreen && visualizerOn { player.setVisualizer(active: true) }
+            }
+        }
         .onDisappear { player.setVisualizer(active: false) }
         .onChange(of: scenePhase) { _, phase in
             player.setVisualizer(active: visualizerOn && phase == .active)
