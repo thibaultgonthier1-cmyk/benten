@@ -17,7 +17,14 @@ struct LibraryView: View {
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var favorites: FavoritesStore
     @State private var showImporter = false
-    @State private var mode: BrowseMode = .albums
+    @State private var mode: BrowseMode = LibraryView.initialMode
+
+    private static var initialMode: BrowseMode {
+        #if DEBUG
+        if DemoMode.value("demoScreen") == "tracks" { return .tracks }
+        #endif
+        return .albums
+    }
     @State private var deletion: DeletionRequest?
 
     enum BrowseMode: String, CaseIterable {

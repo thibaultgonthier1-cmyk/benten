@@ -78,6 +78,12 @@ struct RootView: View {
         }
         // Préparation du plein écran dès qu'un morceau démarre (fond flouté + grande pochette) :
         // l'ouverture du lecteur est instantanée, sans à-coup.
+        #if DEBUG
+        .task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            DemoMode.run(library: library, player: player, router: router, playlists: playlists)
+        }
+        #endif
         .task(id: player.current?.id) {
             guard let track = player.current else { return }
             _ = await ArtworkCache.shared.load(for: track, maxPixel: 1000)

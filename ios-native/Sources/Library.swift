@@ -58,6 +58,16 @@ final class Library: ObservableObject {
     init() {
         createDirectories()
         load()
+        #if DEBUG
+        // Tests automatiques sur simulateur : bibliothèque synthétique (jamais dans l'IPA).
+        if DemoMode.active {
+            let demo = DemoMode.makeTracks()
+            tracks = demo
+            refreshIndexes()
+            derivedTask?.cancel()
+            apply(Self.derive(demo))
+        }
+        #endif
     }
 
     private func refreshIndexes() {

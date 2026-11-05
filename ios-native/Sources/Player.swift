@@ -1632,3 +1632,36 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         return smoothed
     }
 }
+
+#if DEBUG
+// MARK: - Test : enregistrement des platines (mode démo uniquement)
+
+extension Player {
+    /// Enregistre séparément la sortie de chaque platine (après tempo et EQ, AVANT le volume de
+    /// mix) pendant `seconds` secondes : sert à mesurer, au millième, le calage des temps pendant
+    /// un mix réel.
+    func demoRecordDecks(seconds: Double, directory: URL) {
+        var nodes: [AVAudioNode] = []
+        for (node, name) in [(fxA as AVAudioNode, "deckA"), (fxB as AVAudioNode, "deckB")] {
+            let format = node.outputFormat(forBus: 0)
+            let url = directory.appendingPathComponent("\(name).caf")
+            try? FileManager.default.removeItem(at: url)
+            guard let file = try? AVAudioFile(forWriting: url, settings: format.settings,
+                                              commonFormat: .pcmFormatFloat32, interleaved: false) else { continue }
+            let recorder = DemoRecorder(file: file, name: name, directory: directory)
+            node.installTap(onBus: 0, bufferSize: 4096, format: format, block: Player.demoTap(recorder))
+            nodes.append(node)
+        }
+        diag("DÉMO : enregistrement des platines (\(nodes.count)) pendant \(Int(seconds)) s")
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            for node in nodes { node.removeTap(onBus: 0) }
+            diag("DÉMO : enregistrement terminé")
+        }
+    }
+
+    nonisolated static func demoTap(_ recorder: DemoRecorder) -> AVAudioNodeTapBlock {
+        { buffer, when in recorder.write(buffer, when) }
+    }
+}
+#endif

@@ -77,3 +77,96 @@ jobs:
           path: ios-native/out/benten-native.ipa
           if-no-files-found: error
           retention-days: 14
+
+  # TEST FINAL SUR SIMULATEUR (iPhone 17 Pro Max) : captures de chaque écran, vrai mix enregistré
+  # platine par platine. Mode démo compilé en Debug uniquement (jamais dans l'IPA).
+  # Se lance à la main, ou quand le message de commit contient [qa].
+  simulator-qa:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[qa]')
+    runs-on: macos-15
+    timeout-minutes: 50
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer XcodeGen
+        run: brew install xcodegen
+
+      - name: Générer le projet Xcode
+        working-directory: ios-native
+        run: xcodegen generate
+
+      - name: Sélectionner le Xcode le plus récent
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE "beta|release_candidate|_rc" | sort -V | tail -1)
+          if [ -n "$LATEST" ]; then sudo xcode-select -s "$LATEST"; fi
+          xcodebuild -version
+
+      - name: Compiler pour le simulateur (Debug, mode démo)
+        working-directory: ios-native
+        run: |
+          xcodebuild -project Benten.xcodeproj -scheme Benten -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -20
+
+      - name: Captures et mix enregistré
+        working-directory: ios-native
+        run: |
+          set -x
+          APP=$(find build/Build/Products/Debug-iphonesimulator -name "*.app" -maxdepth 2 | head -1)
+          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c "import json,sys; r=[x for x in json.load(sys.stdin)['runtimes'] if x.get('platform')=='iOS' and x['isAvailable']]; print(sorted(r,key=lambda x:[int(p) for p in x['version'].split('.')])[-1]['identifier'])")
+          DT=$(xcrun simctl list devicetypes -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devicetypes']; m=[x for x in d if x['name']=='iPhone 17 Pro Max'] or [x for x in d if 'Pro Max' in x['name']]; print(m[-1]['identifier'])")
+          echo "Runtime $RUNTIME / appareil $DT"
+          UDID=$(xcrun simctl create QA "$DT" "$RUNTIME")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl ui "$UDID" appearance dark || true
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl install "$UDID" "$APP"
+          mkdir -p qa
+          BID=com.benten.player
+          shot() {
+            local name=$1 wait=$2; shift 2
+            xcrun simctl terminate "$UDID" $BID 2>/dev/null || true
+            xcrun simctl launch "$UDID" $BID -BentenDemo "$@"
+            sleep "$wait"
+            xcrun simctl io "$UDID" screenshot "qa/$name.png"
+          }
+          shot player_carree 9 -demoScreen=player -demoTrack=0
+          shot player_bandes_noires 9 -demoScreen=player -demoTrack=1
+          shot player_large 9 -demoScreen=player -demoTrack=2
+          shot player_sombre 9 -demoScreen=player -demoTrack=3
+          shot player_sans_animation 9 -demoScreen=player -demoTrack=0 -livingArtwork NO
+          shot player_style_benten 9 -demoScreen=player -demoTrack=1 -design benten
+          shot albums 8 -demoScreen=albums
+          shot titres_index 8 -demoScreen=tracks
+          shot playlists 8 -demoScreen=playlists
+          shot playlist_mosaique 9 -demoScreen=playlist
+          shot reglages 7 -demoScreen=settings
+          # Vague de couleur : rafale de captures pendant l'animation.
+          xcrun simctl terminate "$UDID" $BID 2>/dev/null || true
+          xcrun simctl launch "$UDID" $BID -BentenDemo -demoScreen=sweep -palette rose
+          sleep 2.6
+          for i in $(seq -w 1 14); do xcrun simctl io "$UDID" screenshot "qa/vague_$i.png"; sleep 0.12; done
+          sleep 3
+          xcrun simctl io "$UDID" screenshot "qa/vague_fin.png"
+          # Vrai mix A (124 BPM) -> B (128 BPM).
+          xcrun simctl terminate "$UDID" $BID 2>/dev/null || true
+          xcrun simctl launch "$UDID" $BID -BentenDemo -demoMix -palette or
+          sleep 30
+          xcrun simctl io "$UDID" screenshot "qa/pendant_mix.png"
+          sleep 45
+          C=$(xcrun simctl get_app_container "$UDID" $BID data)
+          ls -la "$C/Documents" "$C/Library/Caches" || true
+          cp "$C"/Documents/deck*.* qa/ 2>/dev/null || true
+          cp "$C"/Documents/diag.txt qa/ 2>/dev/null || true
+          cp "$C"/Library/Caches/benten-analysis-v4.json qa/ 2>/dev/null || true
+          cp ~/Library/Logs/DiagnosticReports/Benten* qa/ 2>/dev/null || true
+          ls -la qa
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benten-simulator-qa
+          path: ios-native/qa
+          retention-days: 7

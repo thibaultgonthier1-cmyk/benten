@@ -8,9 +8,10 @@ struct PlaylistsView: View {
     @State private var newName = ""
     @State private var creating = false
     @State private var deletion: DeletionRequest?
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 AnimatedBackdrop()
 
@@ -57,6 +58,14 @@ struct PlaylistsView: View {
             .navigationDestination(for: UUID.self) { id in
                 PlaylistDetailView(playlistID: id)
             }
+            #if DEBUG
+            .task(id: playlists.items.count) {
+                if DemoMode.value("demoScreen") == "playlist", path.isEmpty,
+                   let demo = playlists.items.first(where: { $0.name == "Test mosaïque" }) {
+                    path.append(demo.id)
+                }
+            }
+            #endif
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
