@@ -18,6 +18,7 @@ struct LibraryView: View {
     @EnvironmentObject private var favorites: FavoritesStore
     @State private var showImporter = false
     @State private var mode: BrowseMode = .albums
+    @State private var deletion: DeletionRequest?
 
     enum BrowseMode: String, CaseIterable {
         case albums = "Albums", artists = "Artistes", tracks = "Titres"
@@ -101,6 +102,7 @@ struct LibraryView: View {
                 }
             }
             .toolbarBackground(Theme.ink, for: .navigationBar)
+            .deletionConfirmation($deletion)
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav, .aiff],
@@ -139,6 +141,9 @@ struct LibraryView: View {
                     .contextMenu {
                         Button { player.play(album.tracks, startingAt: 0) } label: { Label("Lire", systemImage: "play.fill") }
                         Button { player.playShuffled(album.tracks) } label: { Label("Aléatoire", systemImage: "shuffle") }
+                        DeleteFromDeviceButton("Supprimer l'album de l'iPhone") {
+                            deletion = DeletionRequest(tracks: album.tracks, name: album.title)
+                        }
                     }
                 }
             }
@@ -155,6 +160,9 @@ struct LibraryView: View {
                         let all = artist.albums.flatMap(\.tracks)
                         Button { player.play(all, startingAt: 0) } label: { Label("Tout lire", systemImage: "play.fill") }
                         Button { player.playShuffled(all) } label: { Label("Aléatoire", systemImage: "shuffle") }
+                        DeleteFromDeviceButton("Supprimer l'artiste de l'iPhone") {
+                            deletion = DeletionRequest(tracks: all, name: artist.name)
+                        }
                     }
                 }
             }
@@ -173,6 +181,9 @@ struct LibraryView: View {
                         onPlay: { player.play(list, startingAt: offset) },
                         onToggleFavorite: { favorites.toggle(track.id) }
                     )
+                    .contextMenu {
+                        DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
+                    }
                 }
             }
             .transition(.opacity)
@@ -501,26 +512,46 @@ struct MiniPlayer: View {
     }
 }
 
-/// Pose le mini-lecteur au-dessus de la barre d'onglets. Appliqué à CHAQUE onglet : un
-/// `safeAreaInset` sur la TabView entière le faisait passer PAR-DESSUS les onglets (plus d'accès
-/// aux réglages pendant la lecture).
-struct MiniPlayerInset: ViewModifier {
+/// Réserve, en bas de chaque onglet, la place du mini-lecteur (pour que le dernier élément d'une
+/// liste ne passe pas dessous). Simple espace vide : le mini-lecteur lui-même est UNIQUE et posé
+/// une seule fois par-dessus les onglets (voir `RootView`).
+struct MiniPlayerSpacer: ViewModifier {
     @EnvironmentObject private var player: Player
 
     func body(content: Content) -> some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if player.current != nil {
-                MiniPlayer()
-                    .padding(.bottom, 6)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+            Color.clear.frame(height: player.current == nil ? 0 : 70)
         }
-        .animation(Motion.spring, value: player.current == nil)
     }
 }
 
 extension View {
-    func miniPlayerInset() -> some View { modifier(MiniPlayerInset()) }
+    func miniPlayerSpacer() -> some View { modifier(MiniPlayerSpacer()) }
+}
+
+/// Hauteur réelle de la barre d'onglets (lue sur la vraie barre UIKit sous la TabView).
+enum TabBarMetrics {
+    @MainActor static func height() -> CGFloat {
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        for window in windows {
+            if let bar = findTabBar(in: window.rootViewController) {
+                let height = bar.frame.height - window.safeAreaInsets.bottom
+                if height > 30 { return height }
+            }
+        }
+        return 49
+    }
+
+    @MainActor private static func findTabBar(in controller: UIViewController?) -> UITabBar? {
+        guard let controller else { return nil }
+        if let tabs = controller as? UITabBarController { return tabs.tabBar }
+        for child in controller.children {
+            if let bar = findTabBar(in: child) { return bar }
+        }
+        return findTabBar(in: controller.presentedViewController)
+    }
 }
 
 // MARK: - Lecteur plein écran
@@ -1042,6 +1073,9 @@ struct AlbumDetailView: View {
     let albumID: String
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
+    @Environment(\.dismiss) private var dismiss
+    @State private var deletion: DeletionRequest?
+    @State private var leaveAfter = false
 
     var body: some View {
         ZStack {
@@ -1082,6 +1116,12 @@ struct AlbumDetailView: View {
                             ) {
                                 player.play(album.tracks, startingAt: offset)
                             }
+                            .contextMenu {
+                                DeleteFromDeviceButton {
+                                    leaveAfter = album.tracks.count <= 1
+                                    deletion = DeletionRequest(track: track)
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
@@ -1093,6 +1133,23 @@ struct AlbumDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.ink, for: .navigationBar)
+        .toolbar {
+            if let album = library.albums.first(where: { $0.id == albumID }) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        DeleteFromDeviceButton("Supprimer l'album de l'iPhone") {
+                            leaveAfter = true
+                            deletion = DeletionRequest(tracks: album.tracks, name: album.title)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").foregroundStyle(Theme.accent)
+                    }
+                }
+            }
+        }
+        .deletionConfirmation($deletion) {
+            if leaveAfter { dismiss() }
+        }
     }
 }
 
@@ -1100,6 +1157,9 @@ struct ArtistDetailView: View {
     let artistID: String
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
+    @Environment(\.dismiss) private var dismiss
+    @State private var deletion: DeletionRequest?
+    @State private var leaveAfter = false
 
     var body: some View {
         ZStack {
@@ -1152,6 +1212,12 @@ struct ArtistDetailView: View {
                                     isPlaying: player.playing,
                                     onPlay: { player.play(all, startingAt: offset) }
                                 )
+                                .contextMenu {
+                                    DeleteFromDeviceButton {
+                                        leaveAfter = all.count <= 1
+                                        deletion = DeletionRequest(track: track)
+                                    }
+                                }
                             }
                         }
                     }
@@ -1164,6 +1230,23 @@ struct ArtistDetailView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.ink, for: .navigationBar)
+        .toolbar {
+            if let artist = library.artists.first(where: { $0.id == artistID }) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        DeleteFromDeviceButton("Supprimer l'artiste de l'iPhone") {
+                            leaveAfter = true
+                            deletion = DeletionRequest(tracks: artist.albums.flatMap(\.tracks), name: artist.name)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").foregroundStyle(Theme.accent)
+                    }
+                }
+            }
+        }
+        .deletionConfirmation($deletion) {
+            if leaveAfter { dismiss() }
+        }
     }
 }
 

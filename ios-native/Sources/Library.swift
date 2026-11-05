@@ -332,10 +332,33 @@ final class Library: ObservableObject {
     // MARK: - Suppression
 
     func delete(_ track: Track) {
-        try? FileManager.default.removeItem(at: track.fileURL)
-        if let artwork = track.artworkURL { try? FileManager.default.removeItem(at: artwork) }
-        tracks.removeAll { $0.id == track.id }
+        delete(ids: [track.id])
+    }
+
+    /// Supprime des morceaux de l'iPhone (fichier audio + pochette + index). Les favoris et les
+    /// playlists se nettoient d'eux-mêmes juste après (voir `RootView`). Les fichiers sont effacés
+    /// hors du fil principal : supprimer 300 morceaux ne fige pas l'interface.
+    func delete(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let doomed = tracks.filter { ids.contains($0.id) }
+        guard !doomed.isEmpty else { return }
+        let files = doomed.map(\.fileURL) + doomed.compactMap(\.artworkURL)
+        for track in doomed {
+            if let name = track.artworkName { ArtworkCache.shared.forget(fileName: name) }
+        }
+        tracks.removeAll { ids.contains($0.id) }
         save()
+        Task.detached(priority: .utility) {
+            for url in files { try? FileManager.default.removeItem(at: url) }
+        }
+    }
+
+    /// Place occupée par des morceaux (pour le message de confirmation).
+    func size(of ids: Set<UUID>) -> Int64 {
+        tracks.filter { ids.contains($0.id) }.reduce(Int64(0)) { sum, track in
+            let size = (try? FileManager.default.attributesOfItem(atPath: track.fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+            return sum + size
+        }
     }
 
     func deleteAll() {

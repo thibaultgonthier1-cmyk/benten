@@ -5,6 +5,7 @@ struct SearchView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @State private var query = ""
+    @State private var deletion: DeletionRequest?
 
     private var results: [Track] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -41,6 +42,9 @@ struct SearchView: View {
                                     isPlaying: player.playing,
                                     onPlay: { player.play(list, startingAt: offset) }
                                 )
+                                .contextMenu {
+                                    DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
+                                }
                             }
                         }
                         .padding(.horizontal, 14)
@@ -52,6 +56,7 @@ struct SearchView: View {
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Titres, artistes, albums")
             .navigationTitle("Recherche")
             .toolbarBackground(Theme.ink, for: .navigationBar)
+            .deletionConfirmation($deletion)
         }
     }
 }
@@ -93,7 +98,10 @@ struct SettingsView: View {
             .navigationTitle("Réglages")
             .toolbarBackground(Theme.ink, for: .navigationBar)
             .confirmationDialog("Supprimer tous les morceaux ?", isPresented: $confirmDelete) {
-                Button("Tout supprimer", role: .destructive) { library.deleteAll() }
+                Button("Tout supprimer", role: .destructive) {
+                    player.stopAndClear()
+                    library.deleteAll()
+                }
                 Button("Annuler", role: .cancel) {}
             }
             .alert("Playlist Phonk / Funk", isPresented: Binding(get: { genreMessage != nil }, set: { if !$0 { genreMessage = nil } })) {

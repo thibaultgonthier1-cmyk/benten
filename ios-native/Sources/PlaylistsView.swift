@@ -7,6 +7,7 @@ struct PlaylistsView: View {
     @EnvironmentObject private var playlists: PlaylistStore
     @State private var newName = ""
     @State private var creating = false
+    @State private var deletion: DeletionRequest?
 
     var body: some View {
         NavigationStack {
@@ -36,7 +37,10 @@ struct PlaylistsView: View {
                                     } label: { Label("Aléatoire", systemImage: "shuffle") }
                                     Button(role: .destructive) {
                                         withAnimation(Motion.spring) { playlists.delete(playlist.id) }
-                                    } label: { Label("Supprimer", systemImage: "trash") }
+                                    } label: { Label("Supprimer la playlist", systemImage: "minus.circle") }
+                                    DeleteFromDeviceButton("Supprimer ses morceaux de l'iPhone") {
+                                        deletion = DeletionRequest(tracks: playlists.tracks(of: playlist, in: library), name: playlist.name)
+                                    }
                                 }
                             }
                         }
@@ -47,6 +51,7 @@ struct PlaylistsView: View {
             }
             .navigationTitle("Playlists")
             .navigationBarTitleDisplayMode(.large)
+            .deletionConfirmation($deletion)
             .toolbarBackground(Theme.ink, for: .navigationBar)
             .navigationDestination(for: UUID.self) { id in
                 PlaylistDetailView(playlistID: id)
@@ -138,6 +143,9 @@ struct PlaylistDetailView: View {
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var playlists: PlaylistStore
     @Environment(\.dismiss) private var dismiss
+    @State private var deletion: DeletionRequest?
+    /// Après « supprimer la playlist ET ses morceaux », on supprime aussi la playlist.
+    @State private var deletePlaylistAfter = false
 
     var body: some View {
         ZStack {
@@ -183,10 +191,14 @@ struct PlaylistDetailView: View {
                                 onPlay: { player.play(tracks, startingAt: offset) }
                             )
                             .contextMenu {
-                                Button(role: .destructive) {
+                                Button {
                                     withAnimation(Motion.spring) { playlists.remove(track.id, from: playlist.id) }
                                 } label: {
                                     Label("Retirer de la playlist", systemImage: "minus.circle")
+                                }
+                                DeleteFromDeviceButton {
+                                    deletePlaylistAfter = false
+                                    deletion = DeletionRequest(track: track)
                                 }
                             }
                         }
@@ -199,14 +211,36 @@ struct PlaylistDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .deletionConfirmation($deletion) {
+            if deletePlaylistAfter {
+                deletePlaylistAfter = false
+                playlists.delete(playlistID)
+                dismiss()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if let playlist = playlists.items.first(where: { $0.id == playlistID }) {
+                        let tracks = playlists.tracks(of: playlist, in: library)
+                        Section("Libérer de la place") {
+                            DeleteFromDeviceButton("Supprimer ses \(tracks.count) morceaux de l'iPhone") {
+                                deletePlaylistAfter = false
+                                deletion = DeletionRequest(tracks: tracks, name: playlist.name)
+                            }
+                            .disabled(tracks.isEmpty)
+                            DeleteFromDeviceButton("Supprimer la playlist ET ses morceaux") {
+                                deletePlaylistAfter = true
+                                deletion = DeletionRequest(tracks: tracks, name: playlist.name)
+                            }
+                            .disabled(tracks.isEmpty)
+                        }
+                    }
                     Button(role: .destructive) {
                         playlists.delete(playlistID)
                         dismiss()
                     } label: {
-                        Label("Supprimer la playlist", systemImage: "trash")
+                        Label("Supprimer la playlist (garder les morceaux)", systemImage: "minus.circle")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")

@@ -597,6 +597,10 @@ struct MixPlan: Sendable {
         case crossfade
         /// Même album : enchaînement sans aucun blanc, sans fondu (comme Apple).
         case gapless
+        /// Même morceau qui se répète : raccord COURT (≈ 1,5 s) de la vraie fin vers le vrai début,
+        /// calé sur un temps. Un long fondu fin→intro sonnait comme une coupure (l'outro s'efface,
+        /// il ne reste qu'une intro calme) et la barre repartait avant qu'on entende le début.
+        case loop
     }
 
     var style: Style
@@ -616,10 +620,33 @@ enum MixPlanner {
     static func plan(
         out: TrackAnalysis, outDuration: Double,
         into incoming: TrackAnalysis,
-        sameAlbum: Bool, beats: Int, seconds: Double, beatMatch: Bool
+        sameAlbum: Bool, sameTrack: Bool = false, beats: Int, seconds: Double, beatMatch: Bool
     ) -> MixPlan {
         let outEnd = min(outDuration, out.end ?? outDuration)
         let inStart = min(max(0, incoming.start), 8)
+
+        if sameTrack {
+            var length = 1.5
+            var exit = outEnd - length
+            var entry = inStart
+            if beatMatch, let bpm = out.bpm {
+                let beat = 60 / bpm
+                // Raccord de 4 temps maximum, sortie sur un temps, entrée sur un temps fort.
+                length = min(max(beat * 2, 1.0), beat * 4)
+                exit = outEnd - length
+                if let anchor = out.tailDownbeat ?? out.midDownbeat {
+                    exit = anchor + ((exit - anchor) / beat).rounded(.down) * beat
+                }
+                if let anchor = incoming.headDownbeat ?? incoming.midDownbeat {
+                    let bar = 4 * beat
+                    let aligned = anchor + ((inStart - 0.02 - anchor) / bar).rounded(.up) * bar
+                    if aligned >= 0, aligned <= inStart + bar { entry = aligned }
+                }
+            }
+            exit = max(outDuration * 0.5, exit)
+            length = max(0.5, min(length, outDuration - exit - 0.02))
+            return MixPlan(style: .loop, exitAt: exit, entryAt: max(0, entry), length: length, tempoRatio: 1, levelGain: 1, bassSwap: false)
+        }
 
         if sameAlbum {
             return MixPlan(style: .gapless, exitAt: outDuration, entryAt: 0, length: 0, tempoRatio: 1, levelGain: 1, bassSwap: false)

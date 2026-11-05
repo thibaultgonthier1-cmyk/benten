@@ -54,45 +54,70 @@ struct RootView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var playlists: PlaylistStore
     @EnvironmentObject private var favorites: FavoritesStore
+    @State private var tabBarHeight: CGFloat = 49
+    @State private var keyboardVisible = false
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             TabView(selection: $router.tab) {
-                // Le mini-lecteur est posé DANS chaque onglet : il se place juste au-dessus de la
-                // barre d'onglets, qui reste toujours accessible (réglages compris).
+                // Chaque onglet réserve en bas la place du mini-lecteur (posé une seule fois,
+                // plus bas) : la barre d'onglets reste toujours accessible, réglages compris.
                 LibraryView()
-                    .miniPlayerInset()
+                    .miniPlayerSpacer()
                     .tabItem { Label("Bibliothèque", systemImage: "square.stack.fill") }
                     .tag(AppRouter.Tab.library)
 
                 FavoritesView()
-                    .miniPlayerInset()
+                    .miniPlayerSpacer()
                     .tabItem { Label("Favoris", systemImage: "heart.fill") }
                     .tag(AppRouter.Tab.favorites)
 
                 PlaylistsView()
-                    .miniPlayerInset()
+                    .miniPlayerSpacer()
                     .tabItem { Label("Playlists", systemImage: "music.note.list") }
                     .tag(AppRouter.Tab.playlists)
 
                 SearchView()
-                    .miniPlayerInset()
+                    .miniPlayerSpacer()
                     .tabItem { Label("Recherche", systemImage: "magnifyingglass") }
                     .tag(AppRouter.Tab.search)
 
                 SettingsView()
-                    .miniPlayerInset()
+                    .miniPlayerSpacer()
                     .tabItem { Label("Réglages", systemImage: "gearshape.fill") }
                     .tag(AppRouter.Tab.settings)
             }
             .tint(Theme.accent)
             .onChange(of: router.tab) { _, _ in Haptics.choose() }
 
+            // UN SEUL mini-lecteur, permanent, posé juste au-dessus de la barre d'onglets : il ne
+            // se recrée plus à chaque navigation (avant, un exemplaire par onglet apparaissait
+            // avant le reste de l'écran). Caché quand le clavier est ouvert.
+            if player.current != nil && !player.showFullScreen && !keyboardVisible {
+                MiniPlayer()
+                    .padding(.bottom, tabBarHeight + 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(5)
+            }
+
             if player.current != nil && player.showFullScreen {
                 NowPlayingView()
                     .transition(.move(edge: .bottom))
                     .zIndex(10)
             }
+        }
+        .animation(Motion.spring, value: player.current == nil)
+        .animation(Motion.quick, value: keyboardVisible)
+        .onAppear {
+            tabBarHeight = TabBarMetrics.height()
+            // La barre UIKit n'est mesurable qu'une fois affichée : seconde lecture juste après.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { tabBarHeight = TabBarMetrics.height() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardVisible = false
         }
         // Playlist Phonk / Funk tenue à jour TOUTE SEULE : au lancement et à chaque changement de
         // la bibliothèque (synchro, import, suppression). Regroupé : une passe 1 s après la rafale.

@@ -807,6 +807,7 @@ final class Player: NSObject, ObservableObject {
             outDuration: duration,
             into: analyses[next.id] ?? .empty,
             sameAlbum: sameAlbum,
+            sameTrack: next.id == current.id,
             beats: mixLength.beats,
             seconds: mixLength.seconds,
             beatMatch: beatMatched
@@ -914,6 +915,71 @@ final class Player: NSObject, ObservableObject {
     }
 
     func next() { advance(manual: true) }
+
+    /// Des morceaux vont être supprimés de l'iPhone : on les retire de la file. Si le morceau en
+    /// cours en fait partie, on passe proprement au suivant qui reste (ou on s'arrête).
+    func removeTracks(_ ids: Set<UUID>) {
+        guard !ids.isEmpty, !queue.isEmpty else { return }
+        let survivors = queue.filter { !ids.contains($0.id) }
+        guard let current, ids.contains(current.id) else {
+            // Le morceau en cours reste : on garde la lecture, on recompose juste la file.
+            let currentID = self.current?.id
+            var newIndex: [UUID: Int] = [:]
+            for (index, track) in survivors.enumerated() where newIndex[track.id] == nil {
+                newIndex[track.id] = index
+            }
+            order = order.compactMap { old in
+                guard queue.indices.contains(old) else { return nil }
+                return newIndex[queue[old].id]
+            }
+            var seen = Set<Int>()
+            order = order.filter { seen.insert($0).inserted }
+            queue = survivors
+            queuePosition = currentID.flatMap { newIndex[$0] } ?? 0
+            refreshPlan()
+            return
+        }
+
+        // Le morceau en cours est supprimé : on cherche le suivant qui survit, dans l'ordre.
+        var nextID: UUID?
+        if let at = order.firstIndex(of: queuePosition) {
+            for step in 1..<max(2, order.count + 1) {
+                let index = order[(at + step) % order.count]
+                if queue.indices.contains(index), !ids.contains(queue[index].id) {
+                    nextID = queue[index].id
+                    break
+                }
+            }
+        }
+        _ = current
+        if survivors.isEmpty || nextID == nil {
+            stopAndClear()
+            return
+        }
+        let start = survivors.firstIndex { $0.id == nextID } ?? 0
+        play(survivors, startingAt: start)
+    }
+
+    /// Arrêt complet : plus rien en cours (le mini-lecteur disparaît).
+    func stopAndClear() {
+        cancelFade()
+        analysisTask?.cancel()
+        deckA.stop()
+        deckB.stop()
+        playing = false
+        showFullScreen = false
+        current = nil
+        activeFile = nil
+        queue = []
+        order = []
+        queuePosition = 0
+        plan = nil
+        planTrackID = nil
+        pausedPosition = nil
+        clock.position = 0
+        clock.duration = 0
+        updateNowPlaying()
+    }
 
     func previous() {
         guard !queue.isEmpty else { return }
@@ -1042,7 +1108,9 @@ final class Player: NSObject, ObservableObject {
                 if plan.style != .gapless {
                     applyCurves(plan, t: min(1, t), outgoing: outgoing, incoming: incoming, outFX: outFX, inFX: inFX)
                 }
-                if !switched && (plan.style == .gapless || t >= 0.5) {
+                // Mix entre deux morceaux : bascule au milieu. Boucle / enchaînement sans blanc :
+                // bascule DÈS que le début se fait entendre (la barre repart pile avec le son).
+                if !switched && (plan.style == .gapless || plan.style == .loop || t >= 0.5) {
                     switched = true
                     activeDeck = incoming
                     activeFile = file
@@ -1137,6 +1205,10 @@ final class Player: NSObject, ObservableObject {
             let smooth = t * t * (3 - 2 * t)
             inFX.bands[0].gain = Float(-12 * (1 - smooth))
             outFX.bands[0].gain = Float(-12 * smooth)
+        case .loop:
+            // Raccord court à puissance constante, sans effet : la fin se fond dans le début.
+            incoming.volume = Float(sin(t * .pi / 2) * gain)
+            outgoing.volume = Float(cos(t * .pi / 2))
         case .gapless:
             break
         }

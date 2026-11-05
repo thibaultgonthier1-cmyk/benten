@@ -5,6 +5,7 @@ struct FavoritesView: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var player: Player
     @EnvironmentObject private var favorites: FavoritesStore
+    @State private var deletion: DeletionRequest?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,9 @@ struct FavoritesView: View {
                                     }
                                 )
                                 .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
+                                .contextMenu {
+                                    DeleteFromDeviceButton { deletion = DeletionRequest(track: track) }
+                                }
                             }
                         }
                         .padding(.horizontal, 14)
@@ -39,6 +43,7 @@ struct FavoritesView: View {
             }
             .navigationTitle("Favoris")
             .navigationBarTitleDisplayMode(.large)
+            .deletionConfirmation($deletion)
             .toolbarBackground(Theme.ink, for: .navigationBar)
         }
     }
