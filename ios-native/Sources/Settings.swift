@@ -73,6 +73,9 @@ struct SettingsView: View {
     @AppStorage("sync.base") private var syncBase = ""
     @AppStorage("sync.token") private var syncToken = ""
     @AppStorage("sync.limit") private var syncLimit = 100
+    @State private var showPicker = false
+    @State private var picked = Set<Int>()
+    @State private var search = ""
     @State private var usedBytes: Int64 = 0
     @State private var genreMessage: String?
     @AppStorage("palette") private var paletteRaw = Palette.or.rawValue
@@ -214,6 +217,18 @@ struct SettingsView: View {
 
             Button {
                 Haptics.press()
+                picked = []
+                search = ""
+                showPicker = true
+                Task { await sync.loadCandidates(base: syncBase, token: syncToken, library: library) }
+            } label: {
+                Label(sync.loadingList ? "Chargement…" : "Choisir les morceaux…", systemImage: "checklist")
+                    .foregroundStyle(Theme.accent)
+            }
+            .disabled(sync.running || sync.loadingList)
+
+            Button {
+                Haptics.press()
                 Task { await sync.run(base: syncBase, token: syncToken, limit: syncLimit, library: library) }
             } label: {
                 Label(sync.running ? "Récupération…" : "Récupérer depuis le PC", systemImage: "arrow.down.circle")
@@ -231,6 +246,76 @@ struct SettingsView: View {
             }
         } header: {
             Text("Synchroniser avec le PC").foregroundStyle(Theme.accent.opacity(0.8))
+        }
+        .sheet(isPresented: $showPicker) { pickerSheet }
+    }
+
+    // MARK: Sélection des morceaux du PC
+
+    private var filteredCandidates: [SyncService.Candidate] {
+        let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return sync.candidates }
+        return sync.candidates.filter {
+            "\($0.title) \($0.artist) \($0.album)".lowercased().contains(q)
+        }
+    }
+
+    private var pickerSheet: some View {
+        NavigationStack {
+            List {
+                if sync.candidates.isEmpty {
+                    Text(sync.status.isEmpty ? "chargement…" : sync.status)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.dim)
+                }
+                ForEach(filteredCandidates) { item in
+                    Button {
+                        if picked.contains(item.id) { picked.remove(item.id) } else { picked.insert(item.id) }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: picked.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(picked.contains(item.id) ? Theme.accent : Theme.dim)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title).lineLimit(1)
+                                Text(item.artist)
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.dim)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if item.known {
+                                Text("déjà")
+                                    .font(.caption2)
+                                    .foregroundStyle(Theme.dim)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .searchable(text: $search, prompt: "titre ou artiste")
+            .navigationTitle(picked.isEmpty ? "Choisir" : "\(picked.count) choisi(s)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fermer") { showPicker = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Récupérer") {
+                        Haptics.press()
+                        showPicker = false
+                        Task {
+                            await sync.runSelection(
+                                base: syncBase,
+                                token: syncToken,
+                                ids: picked,
+                                library: library
+                            )
+                        }
+                    }
+                    .disabled(picked.isEmpty || sync.running)
+                }
+            }
         }
     }
 

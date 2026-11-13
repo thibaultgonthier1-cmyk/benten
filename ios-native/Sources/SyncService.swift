@@ -36,6 +36,124 @@ final class SyncService: ObservableObject {
         let error: String
     }
 
+    /// Morceau proposé par le PC, avec l'état local : `known` évite de le reprendre.
+    struct Candidate: Identifiable, Equatable {
+        let id: Int
+        let title: String
+        let artist: String
+        let album: String
+        let durationSec: Double
+        let audio: String
+        let art: String?
+        let known: Bool
+    }
+
+    /// Liste complète du PC, affichée pour que l'utilisateur coche ce qu'il veut.
+    @Published var candidates: [Candidate] = []
+    @Published var loadingList = false
+
+    /// Charge la liste du PC sans rien télécharger : sert à l'écran de sélection.
+    func loadCandidates(base rawBase: String, token: String, library: Library) async {
+        guard let base = Self.normalize(rawBase) else {
+            status = "adresse invalide — exemple : http://192.168.1.10:4321"
+            return
+        }
+        let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanToken.isEmpty else {
+            status = "jeton manquant : il est affiché dans les Réglages du PC"
+            return
+        }
+        loadingList = true
+        defer { loadingList = false }
+        do {
+            status = "chargement de la liste…"
+            let remote = try await fetchLibrary(base: base, token: cleanToken)
+            let known = Set(library.tracks.compactMap { $0.remoteID })
+            candidates = remote.map {
+                Candidate(
+                    id: $0.id,
+                    title: $0.title,
+                    artist: $0.artist,
+                    album: $0.album,
+                    durationSec: $0.durationSec,
+                    audio: $0.audio,
+                    art: $0.art,
+                    known: known.contains($0.id)
+                )
+            }
+            let missing = candidates.filter { !$0.known }.count
+            status = "\(missing) morceau(x) à récupérer sur \(candidates.count)"
+        } catch {
+            status = Self.describe(error)
+        }
+    }
+
+    /// Récupère uniquement les morceaux cochés.
+    func runSelection(base rawBase: String, token: String, ids: Set<Int>, library: Library) async {
+        guard !running else { return }
+        guard !ids.isEmpty else {
+            status = "aucun morceau sélectionné"
+            return
+        }
+        guard let base = Self.normalize(rawBase) else {
+            status = "adresse invalide — exemple : http://192.168.1.10:4321"
+            return
+        }
+        let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanToken.isEmpty else {
+            status = "jeton manquant : il est affiché dans les Réglages du PC"
+            return
+        }
+
+        running = true
+        progress = 0
+        defer { running = false }
+
+        let selection = candidates.filter { ids.contains($0.id) && !$0.known }
+        if selection.isEmpty {
+            status = "ces morceaux sont déjà sur le téléphone"
+            return
+        }
+
+        var added = 0
+        for (offset, item) in selection.enumerated() {
+            status = "récupération \(offset + 1)/\(selection.count) — \(item.title)"
+            progress = Double(offset) / Double(selection.count)
+            do {
+                let data = try await fetchAudio(base: base, token: cleanToken, path: item.audio)
+                let trackID = await library.adopt(
+                    data: data,
+                    remote: item.id,
+                    fallbackTitle: item.title,
+                    fallbackArtist: item.artist
+                )
+                if let trackID, let artPath = item.art,
+                   let art = try? await fetchAudio(base: base, token: cleanToken, path: artPath) {
+                    await library.attachArtwork(trackID: trackID, data: art)
+                }
+                added += 1
+            } catch {
+                continue
+            }
+        }
+        progress = 1
+        status = added == 0 ? "aucun morceau récupéré" : "\(added) morceau(x) récupéré(s)"
+        // Les morceaux récupérés ne doivent plus être proposés : on rafraîchit l'état local.
+        let known = Set(library.tracks.compactMap { $0.remoteID })
+        candidates = candidates.map {
+            Candidate(
+                id: $0.id,
+                title: $0.title,
+                artist: $0.artist,
+                album: $0.album,
+                durationSec: $0.durationSec,
+                audio: $0.audio,
+                art: $0.art,
+                known: known.contains($0.id)
+            )
+        }
+    }
+
     /// Normalise l'adresse saisie : sans schéma, on suppose `http://` (le PC sert en clair sur le
     /// réseau local). Un slash final est retiré pour ne pas doubler les séparateurs.
     static func normalize(_ raw: String) -> String? {
