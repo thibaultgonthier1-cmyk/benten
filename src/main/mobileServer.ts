@@ -119,6 +119,20 @@ export function startMobileServer(): void {
           response.end(JSON.stringify({ error: error instanceof Error ? error.message : "erreur" }));
           return;
         }
+        // Filtre optionnel : `?ids=1,2,3` ne renvoie que les morceaux demandés. C'est ce qui
+        // permet au téléphone de CHOISIR ce qu'il récupère, au lieu d'aspirer toute la
+        // bibliothèque du PC. Sans `ids`, le comportement d'origine est conservé (tout).
+        const idsParam = url.searchParams.get("ids");
+        if (idsParam) {
+          const wanted = new Set(
+            idsParam
+              .split(",")
+              .map((value) => Number(value.trim()))
+              .filter((value) => Number.isFinite(value)),
+          );
+          source = source.filter((track) => wanted.has(track.id));
+        }
+
         const items = source.map(({ path, ...rest }) => ({
           ...rest,
           // La pochette est servie par le PC : elle vit dans son cache, pas dans le fichier audio.

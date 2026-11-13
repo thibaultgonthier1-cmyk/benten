@@ -726,6 +726,14 @@ function renderSettings() {
             <button id="syncRun" class="btn go" type="button">Récupérer</button>
           </div>
           <p class="hint" id="syncInfo">—</p>
+          <hr style="border:0;border-top:1px solid rgba(255,255,255,.08);margin:14px 0" />
+          <input id="syncSearch" class="field" type="search" placeholder="filtrer par titre ou artiste" autocomplete="off" />
+          <div class="row-btns">
+            <button id="syncPick" class="btn ghost" type="button">Choisir les morceaux…</button>
+            <button id="syncPickRun" class="btn go" type="button">Récupérer la sélection</button>
+          </div>
+          <p class="hint" id="syncPickInfo">Choisis exactement ce que le téléphone reçoit.</p>
+          <div class="rows" id="syncPicker"></div>
         </div>
       </div>
     </div>
@@ -861,7 +869,26 @@ function setupDelegation() {
     }
     if (t.closest("#syncTest")) { runSyncTest(); return; }
     if (t.closest("#syncRun")) { runSync(); return; }
+    if (t.closest("#syncPick")) { openPicker(); return; }
+    if (t.closest("#syncPickRun")) { runSyncSelection(); return; }
     if (t.closest("#clear")) { runClear(); return; }
+  });
+
+  // Cocher / décocher un morceau dans la liste de sélection.
+  document.addEventListener("change", (event) => {
+    const box = event.target;
+    if (!(box instanceof HTMLInputElement) || box.dataset.pick === undefined) return;
+    const id = box.dataset.pick;
+    if (box.checked) pickerChecked.add(id);
+    else pickerChecked.delete(id);
+    updatePickInfo();
+  });
+
+  // Filtrer la liste de sélection pendant la frappe.
+  document.addEventListener("input", (event) => {
+    const field = event.target;
+    if (!(field instanceof HTMLInputElement) || field.id !== "syncSearch") return;
+    renderPicker();
   });
 }
 
@@ -1412,6 +1439,126 @@ function runSync() {
       fail("synchronisation", error);
     } finally {
       if ($("syncRun")) $("syncRun").disabled = false;
+    }
+  })();
+}
+
+/* --------------------- Sélection de ce qu'on récupère --------------------- */
+
+/**
+ * Le téléphone demandait TOUTE la bibliothèque du PC et ne gardait que ce qui lui manquait :
+ * impossible de choisir. Cette liste permet de cocher les morceaux un par un, puis de ne
+ * récupérer que ceux-là. Le PC n'envoie que les identifiants demandés (`?ids=`).
+ */
+let pickerRemote = [];
+const pickerChecked = new Set();
+
+async function openPicker() {
+  const info = $("syncPickInfo");
+  const { host, token } = syncTargets();
+  if (!host || !token) { info.textContent = "adresse et jeton obligatoires"; return; }
+  info.textContent = "chargement de la liste…";
+  try {
+    const response = await fetch(`${host}/api/library?token=${encodeURIComponent(token)}`);
+    if (!response.ok) throw new Error(`le PC a répondu ${response.status}`);
+    const payload = await response.json();
+    pickerRemote = Array.isArray(payload.tracks) ? payload.tracks : [];
+    pickerChecked.clear();
+    renderPicker();
+    updatePickInfo();
+  } catch (error) {
+    info.textContent = `échec : ${error instanceof Error ? error.message : String(error)}`;
+    fail("sélection", error);
+  }
+}
+
+function renderPicker() {
+  const box = $("syncPicker");
+  if (!box) return;
+  if (pickerRemote.length === 0) { box.innerHTML = ""; return; }
+  const known = new Set(state.tracks.map((t) => t.id));
+  const q = ($("syncSearch")?.value ?? "").trim().toLowerCase();
+  const rows = pickerRemote.filter((item) => {
+    if (!q) return true;
+    return `${item.title} ${item.artist} ${item.album ?? ""}`.toLowerCase().includes(q);
+  });
+  if (rows.length === 0) { box.innerHTML = `<p class="hint">aucun morceau ne correspond</p>`; return; }
+  box.innerHTML = rows.slice(0, 500).map((item) => {
+    const deja = known.has(`pc:${item.id}`);
+    const checked = pickerChecked.has(String(item.id)) ? "checked" : "";
+    const duree = item.durationSec
+      ? `${Math.floor(item.durationSec / 60)}:${String(Math.round(item.durationSec % 60)).padStart(2, "0")}`
+      : "";
+    return `<label style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+      <input type="checkbox" data-pick="${item.id}" ${checked} />
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.title)} <span class="hint">— ${escapeHtml(item.artist ?? "")}</span></span>
+      <span class="hint">${deja ? "déjà là" : duree}</span>
+    </label>`;
+  }).join("");
+}
+
+function updatePickInfo() {
+  const info = $("syncPickInfo");
+  if (!info) return;
+  info.textContent = pickerChecked.size === 0
+    ? "Choisis exactement ce que le téléphone reçoit."
+    : `${pickerChecked.size} morceau(x) sélectionné(s)`;
+}
+
+function runSyncSelection() {
+  void (async () => {
+    const info = $("syncPickInfo");
+    const { host, token } = syncTargets();
+    if (!host || !token) { info.textContent = "adresse et jeton obligatoires"; return; }
+    if (pickerChecked.size === 0) { info.textContent = "aucun morceau sélectionné"; return; }
+    const known = new Set(state.tracks.map((t) => t.id));
+    const wanted = pickerRemote.filter(
+      (item) => pickerChecked.has(String(item.id)) && !known.has(`pc:${item.id}`),
+    );
+    if (wanted.length === 0) { info.textContent = "tout est déjà sur le téléphone"; return; }
+    if ($("syncPickRun")) $("syncPickRun").disabled = true;
+    let added = 0;
+    try {
+      for (const item of wanted) {
+        info.textContent = `${added}/${wanted.length} récupéré(s)…`;
+        const audioResponse = await fetch(`${host}${item.audio}`);
+        if (!audioResponse.ok) continue;
+        const blob = await audioResponse.blob();
+        let cover = null;
+        if (item.art) {
+          try {
+            const artResponse = await fetch(`${host}${item.art}`);
+            if (artResponse.ok) cover = await artResponse.blob();
+          } catch { /* pochette absente : dégradé de repli */ }
+        }
+        const record = {
+          id: `pc:${item.id}`,
+          title: item.title,
+          artist: item.artist,
+          album: item.album || "",
+          blob,
+          cover,
+          durationSec: item.durationSec,
+          addedAt: Date.now(),
+        };
+        try { if (state.persistent) await saveTrack(record); }
+        catch (e) { state.persistent = false; fail("enregistrement", e); }
+        state.tracks = [
+          ...state.tracks.filter((t) => t.id !== record.id),
+          state.persistent ? metaOf(record) : record,
+        ];
+        added += 1;
+        pickerChecked.delete(String(item.id));
+      }
+      render();
+      renderPicker();
+      updatePickInfo();
+      info.textContent = `${added} morceau(x) récupéré(s)`;
+    } catch (error) {
+      info.textContent = `échec : ${error instanceof Error ? error.message : String(error)}`;
+      fail("sélection", error);
+    } finally {
+      if ($("syncPickRun")) $("syncPickRun").disabled = false;
     }
   })();
 }
